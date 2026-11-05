@@ -692,6 +692,9 @@ button:disabled {
 }
 
 .result-error {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   margin: 8px 10px 0;
   padding: 7px 10px;
   border: 1px solid rgba(248, 113, 113, 0.3);
@@ -699,6 +702,18 @@ button:disabled {
   background: rgba(248, 113, 113, 0.08);
   color: #fecaca;
   font-size: 12px;
+}
+
+.result-error-meta {
+  color: rgba(254, 202, 202, 0.65);
+  font-family:
+    "Cascadia Code",
+    "JetBrains Mono",
+    Consolas,
+    "Microsoft YaHei",
+    monospace;
+  font-size: 10px;
+  word-break: break-all;
 }
 
 /* ---------- status bar ---------- */

@@ -50,6 +50,13 @@ export const queryExecuteSchema = z.object({
   sql: z.string().trim().min(1).max(1_000_000),
 });
 
+export const logWriteSchema = z.object({
+  level: z.enum(['error', 'warn', 'info', 'debug']),
+  scope: z.string().trim().min(1).max(64),
+  message: z.string().min(1).max(2000),
+  meta: z.string().max(4000).optional(),
+});
+
 export function formatConnectionIssues(error: z.ZodError): string {
   return error.issues
     .map((issue) => {

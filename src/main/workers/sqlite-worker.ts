@@ -43,6 +43,8 @@ function open(filePath: string): { version: string } {
   }
 
   database = new Database(filePath, { fileMustExist: true });
+  // 整数默认以 BigInt 读出，避免超过 2^53 时被静默四舍五入。
+  database.defaultSafeIntegers(true);
   database.pragma('foreign_keys = ON');
   database.pragma('busy_timeout = 5000');
 

@@ -110,10 +110,22 @@ src/
 
 连接信息当前只保存在渲染进程内存中，密码不写盘。
 
+## 日志
+
+- `npm run dev` 默认 `debug` 级别；打包后默认 `info`。
+- 覆盖级别（PowerShell）：`$env:DBCRAFT_LOG_LEVEL = "debug"; npm run dev`，可选 `error|warn|info|debug`。
+- 主进程写入 `<userData>/logs/dbcraft.log`（Windows 开发环境通常是 `%APPDATA%\dbcraft\logs\dbcraft.log`），
+  单文件 5 MB 轮转、保留 3 个历史文件。
+- 渲染进程日志经 `log:write` IPC 汇入同一文件，来源校验与长度校验在 IPC 层完成。
+- 日志不记录 SQL 文本、密码或连接串；敏感字段自动打码。详见 `doc/LOGGING.md`。
+
 ## 文档
 
 - `doc/PRD.md`
 - `doc/TECH_DESIGN.md`
+- `doc/IMPLEMENTATION_STATUS.md`
+- `doc/LOGGING.md`
+- `doc/CHANGELOG.md`
 
 ## 许可证
 

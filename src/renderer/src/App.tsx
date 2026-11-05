@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AppInfo, ConnectionInput, DatabaseType, SchemaObject } from '@shared/ipc-contract';
+import type {
+  AppInfo,
+  ConnectionInput,
+  DatabaseType,
+  QueryError,
+  SchemaObject,
+} from '@shared/ipc-contract';
+import { buildTablePreviewSql } from '@shared/dialect/identifiers';
 import { ConnectionDialog } from './features/connections/ConnectionDialog';
 import { Icon } from './components/Icon';
 import { Sidebar } from './components/Sidebar';
@@ -44,10 +51,20 @@ const EMPTY_RUN: RunState = {
   truncated: false,
   executedAt: null,
   error: null,
+  errorMeta: null,
 };
 
 function createId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatErrorMeta(error: QueryError): string | null {
+  const parts: string[] = [];
+  if (error.code) parts.push(error.code);
+  if (error.errno !== null) parts.push(`errno ${error.errno}`);
+  if (error.sqlState) parts.push(`SQLSTATE ${error.sqlState}`);
+  if (error.retryable) parts.push('可重试');
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 export default function App() {
@@ -114,8 +131,13 @@ export default function App() {
 
     setSchemaLoadingId(sessionId);
     try {
-      const objects = await api.schema.get(sessionId);
-      setSchemas((current) => ({ ...current, [sessionId]: objects }));
+      const result = await api.schema.get(sessionId);
+      if (!result.ok) {
+        setSchemas((current) => ({ ...current, [sessionId]: [] }));
+        showNotice('error', result.message);
+        return;
+      }
+      setSchemas((current) => ({ ...current, [sessionId]: result.objects }));
     } catch (error) {
       setSchemas((current) => ({ ...current, [sessionId]: [] }));
       showNotice('error', error instanceof Error ? error.message : '加载对象树失败。');
@@ -264,6 +286,7 @@ export default function App() {
             ...response.result,
             executedAt: Date.now(),
             error: null,
+            errorMeta: null,
           },
         }));
         if (response.result.truncated) {
@@ -277,6 +300,7 @@ export default function App() {
             elapsedMs: 0,
             executedAt: Date.now(),
             error: response.error.message,
+            errorMeta: formatErrorMeta(response.error),
           },
         }));
         if (response.error.connectionClosed) {
@@ -296,6 +320,7 @@ export default function App() {
           elapsedMs: 0,
           executedAt: Date.now(),
           error: message,
+          errorMeta: null,
         },
       }));
       showNotice('error', message);
@@ -380,8 +405,8 @@ export default function App() {
   };
 
   const openTable = (name: string) => {
-    const quoted = `"${name.replace(/"/g, '""')}"`;
-    updateSql(`SELECT * FROM ${quoted} LIMIT 100;`);
+    const type = activeConnection?.input.type ?? 'sqlite';
+    updateSql(buildTablePreviewSql(type, name));
     showNotice('info', `已填入 ${name} 查询，按 Ctrl+Enter 执行。`);
   };
 

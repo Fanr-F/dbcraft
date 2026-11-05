@@ -2,6 +2,7 @@ import mariadb from 'mariadb';
 import type { Connection as MariaConnection, ConnectionConfig, FieldInfo } from 'mariadb';
 import type {
   MysqlFamilyConnectionInput,
+  QueryCell,
   QueryColumn,
   QueryResult,
   SchemaObject,
@@ -11,6 +12,17 @@ import type { DatabaseSession } from '../DatabaseSession';
 import { encodeCell } from '../query-values';
 
 const MAX_ROWS = 2000;
+
+/** 能确认返回结果集的语句；其余走普通 query 以保留 affectedRows。 */
+const ROW_STATEMENT = /^(?:select|show|describe|desc|explain|with|table|values|call)\b/i;
+
+function stripLeadingComments(sql: string): string {
+  return sql.replace(/^(?:\s+|--[^\n]*\n?|#[^\n]*\n?|\/\*[\s\S]*?\*\/)+/, '');
+}
+
+function isRowStatement(sql: string): boolean {
+  return ROW_STATEMENT.test(stripLeadingComments(sql));
+}
 
 function sslOption(mode: SslMode): { rejectUnauthorized: boolean } | true | undefined {
   if (mode === 'disable') return undefined;
@@ -33,6 +45,7 @@ export class MariaSession implements DatabaseSession {
   readonly label = 'MariaDB';
   readonly serverVersion: string;
   readonly note?: string;
+  readonly alive = true;
   readonly cancelDisconnects = false;
 
   private constructor(
@@ -91,6 +104,68 @@ export class MariaSession implements DatabaseSession {
   }
 
   async query(sql: string): Promise<QueryResult> {
+    // mariadb 的流式接口不会返回 OkPacket（affectedRows），DML/DDL 继续走普通查询。
+    if (isRowStatement(sql)) {
+      return this.queryStreamed(sql);
+    }
+    return this.queryBuffered(sql);
+  }
+
+  /** 流式读取结果集，最多保留 MAX_ROWS 行，其余行只消费不入内存。 */
+  private queryStreamed(sql: string): Promise<QueryResult> {
+    const startedAt = Date.now();
+    const stream = this.connection.queryStream({ sql, rowsAsArray: true });
+
+    return new Promise<QueryResult>((resolve, reject) => {
+      let columns: QueryColumn[] = [];
+      let isSelect = false;
+      const rows: QueryCell[][] = [];
+      let truncated = false;
+      let settled = false;
+
+      stream.on('fields', (meta: FieldInfo[] | undefined) => {
+        if (!Array.isArray(meta)) return;
+        isSelect = true;
+        columns = meta.map((field) => ({
+          name: fieldName(field),
+          declaredType: field.dataTypeName ?? field.type ?? null,
+        }));
+      });
+
+      stream.on('data', (row: unknown) => {
+        if (!Array.isArray(row) || !isSelect) return;
+
+        if (rows.length >= MAX_ROWS) {
+          truncated = true;
+          return;
+        }
+        rows.push(row.map(encodeCell));
+      });
+
+      stream.on('error', (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      });
+
+      stream.on('end', () => {
+        if (settled) return;
+        settled = true;
+
+        resolve({
+          columns,
+          rows,
+          rowCount: rows.length,
+          elapsedMs: Date.now() - startedAt,
+          statementType: 'select',
+          changes: null,
+          truncated,
+        });
+      });
+    });
+  }
+
+  private async queryBuffered(sql: string): Promise<QueryResult> {
     const startedAt = Date.now();
     const rows = await this.connection.query({ sql, rowsAsArray: true });
 

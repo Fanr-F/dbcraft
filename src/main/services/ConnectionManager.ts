@@ -5,15 +5,17 @@ import type {
   QueryError,
   QueryRequest,
   QueryResponse,
-  SchemaObject,
+  SchemaGetResult,
   SessionOpenResult,
 } from '../../shared/ipc-contract';
 import type { DatabaseSession } from './DatabaseSession';
 import { MariaSession } from './mariadb/MariaSession';
 import { MysqlSession } from './mysql/MysqlSession';
 import { SqliteSession } from './sqlite/SqliteSession';
+import { createLogger } from '../logging/logger';
 
 const sessions = new Map<string, DatabaseSession>();
+const log = createLogger('session');
 
 interface RunningQuery {
   sessionId: string;
@@ -23,14 +25,50 @@ interface RunningQuery {
 
 const runningQueries = new Map<string, RunningQuery>();
 
+interface DriverError extends Error {
+  code?: string | number;
+  errno?: number;
+  sqlState?: string;
+  sqlMessage?: string;
+  fatal?: boolean;
+}
+
+const RETRYABLE_CODES = new Set([
+  'PROTOCOL_CONNECTION_LOST',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ER_CON_COUNT_ERROR',
+  'ER_LOCK_DEADLOCK',
+  'ER_LOCK_WAIT_TIMEOUT',
+]);
+
 function errorDetails(error: unknown): QueryError {
   if (error instanceof Error) {
+    const driver = error as DriverError;
+    const code =
+      typeof driver.code === 'string'
+        ? driver.code
+        : driver.code === undefined
+          ? null
+          : String(driver.code);
+
     return {
-      message: error.message,
-      code: (error as Error & { code?: string }).code ?? null,
+      message: driver.sqlMessage ?? driver.message,
+      code,
+      sqlState: typeof driver.sqlState === 'string' ? driver.sqlState : null,
+      errno: typeof driver.errno === 'number' ? driver.errno : null,
+      retryable: Boolean(driver.fatal) || (code ? RETRYABLE_CODES.has(code) : false),
     };
   }
-  return { message: String(error), code: null };
+
+  return {
+    message: String(error),
+    code: null,
+    sqlState: null,
+    errno: null,
+    retryable: false,
+  };
 }
 
 function testSqliteFile(filePath: string): string {
@@ -66,6 +104,7 @@ function sessionMessage(session: DatabaseSession): string {
 
 export async function testConnection(input: ConnectionInput): Promise<ConnectionTestResult> {
   const startedAt = Date.now();
+  log.debug('测试连接', { type: input.type });
 
   if (input.type === 'sqlite') {
     try {
@@ -105,10 +144,16 @@ export async function testConnection(input: ConnectionInput): Promise<Connection
       elapsedMs: Date.now() - startedAt,
     };
   } catch (error) {
+    const details = errorDetails(error);
+    log.warn('测试连接失败', {
+      type: input.type,
+      code: details.code,
+      errno: details.errno,
+    });
     return {
       status: 'failed',
       ok: false,
-      message: errorDetails(error).message,
+      message: details.message,
       elapsedMs: Date.now() - startedAt,
     };
   } finally {
@@ -124,6 +169,9 @@ export async function openSession(
 ): Promise<SessionOpenResult> {
   const startedAt = Date.now();
 
+  // 先关闭同 id 的旧会话，避免 MSSQL 提前返回时泄漏。
+  await closeSession(sessionId);
+
   if (input.type === 'mssql') {
     return {
       ok: false,
@@ -132,11 +180,16 @@ export async function openSession(
     };
   }
 
-  await closeSession(sessionId);
-
   try {
     const session = await createSession(input);
     sessions.set(sessionId, session);
+
+    log.info('会话已打开', {
+      sessionId,
+      type: input.type,
+      version: session.serverVersion,
+      elapsedMs: Date.now() - startedAt,
+    });
 
     return {
       ok: true,
@@ -146,6 +199,12 @@ export async function openSession(
     };
   } catch (error) {
     const details = errorDetails(error);
+    log.warn('会话打开失败', {
+      sessionId,
+      type: input.type,
+      code: details.code,
+      errno: details.errno,
+    });
     return {
       ok: false,
       message: details.message,
@@ -154,6 +213,8 @@ export async function openSession(
   }
 }
 
+const NOT_RETRYABLE = { sqlState: null, errno: null, retryable: false } as const;
+
 export async function executeQuery(request: QueryRequest): Promise<QueryResponse> {
   if (runningQueries.has(request.requestId)) {
     return {
@@ -161,6 +222,7 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
       error: {
         message: '重复的查询请求 ID。',
         code: 'DUPLICATE_REQUEST',
+        ...NOT_RETRYABLE,
       },
     };
   }
@@ -172,6 +234,20 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
       error: {
         message: '会话未打开，请重新执行或切换标签页。',
         code: 'NOT_CONNECTED',
+        ...NOT_RETRYABLE,
+      },
+    };
+  }
+
+  if (!session.alive) {
+    sessions.delete(request.sessionId);
+    return {
+      ok: false,
+      error: {
+        message: '会话已失效，请重新连接。',
+        code: 'NOT_CONNECTED',
+        ...NOT_RETRYABLE,
+        connectionClosed: true,
       },
     };
   }
@@ -183,17 +259,54 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
   };
   runningQueries.set(request.requestId, entry);
 
+  log.debug('开始执行查询', {
+    requestId: request.requestId,
+    sessionId: request.sessionId,
+    sqlLength: request.sql.length,
+  });
+
   try {
     const result = await session.query(request.sql);
     if (entry.canceled) {
+      log.info('查询已取消', {
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+      });
       return canceledResponse(request.sessionId, session);
     }
+    log.info('查询完成', {
+      requestId: request.requestId,
+      rows: result.rowCount,
+      elapsedMs: result.elapsedMs,
+      truncated: result.truncated,
+      statementType: result.statementType,
+    });
     return { ok: true, result };
   } catch (error) {
     if (entry.canceled) {
+      log.info('查询已取消', {
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+      });
       return canceledResponse(request.sessionId, session);
     }
-    return { ok: false, error: errorDetails(error) };
+
+    const details = errorDetails(error);
+    log.warn('查询失败', {
+      requestId: request.requestId,
+      code: details.code,
+      sqlState: details.sqlState,
+      errno: details.errno,
+      retryable: details.retryable,
+    });
+    if (!session.alive) {
+      sessions.delete(request.sessionId);
+      return {
+        ok: false,
+        error: { ...details, connectionClosed: true },
+      };
+    }
+    return { ok: false, error: details };
   } finally {
     runningQueries.delete(request.requestId);
   }
@@ -208,6 +321,7 @@ function canceledResponse(sessionId: string, session: DatabaseSession): QueryRes
     error: {
       message: '查询已取消。',
       code: 'QUERY_CANCELED',
+      ...NOT_RETRYABLE,
       connectionClosed: session.cancelDisconnects,
     },
   };
@@ -215,25 +329,39 @@ function canceledResponse(sessionId: string, session: DatabaseSession): QueryRes
 
 export async function cancelQuery(requestId: string): Promise<boolean> {
   const entry = runningQueries.get(requestId);
-  if (!entry) return false;
+  if (!entry || entry.canceled) return false;
+
+  // 必须先标记再取消：SQLite 的 cancel() 会立即 reject 正在执行的查询，
+  // 若等 cancel() 返回后再标记，响应会漏掉 connectionClosed。
+  entry.canceled = true;
 
   try {
     await entry.session.cancel();
-    entry.canceled = true;
+    log.info('查询取消请求已发送', { requestId });
     return true;
   } catch {
+    entry.canceled = false;
     return false;
   }
 }
 
-export async function getSchema(sessionId: string): Promise<SchemaObject[]> {
+export async function getSchema(sessionId: string): Promise<SchemaGetResult> {
   const session = sessions.get(sessionId);
-  if (!session) return [];
+  if (!session) {
+    return { ok: false, message: '会话未打开，请重新连接。' };
+  }
+
+  if (!session.alive) {
+    sessions.delete(sessionId);
+    return { ok: false, message: '会话已失效，请重新连接。' };
+  }
 
   try {
-    return await session.schema();
-  } catch {
-    return [];
+    return { ok: true, objects: await session.schema() };
+  } catch (error) {
+    const details = errorDetails(error);
+    log.warn('加载对象树失败', { sessionId, code: details.code, errno: details.errno });
+    return { ok: false, message: details.message };
   }
 }
 
@@ -243,6 +371,7 @@ export async function closeSession(sessionId: string): Promise<void> {
 
   sessions.delete(sessionId);
   await session.close().catch(() => undefined);
+  log.debug('会话已关闭', { sessionId });
 }
 
 export async function closeAllSessions(): Promise<void> {

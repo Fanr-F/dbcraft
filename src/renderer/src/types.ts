@@ -22,6 +22,7 @@ export interface RunState {
   truncated: boolean;
   executedAt: number | null;
   error: string | null;
+  errorMeta: string | null;
 }
 
 export type SessionStatus = 'idle' | 'opening' | 'ready' | 'error';

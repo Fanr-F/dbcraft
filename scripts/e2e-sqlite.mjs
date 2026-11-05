@@ -90,6 +90,10 @@ try {
     (await page.locator('.result-error').innerText()).includes('no such table'),
     'missing table error not shown',
   );
+  assert(
+    (await page.locator('.result-error').innerText()).includes('SQLITE_ERROR'),
+    'error metadata missing SQLite error code',
+  );
   assert((await statusText(page)).includes('执行失败'), 'status bar did not show failure');
 
   await page.locator('.sql-editor').fill('SELECT 1; SELECT 2;');
@@ -115,6 +119,13 @@ try {
     { timeout: 15000 },
   );
   assert((await statusText(page)).includes('执行失败'), 'status bar did not show cancel failure');
+
+  // SQLite 取消会终止 Worker：会话必须被标记失效，且点击连接后能就地恢复。
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('会话失败'),
+    null,
+    { timeout: 15000 },
+  );
   assert(
     (await page.locator('.connection-item').first().getAttribute('class'))?.includes('is-active') ??
       false,
@@ -126,6 +137,23 @@ try {
     () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
     null,
     { timeout: 15000 },
+  );
+
+  await page.locator('.sql-editor').fill('SELECT 42 AS ok;');
+  await page.getByRole('button', { name: '执行' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
+    null,
+    { timeout: 10000 },
+  );
+
+  // 超过 2^53 的整数必须原样返回，不能被 JS number 静默四舍五入。
+  await page.locator('.sql-editor').fill('SELECT 9007199254740993 AS big;');
+  await page.getByRole('button', { name: '执行' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('revo-grid')?.textContent?.includes('9007199254740993') ?? false,
+    null,
+    { timeout: 10000 },
   );
 
   // 标签页 = 独立会话：标签 1 的长查询不应阻塞标签 2。

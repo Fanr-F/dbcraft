@@ -376,7 +376,7 @@ export function ConnectionDialog({ onClose, onSave }: ConnectionDialogProps) {
           )}
 
           <p className="form-note">
-            M0 只验证表单与 IPC 契约，不会真正连接数据库；连接信息仅保存在内存，密码不写盘。
+            MSSQL 驱动尚未接入；SQLite / MySQL 系测试会真实连接数据库。连接信息仅保存在内存，密码不写盘。
           </p>
         </div>
 

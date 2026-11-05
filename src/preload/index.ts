@@ -25,7 +25,11 @@ const api: DBCraftApi = {
     cancel: (requestId: string) => ipcRenderer.invoke(IPC_CHANNELS.queryCancel, requestId),
   },
   schema: {
-    get: (connectionId: string) => ipcRenderer.invoke(IPC_CHANNELS.schemaGet, connectionId),
+    get: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.schemaGet, sessionId),
+  },
+  log: {
+    write: (level, scope, message, meta) =>
+      ipcRenderer.send(IPC_CHANNELS.logWrite, { level, scope, message, meta }),
   },
 };
 

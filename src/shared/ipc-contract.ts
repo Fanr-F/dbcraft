@@ -2,6 +2,7 @@ export type DatabaseType = 'sqlite' | 'mysql' | 'percona' | 'mariadb' | 'mssql';
 export type MysqlFamilyType = Extract<DatabaseType, 'mysql' | 'percona' | 'mariadb'>;
 export type EnvironmentTag = 'dev' | 'test' | 'prod';
 export type SslMode = 'disable' | 'prefer' | 'require' | 'verify-ca' | 'verify-full';
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
 export interface ConnectionCommon {
   name: string;
@@ -73,6 +74,12 @@ export interface QueryResult {
 export interface QueryError {
   message: string;
   code: string | null;
+  /** 数据库返回的 SQLSTATE；SQLite 等没有该概念时保持 null，不伪造。 */
+  sqlState: string | null;
+  /** 驱动/SQLite 的数字错误码；拿不到时为 null。 */
+  errno: number | null;
+  /** 是否属于可重试错误（锁等待、连接重置等）。 */
+  retryable: boolean;
   connectionClosed?: boolean;
 }
 
@@ -90,6 +97,10 @@ export interface SchemaObject {
   name: string;
   type: 'table' | 'view';
 }
+
+export type SchemaGetResult =
+  | { ok: true; objects: SchemaObject[] }
+  | { ok: false; message: string };
 
 export interface AppInfo {
   name: string;
@@ -119,7 +130,10 @@ export interface DBCraftApi {
     cancel: (requestId: string) => Promise<boolean>;
   };
   schema: {
-    get: (sessionId: string) => Promise<SchemaObject[]>;
+    get: (sessionId: string) => Promise<SchemaGetResult>;
+  };
+  log: {
+    write: (level: LogLevel, scope: string, message: string, meta?: string) => void;
   };
 }
 
@@ -132,6 +146,7 @@ export const IPC_CHANNELS = {
   queryExecute: 'query:execute',
   queryCancel: 'query:cancel',
   schemaGet: 'schema:get',
+  logWrite: 'log:write',
 } as const;
 
 export const DATABASE_TYPES: DatabaseType[] = ['sqlite', 'mysql', 'percona', 'mariadb', 'mssql'];

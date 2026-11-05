@@ -1,7 +1,9 @@
 import mysql from 'mysql2/promise';
+import type { Connection as CoreConnection } from 'mysql2';
 import type { ConnectionOptions, FieldPacket, ResultSetHeader } from 'mysql2/promise';
 import type {
   MysqlFamilyConnectionInput,
+  QueryCell,
   QueryColumn,
   QueryResult,
   SchemaObject,
@@ -55,10 +57,13 @@ function isTlsError(error: unknown): boolean {
     /ssl|tls|secure connection|certificate/i.test(error.message) ||
     (error as Error & { code?: string }).code === 'HANDSHAKE_SSL_ERROR'
   );
-}export class MysqlSession implements DatabaseSession {
+}
+
+export class MysqlSession implements DatabaseSession {
   readonly label: string;
   readonly serverVersion: string;
   readonly note?: string;
+  readonly alive = true;
   readonly cancelDisconnects = false;
 
   private constructor(
@@ -120,43 +125,83 @@ function isTlsError(error: unknown): boolean {
     );
   }
 
+  /**
+   * 使用流式结果，最多保留 MAX_ROWS 行；其余行继续消费但不入内存，
+   * 避免 mysql2 的 query() 把整个结果集物化。
+   */
   async query(sql: string): Promise<QueryResult> {
     const startedAt = Date.now();
-    const [rows, fields] = await this.connection.query({ sql, rowsAsArray: true });
+    // promise 包装器的 Connection 仍持有底层回调式连接，流式接口只在底层提供。
+    const core = (this.connection as unknown as { connection: CoreConnection }).connection;
+    const stream = core.query({ sql, rowsAsArray: true }).stream();
 
-    if (Array.isArray(fields)) {
-      const columns: QueryColumn[] = (fields as FieldPacket[]).map((field) => ({
-        name: field.name,
-        declaredType:
-          field.type === undefined ? null : (MYSQL_TYPE_NAMES[field.type] ?? null),
-      }));
+    return new Promise<QueryResult>((resolve, reject) => {
+      let columns: QueryColumn[] = [];
+      let isSelect = false;
+      let changeHeader: ResultSetHeader | null = null;
+      const rows: QueryCell[][] = [];
+      let truncated = false;
+      let settled = false;
 
-      const encoded = (rows as unknown[][]).map((row) => row.map(encodeCell));
-      const truncated = encoded.length > MAX_ROWS;
+      stream.on('fields', (fields: FieldPacket[] | undefined) => {
+        if (!Array.isArray(fields)) return;
+        isSelect = true;
+        columns = fields.map((field) => ({
+          name: field.name,
+          declaredType:
+            field.type === undefined ? null : (MYSQL_TYPE_NAMES[field.type] ?? null),
+        }));
+      });
 
-      return {
-        columns,
-        rows: truncated ? encoded.slice(0, MAX_ROWS) : encoded,
-        rowCount: truncated ? MAX_ROWS : encoded.length,
-        elapsedMs: Date.now() - startedAt,
-        statementType: 'select',
-        changes: null,
-        truncated,
-      };
-    }
+      stream.on('data', (row: unknown) => {
+        if (!Array.isArray(row)) {
+          changeHeader = row as ResultSetHeader;
+          return;
+        }
+        if (!isSelect) return;
 
-    const header = rows as ResultSetHeader;
-    const changes = Number(header.affectedRows ?? 0);
+        if (rows.length >= MAX_ROWS) {
+          truncated = true;
+          return;
+        }
+        rows.push(row.map(encodeCell));
+      });
 
-    return {
-      columns: [],
-      rows: [],
-      rowCount: changes,
-      elapsedMs: Date.now() - startedAt,
-      statementType: 'change',
-      changes,
-      truncated: false,
-    };
+      stream.on('error', (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      });
+
+      stream.on('end', () => {
+        if (settled) return;
+        settled = true;
+
+        if (!isSelect) {
+          const changes = Number(changeHeader?.affectedRows ?? 0);
+          resolve({
+            columns: [],
+            rows: [],
+            rowCount: changes,
+            elapsedMs: Date.now() - startedAt,
+            statementType: 'change',
+            changes,
+            truncated: false,
+          });
+          return;
+        }
+
+        resolve({
+          columns,
+          rows,
+          rowCount: rows.length,
+          elapsedMs: Date.now() - startedAt,
+          statementType: 'select',
+          changes: null,
+          truncated,
+        });
+      });
+    });
   }
 
   async schema(): Promise<SchemaObject[]> {

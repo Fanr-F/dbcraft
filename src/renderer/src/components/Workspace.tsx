@@ -154,7 +154,8 @@ export function Workspace({
 
         {run.error && (
           <div className="result-error" role="alert">
-            {run.error}
+            <span>{run.error}</span>
+            {run.errorMeta && <span className="result-error-meta">{run.errorMeta}</span>}
           </div>
         )}
 

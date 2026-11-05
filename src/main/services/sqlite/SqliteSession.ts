@@ -22,6 +22,10 @@ export class SqliteSession implements DatabaseSession {
   readonly cancelDisconnects = true;
   serverVersion = 'unknown';
 
+  get alive(): boolean {
+    return !this.closed;
+  }
+
   private nextId = 1;
   private closed = false;
   private readonly pending = new Map<number, Pending>();

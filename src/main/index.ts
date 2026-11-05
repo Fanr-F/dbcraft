@@ -1,10 +1,12 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, Menu, session } from 'electron';
-import { registerIpcHandlers } from './ipc/router';
+import { registerIpcHandlers, bindMainWindow, releaseMainWindow } from './ipc/router';
 import { closeAllSessions } from './services/ConnectionManager';
+import { createLogger, resolveLogLevel } from './logging/logger';
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL']);
 const isSmoke = process.env['DBCRAFT_SMOKE'] === '1';
+const log = createLogger('app');
 
 const PRODUCTION_CSP = [
   "default-src 'self'",
@@ -16,6 +18,7 @@ const PRODUCTION_CSP = [
 ].join('; ');
 
 let mainWindow: BrowserWindow | null = null;
+let quitting = false;
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -41,7 +44,18 @@ function createWindow(): BrowserWindow {
     window.show();
   });
 
+  bindMainWindow(window);
+  log.info('主窗口已创建', { dev: isDev });
+
+  window.webContents.on('render-process-gone', (_event, details) => {
+    log.error('渲染进程异常退出', {
+      reason: details.reason,
+      exitCode: details.exitCode,
+    });
+  });
+
   window.on('closed', () => {
+    releaseMainWindow(window);
     if (mainWindow === window) {
       mainWindow = null;
     }
@@ -124,6 +138,13 @@ if (!app.requestSingleInstanceLock()) {
     registerIpcHandlers();
     mainWindow = createWindow();
 
+    log.info('应用启动', {
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      dev: isDev,
+      level: resolveLogLevel(),
+    });
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createWindow();
@@ -131,8 +152,17 @@ if (!app.requestSingleInstanceLock()) {
     });
   });
 
-  app.on('before-quit', () => {
-    void closeAllSessions();
+  app.on('before-quit', (event) => {
+    if (quitting) return;
+
+    // 先等会话关闭（SQLite Worker、MySQL/MariaDB 连接），再真正退出。
+    event.preventDefault();
+    quitting = true;
+    log.info('应用退出：关闭会话');
+    void closeAllSessions().finally(() => {
+      log.debug('会话已关闭，退出应用');
+      app.quit();
+    });
   });
 
   app.on('window-all-closed', () => {
