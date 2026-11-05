@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 对应 PRD | `doc/PRD.md` v0.16 |
-| 文档版本 | v0.8（评审修订稿） |
+| 文档版本 | v0.9（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
 | 目标平台 | Windows 10（1809+）/ 11，x64 |
@@ -22,6 +22,7 @@
 | v0.6 | 2026-11-05 | M0 主工程脚手架落地：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；安全默认、typed IPC、五类连接表单、模拟结果网格与 smoke 检查；构建配置改为 `electron.vite.config.ts` |
 | v0.7 | 2026-11-05 | SQLite 首条真实链路：better-sqlite3 13 N-API + Worker；连接测试/打开/关闭、单语句查询、`sqlite_master` 对象树；500 行示例库验证；记录多语句、取消、10 万行与打包后 Worker 等待办 |
 | v0.8 | 2026-11-05 | MySQL/Percona/MariaDB 驱动接入：mysql2 + mariadb、统一 DatabaseSession、对象树、MariaDB ed25519、DATETIME/DECIMAL/JSON 原值验证；记录单会话、TLS 矩阵与 Percona 实例待办 |
+| v0.9 | 2026-11-05 | 查询取消：requestId 跟踪、MySQL/MariaDB `KILL QUERY`、SQLite 终止 Worker；验证取消后 MySQL/MariaDB 连接可复用、SQLite 需重连；修正 §4.3 取消语义 |
 
 ---
 
@@ -227,13 +228,13 @@ export type QueryEvent =
 ### 4.3 校验与取消
 
 - 所有 IPC 入参用 `zod` 校验：类型、长度、枚举、ID 格式；
-- `requestId` 由主进程生成并返回，渲染层取消时只传 `requestId`；
-- 每个 `requestId` 对应一个 `AbortController` 与驱动 cancel 句柄；
+- `requestId` 由渲染层生成，并在 `query.execute` / `query.cancel` 之间复用；主进程登记运行中的请求；
+- 每个 `requestId` 对应一个运行中请求记录与驱动 cancel 句柄；
 - 取消语义：
-  - MySQL/Percona/MariaDB：独立连接执行 `KILL QUERY <threadId>`；
+  - MySQL/Percona/MariaDB：独立连接执行 `KILL QUERY <threadId>`，会话保留；
   - MSSQL：调用 `request.cancel()`；
-  - SQLite：Worker 内 `db.interrupt()`；
-  - 至少保证客户端停止等待并清理监听器。
+  - SQLite：终止 Worker（better-sqlite3 未暴露 `interrupt()`），会话失效，需要重新连接；
+  - 驱动即使把被取消的语句当成功返回（例如 MySQL `SLEEP` 返回 1），主进程仍按 `requestId` 标记为已取消。
 
 ### 4.4 流式结果
 
@@ -1074,6 +1075,25 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 结论：**MySQL 与 MariaDB 的 M1 查询链路通过**；Percona 沿用同一代码路径，待实例复核。
 
+### 17.5 查询取消
+
+- 实现：`query.execute` 携带 `requestId`；主进程维护运行中请求表；`query.cancel` 按 `requestId` 调用会话 cancel
+- MySQL/Percona/MariaDB：用同配置的临时连接执行 `KILL QUERY <threadId>`，原会话保留
+- SQLite：better-sqlite3 未暴露 `interrupt()`，取消即终止 Worker；会话失效，需要重新连接
+
+| 验证项 | 结果 |
+|---|---|
+| MySQL `SELECT SLEEP(8)` 取消 | 通过，约 1.5s 内返回“查询已取消” |
+| MySQL 取消后继续执行 `SELECT 1` | 通过，连接保留 |
+| MariaDB `SELECT SLEEP(8)` 取消 | 通过，连接保留 |
+| SQLite 长递归查询取消 | 通过，返回“查询已取消” |
+| SQLite 取消后重新连接 | 通过，对象树与查询恢复 |
+| 被取消语句返回成功结果 | 主进程按 `requestId` 覆盖为“查询已取消” |
+
+关键发现：MySQL/MariaDB 的 `KILL QUERY` 可能让语句“成功返回”（如 `SLEEP` 返回 1），因此不能只依赖驱动抛错，必须在请求层记录取消状态并覆盖响应。
+
+结论：**查询取消通过**；SQLite 取消以断开会话为代价，UI 明确提示重连。
+
 ---
 
 ## 18. 里程碑映射
@@ -1086,7 +1106,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | M3 | DDL 生成/预览、SQLite 重建、Agent 列表/详情/启停/脚本 |
 | M4 | 性能/安全专项、签名打包、回归与发布检查 |
 
-> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、结果网格与 `npm run smoke` 冒烟检查。M1 已接入 SQLite（见 17.3）与 MySQL/Percona/MariaDB（见 17.4）；MSSQL 驱动、会话池、SQL 取消与历史仍待后续交付。
+> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、结果网格与 `npm run smoke` 冒烟检查。M1 已接入 SQLite（见 17.3）、MySQL/Percona/MariaDB（见 17.4）与查询取消（见 17.5）；MSSQL 驱动、会话池与历史仍待后续交付。
 
 ---
 
@@ -1097,7 +1117,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 3. MySQL 系认证 Spike 已完成（见 17.2）；Percona 仍需真实实例复核，`unix_socket`/PAM 在 Windows 客户端不适用。
 4. mysql2 非 TLS 下无法拒绝服务端公钥获取；正式实现默认引导 TLS，并在连接表单明确标注未加密连接的风险。
 5. SQLite 连接 Worker 的数量上限与回收策略。
-6. SQLite 已完成单语句查询；多语句、取消、事务状态、10 万行性能与打包后 asar Worker 路径待验证。
+6. SQLite 已完成单语句查询与取消；多语句、事务状态、10 万行性能与打包后 asar Worker 路径待验证；SQLite 取消会断开会话。
 7. 代码签名证书的采购时间与发布渠道。
 
 ---

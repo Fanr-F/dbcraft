@@ -13,6 +13,7 @@ import {
   queryExecuteSchema,
 } from './schemas';
 import {
+  cancelQuery,
   closeConnection,
   executeQuery,
   getSchema,
@@ -103,9 +104,16 @@ export function registerIpcHandlers(): void {
         };
       }
 
-      return executeQuery(parsed.data.connectionId, parsed.data.sql);
+      return executeQuery(parsed.data);
     },
   );
+
+  ipcMain.handle(IPC_CHANNELS.queryCancel, async (_event, rawInput: unknown): Promise<boolean> => {
+    if (typeof rawInput !== 'string' || rawInput.length === 0) {
+      return false;
+    }
+    return cancelQuery(rawInput);
+  });
 
   ipcMain.handle(IPC_CHANNELS.schemaGet, async (_event, rawInput: unknown) => {
     if (typeof rawInput !== 'string' || rawInput.length === 0) {

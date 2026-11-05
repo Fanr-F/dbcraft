@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import type { FieldPacket, ResultSetHeader } from 'mysql2/promise';
+import type { ConnectionOptions, FieldPacket, ResultSetHeader } from 'mysql2/promise';
 import type {
   MysqlFamilyConnectionInput,
   QueryColumn,
@@ -59,9 +59,12 @@ function isTlsError(error: unknown): boolean {
   readonly label: string;
   readonly serverVersion: string;
   readonly note?: string;
+  readonly cancelDisconnects = false;
 
   private constructor(
     private readonly connection: mysql.Connection,
+    private readonly controlOptions: ConnectionOptions,
+    private readonly threadId: number,
     label: string,
     version: string,
     note?: string,
@@ -73,7 +76,7 @@ function isTlsError(error: unknown): boolean {
 
   static async create(config: MysqlFamilyConnectionInput): Promise<MysqlSession> {
     const label = config.type === 'percona' ? 'Percona' : 'MySQL';
-    const baseOptions = {
+    const baseOptions: ConnectionOptions = {
       host: config.host,
       port: config.port,
       user: config.username,
@@ -89,9 +92,11 @@ function isTlsError(error: unknown): boolean {
     const ssl = sslOption(config.sslMode);
     let connection: mysql.Connection;
     let note: string | undefined;
+    let controlOptions: ConnectionOptions = baseOptions;
 
     try {
-      connection = await mysql.createConnection({ ...baseOptions, ...(ssl ? { ssl } : {}) });
+      controlOptions = { ...baseOptions, ...(ssl ? { ssl } : {}) };
+      connection = await mysql.createConnection(controlOptions);
     } catch (error) {
       if (config.sslMode !== 'prefer' || !ssl || !isTlsError(error)) {
         throw error;
@@ -105,7 +110,14 @@ function isTlsError(error: unknown): boolean {
     );
     const info = (rows as Array<{ version: string; comment: string }>)[0];
 
-    return new MysqlSession(connection, label, info?.version ?? 'unknown', note);
+    return new MysqlSession(
+      connection,
+      controlOptions,
+      connection.threadId,
+      label,
+      info?.version ?? 'unknown',
+      note,
+    );
   }
 
   async query(sql: string): Promise<QueryResult> {
@@ -164,5 +176,14 @@ function isTlsError(error: unknown): boolean {
 
   async close(): Promise<void> {
     await this.connection.end();
+  }
+
+  async cancel(): Promise<void> {
+    const control = await mysql.createConnection(this.controlOptions);
+    try {
+      await control.query(`KILL QUERY ${Number(this.threadId)}`);
+    } finally {
+      await control.end().catch(() => undefined);
+    }
   }
 }

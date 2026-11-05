@@ -65,6 +65,7 @@ export default function App() {
 
   const tabCounter = useRef(2);
   const noticeTimer = useRef<number | null>(null);
+  const runningRequestId = useRef<string | null>(null);
 
   useEffect(() => {
     const api = window.dbcraft;
@@ -222,8 +223,11 @@ export default function App() {
     }
 
     setRunning(true);
+    const requestId = createId('query');
+    runningRequestId.current = requestId;
     try {
       const response = await api.query.execute({
+        requestId,
         connectionId: activeConnection.id,
         sql,
       });
@@ -244,6 +248,15 @@ export default function App() {
           executedAt: Date.now(),
           error: response.error.message,
         }));
+        if (response.error.connectionClosed) {
+          setRuntimes((current) => ({
+            ...current,
+            [activeConnection.id]: {
+              status: 'error',
+              message: response.error.message,
+            },
+          }));
+        }
         showNotice('error', response.error.message);
       }
     } catch (error) {
@@ -256,8 +269,25 @@ export default function App() {
       }));
       showNotice('error', message);
     } finally {
+      if (runningRequestId.current === requestId) {
+        runningRequestId.current = null;
+      }
       setRunning(false);
     }
+  };
+
+  const cancelQuery = async () => {
+    const requestId = runningRequestId.current;
+    if (!requestId) return;
+
+    const api = window.dbcraft;
+    if (!api) return;
+
+    const canceled = await api.query.cancel(requestId);
+    showNotice(
+      canceled ? 'info' : 'error',
+      canceled ? '已请求取消查询。' : '查询已结束或无法取消。',
+    );
   };
 
   const addTab = () => {
@@ -354,6 +384,7 @@ export default function App() {
           onAddTab={addTab}
           onSqlChange={updateSql}
           onRun={() => void runQuery()}
+          onCancel={() => void cancelQuery()}
         />
       </div>
 

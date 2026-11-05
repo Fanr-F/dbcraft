@@ -37,6 +37,7 @@ interface WorkspaceProps {
   onAddTab: () => void;
   onSqlChange: (value: string) => void;
   onRun: () => void;
+  onCancel: () => void;
 }
 
 export function Workspace({
@@ -51,6 +52,7 @@ export function Workspace({
   onAddTab,
   onSqlChange,
   onRun,
+  onCancel,
 }: WorkspaceProps) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const ready = connectionRuntime?.status === 'connected';
@@ -108,9 +110,15 @@ export function Workspace({
             <Icon name="play" size={14} />
             {running ? '执行中…' : '执行'}
           </button>
-          <button type="button" className="btn" disabled>
+          <button
+            type="button"
+            className="btn"
+            onClick={onCancel}
+            disabled={!running}
+            title="取消当前查询"
+          >
             <Icon name="stop" size={13} />
-            停止
+            取消
           </button>
           <span className="chip">{connectionType ? DIALECT_LABELS[connectionType] : 'SQL'}</span>
           <span className="pane-hint">Ctrl+Enter 执行</span>

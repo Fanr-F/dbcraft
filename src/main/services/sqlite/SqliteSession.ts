@@ -19,6 +19,7 @@ type WorkerResponse =
 
 export class SqliteSession implements DatabaseSession {
   readonly label = 'SQLite';
+  readonly cancelDisconnects = true;
   serverVersion = 'unknown';
 
   private nextId = 1;
@@ -95,6 +96,14 @@ export class SqliteSession implements DatabaseSession {
       this.failAll(new Error('SQLite 连接已关闭'));
       await this.worker.terminate();
     }
+  }
+
+  async cancel(): Promise<void> {
+    if (this.closed) return;
+
+    this.closed = true;
+    this.failAll(new Error('查询已取消'));
+    await this.worker.terminate();
   }
 
   private request<T>(payload: WorkerRequest): Promise<T> {

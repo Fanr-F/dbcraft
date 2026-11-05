@@ -73,6 +73,7 @@ export interface QueryResult {
 export interface QueryError {
   message: string;
   code: string | null;
+  connectionClosed?: boolean;
 }
 
 export type QueryResponse =
@@ -80,6 +81,7 @@ export type QueryResponse =
   | { ok: false; error: QueryError };
 
 export interface QueryRequest {
+  requestId: string;
   connectionId: string;
   sql: string;
 }
@@ -112,6 +114,7 @@ export interface DBCraftApi {
   };
   query: {
     execute: (request: QueryRequest) => Promise<QueryResponse>;
+    cancel: (requestId: string) => Promise<boolean>;
   };
   schema: {
     get: (connectionId: string) => Promise<SchemaObject[]>;
@@ -125,6 +128,7 @@ export const IPC_CHANNELS = {
   connectionOpen: 'connection:open',
   connectionClose: 'connection:close',
   queryExecute: 'query:execute',
+  queryCancel: 'query:cancel',
   schemaGet: 'schema:get',
 } as const;
 

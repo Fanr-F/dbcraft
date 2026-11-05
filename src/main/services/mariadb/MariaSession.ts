@@ -1,5 +1,5 @@
 import mariadb from 'mariadb';
-import type { Connection as MariaConnection, FieldInfo } from 'mariadb';
+import type { Connection as MariaConnection, ConnectionConfig, FieldInfo } from 'mariadb';
 import type {
   MysqlFamilyConnectionInput,
   QueryColumn,
@@ -33,9 +33,12 @@ export class MariaSession implements DatabaseSession {
   readonly label = 'MariaDB';
   readonly serverVersion: string;
   readonly note?: string;
+  readonly cancelDisconnects = false;
 
   private constructor(
     private readonly connection: MariaConnection,
+    private readonly controlOptions: ConnectionConfig,
+    private readonly threadId: number | null,
     version: string,
     note?: string,
   ) {
@@ -44,7 +47,7 @@ export class MariaSession implements DatabaseSession {
   }
 
   static async create(config: MysqlFamilyConnectionInput): Promise<MariaSession> {
-    const baseOptions = {
+    const baseOptions: ConnectionConfig = {
       host: config.host,
       port: config.port,
       user: config.username,
@@ -61,12 +64,11 @@ export class MariaSession implements DatabaseSession {
     const ssl = sslOption(config.sslMode);
     let connection: MariaConnection;
     let note: string | undefined;
+    let controlOptions: ConnectionConfig = baseOptions;
 
     try {
-      connection = await mariadb.createConnection({
-        ...baseOptions,
-        ...(ssl ? { ssl } : {}),
-      });
+      controlOptions = { ...baseOptions, ...(ssl ? { ssl } : {}) };
+      connection = await mariadb.createConnection(controlOptions);
     } catch (error) {
       if (config.sslMode !== 'prefer' || !ssl || !isTlsError(error)) {
         throw error;
@@ -79,7 +81,13 @@ export class MariaSession implements DatabaseSession {
       'SELECT VERSION() AS version, @@version_comment AS comment',
     )) as Array<{ version: string; comment: string }>;
 
-    return new MariaSession(connection, rows[0]?.version ?? 'unknown', note);
+    return new MariaSession(
+      connection,
+      controlOptions,
+      connection.threadId,
+      rows[0]?.version ?? 'unknown',
+      note,
+    );
   }
 
   async query(sql: string): Promise<QueryResult> {
@@ -138,5 +146,17 @@ export class MariaSession implements DatabaseSession {
 
   async close(): Promise<void> {
     await this.connection.end();
+  }
+
+  async cancel(): Promise<void> {
+    if (!this.threadId) {
+      throw new Error('无法取消：连接没有可用的 thread id');
+    }
+    const control = await mariadb.createConnection(this.controlOptions);
+    try {
+      await control.query(`KILL QUERY ${Number(this.threadId)}`);
+    } finally {
+      await control.end().catch(() => undefined);
+    }
   }
 }

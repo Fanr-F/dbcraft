@@ -45,6 +45,7 @@ export const connectionOpenSchema = z.object({
 });
 
 export const queryExecuteSchema = z.object({
+  requestId: z.string().min(1).max(128),
   connectionId: z.string().min(1).max(128),
   sql: z.string().trim().min(1).max(1_000_000),
 });

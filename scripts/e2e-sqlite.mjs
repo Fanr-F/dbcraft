@@ -103,6 +103,31 @@ try {
     { timeout: 15000 },
   );
 
+  await page.locator('.sql-editor').fill(
+    'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
+  );
+  await page.getByRole('button', { name: '执行' }).click();
+  await page.waitForTimeout(300);
+  await page.getByRole('button', { name: '取消' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('.result-error')?.textContent?.includes('查询已取消') ?? false,
+    null,
+    { timeout: 15000 },
+  );
+  assert((await statusText(page)).includes('执行失败'), 'status bar did not show cancel failure');
+  assert(
+    (await page.locator('.connection-item').first().getAttribute('class'))?.includes('is-active') ??
+      false,
+    'connection not active after cancel',
+  );
+
+  await page.locator('.connection-item').first().click();
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
+    null,
+    { timeout: 15000 },
+  );
+
   await page.screenshot({ path: screenshotPath });
   console.log('[e2e:sqlite] passed');
   console.log('[e2e:sqlite]', await statusText(page));

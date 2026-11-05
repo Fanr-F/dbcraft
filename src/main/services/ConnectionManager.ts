@@ -4,6 +4,7 @@ import type {
   ConnectionOpenResult,
   ConnectionTestResult,
   QueryError,
+  QueryRequest,
   QueryResponse,
   SchemaObject,
 } from '../../shared/ipc-contract';
@@ -13,6 +14,14 @@ import { MysqlSession } from './mysql/MysqlSession';
 import { SqliteSession } from './sqlite/SqliteSession';
 
 const sessions = new Map<string, DatabaseSession>();
+
+interface RunningQuery {
+  connectionId: string;
+  session: DatabaseSession;
+  canceled: boolean;
+}
+
+const runningQueries = new Map<string, RunningQuery>();
 
 function errorDetails(error: unknown): QueryError {
   if (error instanceof Error) {
@@ -147,11 +156,18 @@ export async function openConnection(
   }
 }
 
-export async function executeQuery(
-  connectionId: string,
-  sql: string,
-): Promise<QueryResponse> {
-  const session = sessions.get(connectionId);
+export async function executeQuery(request: QueryRequest): Promise<QueryResponse> {
+  if (runningQueries.has(request.requestId)) {
+    return {
+      ok: false,
+      error: {
+        message: '重复的查询请求 ID。',
+        code: 'DUPLICATE_REQUEST',
+      },
+    };
+  }
+
+  const session = sessions.get(request.connectionId);
   if (!session) {
     return {
       ok: false,
@@ -162,10 +178,53 @@ export async function executeQuery(
     };
   }
 
+  const entry: RunningQuery = {
+    connectionId: request.connectionId,
+    session,
+    canceled: false,
+  };
+  runningQueries.set(request.requestId, entry);
+
   try {
-    return { ok: true, result: await session.query(sql) };
+    const result = await session.query(request.sql);
+    if (entry.canceled) {
+      return canceledResponse(request.connectionId, session);
+    }
+    return { ok: true, result };
   } catch (error) {
+    if (entry.canceled) {
+      return canceledResponse(request.connectionId, session);
+    }
     return { ok: false, error: errorDetails(error) };
+  } finally {
+    runningQueries.delete(request.requestId);
+  }
+}
+
+function canceledResponse(connectionId: string, session: DatabaseSession): QueryResponse {
+  if (session.cancelDisconnects) {
+    sessions.delete(connectionId);
+  }
+  return {
+    ok: false,
+    error: {
+      message: '查询已取消。',
+      code: 'QUERY_CANCELED',
+      connectionClosed: session.cancelDisconnects,
+    },
+  };
+}
+
+export async function cancelQuery(requestId: string): Promise<boolean> {
+  const entry = runningQueries.get(requestId);
+  if (!entry) return false;
+
+  try {
+    await entry.session.cancel();
+    entry.canceled = true;
+    return true;
+  } catch {
+    return false;
   }
 }
 

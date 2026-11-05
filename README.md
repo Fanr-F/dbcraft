@@ -94,12 +94,13 @@ src/
 - SQLite 查询在独立 Worker 中执行，不阻塞主进程
 - MariaDB `ed25519` 账号走 `mariadb` 驱动
 - DATETIME、DECIMAL、JSON、BIGINT 按数据库返回形态展示
+- 查询取消：MySQL/MariaDB 用 `KILL QUERY`，连接保留；SQLite 终止 Worker，需要重连
 - 结果最多返回 2,000 行，超出标记截断
 
 尚未接入：
 
 - MSSQL 真实驱动
-- 多语句执行、查询取消、事务状态跟踪
+- 多语句执行、事务状态跟踪
 - 会话池（当前每个保存连接只有一个会话，多标签页串行）
 - 查询历史、设置、导出、数据编辑、DDL、Agent
 - 10 万行性能验证、打包后 asar Worker 冒烟测试
