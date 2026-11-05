@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 对应 PRD | `doc/PRD.md` v0.16 |
-| 文档版本 | v0.9（评审修订稿） |
+| 文档版本 | v0.10（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
 | 目标平台 | Windows 10（1809+）/ 11，x64 |
@@ -23,6 +23,7 @@
 | v0.7 | 2026-11-05 | SQLite 首条真实链路：better-sqlite3 13 N-API + Worker；连接测试/打开/关闭、单语句查询、`sqlite_master` 对象树；500 行示例库验证；记录多语句、取消、10 万行与打包后 Worker 等待办 |
 | v0.8 | 2026-11-05 | MySQL/Percona/MariaDB 驱动接入：mysql2 + mariadb、统一 DatabaseSession、对象树、MariaDB ed25519、DATETIME/DECIMAL/JSON 原值验证；记录单会话、TLS 矩阵与 Percona 实例待办 |
 | v0.9 | 2026-11-05 | 查询取消：requestId 跟踪、MySQL/MariaDB `KILL QUERY`、SQLite 终止 Worker；验证取消后 MySQL/MariaDB 连接可复用、SQLite 需重连；修正 §4.3 取消语义 |
+| v0.10 | 2026-11-05 | 会话模型简化为一个 session 对应一个连接，移除会话池与租借设计；多标签共享连接并串行执行；事务状态暂不跟踪，状态栏改为“单会话” |
 
 ---
 
@@ -74,7 +75,7 @@
 ┌───────────────────────────▼──────────────────────────────────┐
 │ Main Process (Electron)                                      │
 │  - IPC Router（参数校验、权限边界）                            │
-│  - ConnectionManager / SessionPool / QueryScheduler          │
+│  - ConnectionManager / QueryScheduler                       │
 │  - MetadataService（连接、历史、设置、草稿、schema 缓存）       │
 │  - DialectRegistry / SqlSplitter / CompletionService          │
 │  - DdlService / GridService / AgentService / ExportService    │
@@ -126,7 +127,6 @@ dbcraft/
 │  │  ├─ services/
 │  │  │  ├─ connection/
 │  │  │  │  ├─ ConnectionManager.ts
-│  │  │  │  ├─ SessionPool.ts
 │  │  │  │  └─ drivers/{mysql,percona,mariadb,mssql,sqlite}.ts
 │  │  │  ├─ query/
 │  │  │  │  ├─ QueryScheduler.ts
@@ -515,7 +515,7 @@ interface SqlStatement {
 ```text
 渲染层 query.execute
   → IPC 校验
-  → SessionPool.acquire(requestId)
+  → ConnectionManager 取当前连接会话
   → SqlSplitter.split()
   → 逐语句执行
       → 绑定超时/取消
@@ -559,13 +559,14 @@ interface SqlStatement {
 - v1.0 不执行参数化，遇到占位符时提示「v1.x 支持」；
 - 历史详情预留 `parameters_json` 字段扩展位（v1.x migration 添加）。
 
-### 7.6 会话池与调度
+### 7.6 会话模型（简化）
 
-- 每个连接配置一个会话池：MySQL 系/MSSQL 默认 `max=8`，空闲 5 分钟回收；SQLite 每个标签独立 Worker，LRU 上限 4。
-- 标签不长期持有物理连接：查询时 acquire，完成后 release；只有显式事务或网格提交期间持有 lease，直到事务结束；网格编辑租用独立会话/独立事务。
-- MSSQL 不依赖 MARS，一个会话同一时刻只执行一个请求；同一连接的多标签排队执行。
-- 全局并发上限默认 8，超出排队；取消的请求从队列移除并释放会话。
-- 连接断开时池内会话标记失效，下次查询自动重建；未提交事务提示用户处理。
+- **一个 session 对应一个连接**：每个保存的连接只维护一个物理会话，不做连接池。
+- 同一连接的所有标签页共享该会话，查询串行执行；长查询会阻塞该连接上的其他标签页，这是明确取舍。
+- 不做标签级连接租借、空闲回收、全局并发上限。
+- SQLite 仍为每个连接一个 Worker；SQLite 取消会终止 Worker，需要重新连接。
+- 事务状态暂不跟踪，状态栏不显示“自动提交”，改为“单会话”。
+- 若未来需要多标签并发或独立事务，再单独设计会话池，不纳入当前范围。
 
 ---
 
@@ -1069,7 +1070,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 1. mysql2 使用 `rowsAsArray: true` 时仍返回完整 `fields`；MariaDB 通过结果数组的 `meta` 暴露列信息，且列名是方法 `name()` 而非属性。
 2. `dateStrings`、`bigNumberStrings`、`jsonStrings` 能保留数据库返回值形态，符合“不做应用层时区/格式转换”的约束。
-3. 当前每个保存连接只有一个会话，多个标签页共用时请求串行；尚未实现 8 连接会话池。
+3. 当前每个保存连接只有一个会话，多标签页共用时请求串行；这是选定的单会话模型，不是未完成的池化。
 4. TLS 的 `prefer` 已实现“失败后回退明文”，但尚未覆盖完整 TLS 矩阵；`verify-ca`/`verify-full` 暂用系统 CA。
 5. Percona 与 MySQL 共用 `MysqlSession`，仍待真实 Percona 实例复核。
 
@@ -1101,12 +1102,12 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | 里程碑 | 技术交付 |
 |---|---|
 | M0 | 窗口骨架、typed IPC、连接表单、结果网格原型 |
-| M1 | 多库驱动（SQLite/MySQL/Percona/MariaDB/MSSQL）、会话池、SQL 执行/取消、结果流、基础设置 |
+| M1 | 多库驱动（SQLite/MySQL/Percona/MariaDB/MSSQL）、SQL 执行/取消、结果流、基础设置 |
 | M2 | 元数据库 migration、历史/FTS5、网格事务/乐观锁 |
 | M3 | DDL 生成/预览、SQLite 重建、Agent 列表/详情/启停/脚本 |
 | M4 | 性能/安全专项、签名打包、回归与发布检查 |
 
-> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、结果网格与 `npm run smoke` 冒烟检查。M1 已接入 SQLite（见 17.3）、MySQL/Percona/MariaDB（见 17.4）与查询取消（见 17.5）；MSSQL 驱动、会话池与历史仍待后续交付。
+> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、结果网格与 `npm run smoke` 冒烟检查。M1 已接入 SQLite（见 17.3）、MySQL/Percona/MariaDB（见 17.4）与查询取消（见 17.5）；采用单会话模型，MSSQL 驱动与历史仍待后续交付。
 
 ---
 
@@ -1116,9 +1117,10 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 2. RevoGrid Core Spike 已完成（见 17.1）；正式实现需补 pinned 列映射、单格复制路径、过滤默认操作符，并完成 IME/无障碍人工验证。多区域属 Pro，v1.0 使用单区域。
 3. MySQL 系认证 Spike 已完成（见 17.2）；Percona 仍需真实实例复核，`unix_socket`/PAM 在 Windows 客户端不适用。
 4. mysql2 非 TLS 下无法拒绝服务端公钥获取；正式实现默认引导 TLS，并在连接表单明确标注未加密连接的风险。
-5. SQLite 连接 Worker 的数量上限与回收策略。
-6. SQLite 已完成单语句查询与取消；多语句、事务状态、10 万行性能与打包后 asar Worker 路径待验证；SQLite 取消会断开会话。
-7. 代码签名证书的采购时间与发布渠道。
+5. 单会话模型下，多标签共享同一连接、查询串行；多标签并发与事务隔离不在当前范围，需要时再设计会话池。
+6. SQLite 已完成单语句查询与取消；多语句、10 万行性能与打包后 asar Worker 路径待验证；SQLite 取消会断开会话。
+7. 事务状态暂不跟踪，状态栏显示“单会话”而非“自动提交”；网格编辑前再补事务状态与关闭确认。
+8. 代码签名证书的采购时间与发布渠道。
 
 ---
 

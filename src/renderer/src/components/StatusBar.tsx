@@ -44,7 +44,7 @@ export function StatusBar({
       <span>{run.executedAt && !run.error ? `${run.elapsedMs} ms` : ''}</span>
       {run.truncated && <span className="status-warn">已截断</span>}
       <span className="status-sep" />
-      <span>自动提交</span>
+      <span>单会话</span>
 
       <span className="status-spacer" />
       <span>{appInfo ? `v${appInfo.version} · Electron ${appInfo.electron}` : 'DBCraft'}</span>
