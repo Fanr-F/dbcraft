@@ -1,0 +1,13 @@
+{
+  "name": "dbcraft-mysql-auth-spike",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "probe": "node scripts/probe.mjs"
+  },
+  "dependencies": {
+    "mariadb": "^3.5.4",
+    "mysql2": "^3.24.6"
+  }
+}

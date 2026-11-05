@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 对应 PRD | `doc/PRD.md` v0.16 |
-| 文档版本 | v0.4（评审修订稿） |
+| 文档版本 | v0.5（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
 | 目标平台 | Windows 10（1809+）/ 11，x64 |
@@ -18,6 +18,7 @@
 | v0.2 | 2026-11-05 | 根据评审与 Q1–Q4 决策修订：改用 RevoGrid Core；SQLite 重建完整处理索引/触发器/视图/外键；MySQL/Percona/MariaDB 独立连接与认证；补齐会话池、WAL 备份、FTS5 短查询、批量提交等实现细节 |
 | v0.3 | 2026-11-05 | 时区规则修正：显示与导出以数据库返回值为准，不做应用层转换；移除连接时区强制设置；有时区类型保留偏移，无时区类型不补；补充「不模拟数据库行为」边界原则 |
 | v0.4 | 2026-11-05 | 回写 RevoGrid Core Spike 结果：25,000×30 虚拟滚动、区域选择/TSV 复制/粘贴、自定义编辑器、过滤面板、右键菜单通过；记录 pinned 列映射、单格复制、过滤默认操作符等待办 |
+| v0.5 | 2026-11-05 | 回写 MySQL 系认证 Spike（S9）：MySQL 8.0.44 `caching_sha2_password`、MariaDB 11.4.13 `ed25519`/`mysql_native_password`、错误码映射与 TLS 行为 16 项通过；修正 `allowPublicKeyRetrieval` 文档错误；注明 unix_socket 在 Windows 不适用、Percona 需真实实例复核 |
 
 ---
 
@@ -388,9 +389,9 @@ CREATE TABLE schema_cache (
 | 连接类型 | `db_type` | 驱动 | 默认端口 | 认证方式 |
 |---|---|---|---|---|
 | SQLite | `sqlite` | better-sqlite3 | —（文件） | 无（v1.0 不支持加密文件） |
-| MySQL | `mysql` | mysql2 | 3306 | `caching_sha2_password`、`mysql_native_password`、`sha256_password`；非 TLS 时 `allowPublicKeyRetrieval` 或 SSL |
-| Percona | `percona` | mysql2 | 3306 | 同 MySQL；通过 `VERSION()`/`@@version_comment` 识别发行版 |
-| MariaDB | `mariadb` | `mariadb` | 3306 | `mysql_native_password`、`ed25519`、`unix_socket`、PAM 等 |
+| MySQL | `mysql` | mysql2 | 3306 | `caching_sha2_password`（8.0/8.4 默认）、`mysql_native_password`、`sha256_password`；TLS 可选 |
+| Percona | `percona` | mysql2 | 3306 | 同 MySQL 8.0/8.4，使用 `caching_sha2_password`；通过 `VERSION()`/`@@version_comment` 识别发行版 |
+| MariaDB | `mariadb` | `mariadb` | 3306 | `mysql_native_password`（默认）、`ed25519`；`unix_socket`/PAM 仅服务端本地认证，Windows 客户端不适用 |
 | MSSQL | `mssql` | mssql/tedious | 1433 | SQL 认证；`encrypt`/`trustServerCertificate` |
 
 规则：
@@ -398,6 +399,10 @@ CREATE TABLE schema_cache (
 - 新建连接第一步选择连接类型；认证插件列表、默认参数、驱动按类型切换。
 - `DialectRegistry.get(db_type)` 将 `mysql`/`percona`/`mariadb` 映射到同一 MySQL 方言，并注入 `vendor`；连接驱动按 `vendor` 选择。
 - MariaDB 不复用 mysql2，避免 `ed25519` 等插件不兼容；MySQL/Percona 使用 mysql2。
+- **mysql2 3.x 不识别 `allowPublicKeyRetrieval`**：传入会被丢弃并打印告警；非 TLS 首次 `caching_sha2_password` 认证会自动向服务端请求 RSA 公钥。v1.0 不提供“禁止公钥获取”开关；明文连接在 UI 标记“未加密”，默认引导启用 TLS。需要防 MITM 时使用 TLS，或通过 `authPlugins` 固定服务端公钥。
+- MariaDB `ed25519` 实测必须使用 `mariadb` 驱动；mysql2 返回 `AUTH_SWITCH_PLUGIN_ERROR`（`client_ed25519`）。
+- `unix_socket`/PAM 属于服务端本机认证，Windows 客户端经 TCP 无法使用；v1.0 不作为验收项。
+- 连接错误按驱动 `code`/`errno` 映射：1045 认证失败、1044 库级权限不足、1049 库不存在；不解析原始消息（MariaDB 消息带 `(conn:n, no:, SQLState:)` 前缀）。
 - `VERSION()`/`@@version_comment` 仅用于展示与诊断，不用于版本兼容层；版本/方言差异按数据库原生行为透传。
 - 连接测试与实际查询使用同一驱动与认证路径；失败时原样返回驱动错误并附中文提示。
 - 导出连接配置不含密码；密码由 safeStorage 加密后存 `secret_blob`。
@@ -936,7 +941,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | S6 | Monaco 中文输入法 | 中文输入、补全、撤销无明显异常 |
 | S7 | 启动/内存 | 冷启动 <3s、热启动 <2s、常驻 <300MB 基线 |
 | S8 | 元数据库 migration | 升级/备份/失败回滚可重复验证 |
-| S9 | MySQL 系认证 | MySQL/Percona `caching_sha2_password` 与 MariaDB `ed25519`/`unix_socket` 分别连接成功；驱动/插件错误可读 |
+| S9 | MySQL 系认证 | ✅ 通过（2026-11-05，`spikes/mysql-auth/`）：MySQL 8.0.44 `caching_sha2_password`、MariaDB 11.4.13 `mysql_native_password`/`ed25519`、TLS、错误码 16 项全通过。待办：Percona 用真实实例复核；`unix_socket` 在 Windows 客户端不适用 |
 | S10 | SQLite 重建全依赖 | 索引/触发器/视图/外键/`sqlite_sequence` 全部重建；并发会话维护锁有效；失败回滚保留原表 |
 
 ### 17.1 RevoGrid Spike 结果（S4）
@@ -970,6 +975,43 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 结论：**RevoGrid Core 通过 S4，可作为 v1.0 数据网格。** 正式实现需补齐 pinned 列映射、自研右键菜单、单格复制、过滤默认操作符，并完成 IME/无障碍人工验证。
 
+### 17.2 MySQL 系认证 Spike 结果（S9）
+
+- 位置：`spikes/mysql-auth/`
+- 环境：Windows + Node 24.22.1；MySQL 8.0.44 便携版（127.0.0.1:3307）；MariaDB 11.4.13 便携版（127.0.0.1:3308）；mysql2 3.24.6；mariadb 3.5.4
+- 方法：真实用户、真实 TCP/TLS 连接；`npm run probe` 生成 `result.json`
+- 结果：16 项通过，0 失败
+
+| 用例 | 结果 | 说明 |
+|---|---|---|
+| MySQL `caching_sha2_password` 首次认证（非 TLS） | 通过 | mysql2 自动请求服务端 RSA 公钥 |
+| MySQL 认证缓存命中 | 通过 | fast auth，不再交换公钥 |
+| MySQL TLS（自签证书，`rejectUnauthorized:false`） | 通过 | 连接与查询正常 |
+| MySQL TLS 严格校验自签证书 | 按预期失败 | `HANDSHAKE_SSL_ERROR`；需显式信任选项 |
+| MySQL `mysql_native_password` | 通过 | 8.0 仍可用；8.4 默认禁用 |
+| MySQL 密码错误 | 按预期失败 | `ER_ACCESS_DENIED_ERROR` / 1045 |
+| MySQL 数据库不存在（root） | 按预期失败 | `ER_BAD_DB_ERROR` / 1049 |
+| MySQL 无库权限（普通账号） | 按预期失败 | `ER_DBACCESS_DENIED_ERROR` / 1044 |
+| MySQL 端口未监听 | 按预期失败 | `ECONNREFUSED` |
+| MariaDB `mysql_native_password` | 通过 | mariadb 驱动 |
+| MariaDB `ed25519` | 通过 | mariadb 驱动，13ms |
+| MariaDB `ed25519` 经 mysql2 | 按预期失败 | `AUTH_SWITCH_PLUGIN_ERROR`，未知插件 `client_ed25519` |
+| MariaDB 原生密码经 mysql2（对照） | 通过 | 仅证明不能覆盖 ed25519 |
+| MariaDB 密码错误 | 按预期失败 | 1045 |
+| MariaDB 数据库不存在 / 无库权限 | 按预期失败 | 1049 / 1044 |
+| MariaDB `unix_socket` | 不适用 | Windows 无该插件（1524）；v1.0 目标 Windows，客户端经 TCP 用不到 |
+
+关键发现：
+
+1. **mysql2 3.x 不支持 `allowPublicKeyRetrieval`**：传入会被丢弃并告警（“Ignoring invalid configuration option…”），首次 `caching_sha2_password` 认证总是向服务端请求 RSA 公钥。§6.1 已按实测修正。安全含义：非 TLS 下密码虽用 RSA 加密，但公钥来自服务端，存在 MITM 风险；正式实现默认引导 TLS，明文连接明确标注“未加密”，需要更强保证时用 TLS 或通过 `authPlugins` 固定服务端公钥。
+2. **MariaDB `ed25519` 必须使用 `mariadb` 驱动**：mysql2 在认证切换阶段报未知插件；这验证了按 `vendor` 分驱动的决策，而不是只按数据库方言复用连接。
+3. **错误码必须分流**：1045 账号/密码、1044 库级权限、1049 库不存在；MariaDB 原始消息带 `(conn:n, no:, SQLState:)` 前缀，UI 应按 `code`/`errno`/`sqlState` 映射，不解析消息文本。
+4. **TLS 自签证书**：`rejectUnauthorized:false` 可用；严格校验失败。连接表单需要“验证证书”开关，默认开启，自签场景由用户显式关闭。
+5. **`unix_socket` 与 PAM 在 Windows 客户端不适用**：属于服务端本机认证；v1.0 不作为验收门槛。
+6. **Percona 未单独跑服务端**：本机无 Docker/Percona 二进制；Percona 8.0/8.4 与 MySQL 共用 mysql2 与 `caching_sha2_password` 路径，代码无分支，但仍需在 M1/CI 用真实 Percona 实例复核版本识别与连接。
+
+结论：**S9 对 MySQL 与 MariaDB 通过**；Percona 视为同一认证路径、待真实实例复核；`unix_socket` 标记为 Windows 不适用。
+
 ---
 
 ## 18. 里程碑映射
@@ -988,8 +1030,10 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 1. `node-sql-parser` 对不完整 SQL 的容错是否满足补全需求，是否需要更轻的自研 parser。
 2. RevoGrid Core Spike 已完成（见 17.1）；正式实现需补 pinned 列映射、单格复制路径、过滤默认操作符，并完成 IME/无障碍人工验证。多区域属 Pro，v1.0 使用单区域。
-3. SQLite 连接 Worker 的数量上限与回收策略。
-4. 代码签名证书的采购时间与发布渠道。
+3. MySQL 系认证 Spike 已完成（见 17.2）；Percona 仍需真实实例复核，`unix_socket`/PAM 在 Windows 客户端不适用。
+4. mysql2 非 TLS 下无法拒绝服务端公钥获取；正式实现默认引导 TLS，并在连接表单明确标注未加密连接的风险。
+5. SQLite 连接 Worker 的数量上限与回收策略。
+6. 代码签名证书的采购时间与发布渠道。
 
 ---
 
@@ -997,6 +1041,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 - `doc/PRD.md` v0.16
 - RevoGrid Core Spike：`spikes/revogrid/`
+- MySQL 系认证 Spike：`spikes/mysql-auth/`
 - Electron Security Checklist
 - SQLite FTS5 trigram tokenizer
 - RevoGrid Core 文档与 MIT 许可

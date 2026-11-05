@@ -1,0 +1,269 @@
+{
+  "generatedAt": "2026-11-05T02:29:52.938Z",
+  "environment": {
+    "platform": "win32",
+    "node": "v24.22.1",
+    "mysql": {
+      "port": 3307,
+      "version": "8.0.44",
+      "comment": "MySQL Community Server - GPL"
+    },
+    "mariadb": {
+      "port": 3308,
+      "version": "11.4.13-MariaDB",
+      "comment": "MariaDB Server"
+    }
+  },
+  "unixSocket": {
+    "created": false,
+    "error": {
+      "name": "SqlError",
+      "code": "ER_PLUGIN_IS_NOT_LOADED",
+      "errno": 1524,
+      "sqlState": "HY000",
+      "sqlMessage": "Plugin 'unix_socket' is not loaded",
+      "message": "(conn:13, no: 1524, SQLState: HY000) Plugin 'unix_socket' is not loaded\nsql: CREATE USER 'socket_user'@'localhost' IDENTIFIED VIA unix_socket - parameters:[]"
+    }
+  },
+  "passed": 16,
+  "failed": 0,
+  "results": [
+    {
+      "id": "mysql/sha2-cold-no-tls",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "connect",
+      "ok": true,
+      "ms": 5,
+      "note": "非 TLS 首次认证；mysql2 忽略 allowPublicKeyRetrieval，自动请求 RSA 公钥",
+      "value": {
+        "allowPublicKeyRetrievalInConfig": "dropped"
+      }
+    },
+    {
+      "id": "mysql/sha2-cached",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "connect",
+      "ok": true,
+      "ms": 2,
+      "note": "认证缓存命中后走 fast auth，不再交换 RSA 公钥",
+      "value": {
+        "ok": true
+      }
+    },
+    {
+      "id": "mysql/sha2-tls",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "connect",
+      "ok": true,
+      "ms": 5,
+      "note": "TLS 下无需 allowPublicKeyRetrieval；使用服务端自签证书",
+      "value": {
+        "ok": true
+      }
+    },
+    {
+      "id": "mysql/tls-strict-self-signed",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "fail",
+      "ok": true,
+      "ms": 3,
+      "note": "严格校验自签证书应失败，UI 需要给出信任选项",
+      "error": {
+        "name": "Error",
+        "code": "HANDSHAKE_SSL_ERROR",
+        "errno": null,
+        "sqlState": null,
+        "sqlMessage": null,
+        "message": "self-signed certificate in certificate chain"
+      }
+    },
+    {
+      "id": "mysql/native-password",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "connect",
+      "ok": true,
+      "ms": 1,
+      "note": "旧账号插件 mysql_native_password 仍可连接（MySQL 8.0）",
+      "value": {
+        "ok": true
+      }
+    },
+    {
+      "id": "mysql/wrong-password",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "fail",
+      "ok": true,
+      "ms": 4,
+      "note": "密码错误应返回 1045，UI 可区分账号/密码问题",
+      "error": {
+        "name": "Error",
+        "code": "ER_ACCESS_DENIED_ERROR",
+        "errno": 1045,
+        "sqlState": "28000",
+        "sqlMessage": "Access denied for user 'sha2_user'@'localhost' (using password: YES)",
+        "message": "Access denied for user 'sha2_user'@'localhost' (using password: YES)"
+      }
+    },
+    {
+      "id": "mysql/unknown-database",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "fail",
+      "ok": true,
+      "ms": 1,
+      "note": "用 root 连接不存在的库应返回 1049",
+      "error": {
+        "name": "Error",
+        "code": "ER_BAD_DB_ERROR",
+        "errno": 1049,
+        "sqlState": "42000",
+        "sqlMessage": "Unknown database 'dbcraft_missing'",
+        "message": "Unknown database 'dbcraft_missing'"
+      }
+    },
+    {
+      "id": "mysql/database-access-denied",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "fail",
+      "ok": true,
+      "ms": 1,
+      "note": "普通账号连未授权库返回 1044，UI 不能只按 1049 判断",
+      "error": {
+        "name": "Error",
+        "code": "ER_DBACCESS_DENIED_ERROR",
+        "errno": 1044,
+        "sqlState": "42000",
+        "sqlMessage": "Access denied for user 'sha2_user'@'%' to database 'dbcraft_missing'",
+        "message": "Access denied for user 'sha2_user'@'%' to database 'dbcraft_missing'"
+      }
+    },
+    {
+      "id": "mysql/connection-refused",
+      "vendor": "mysql",
+      "driver": "mysql2",
+      "expect": "fail",
+      "ok": true,
+      "ms": 1,
+      "note": "端口未监听应返回 ECONNREFUSED",
+      "error": {
+        "name": "Error",
+        "code": "ECONNREFUSED",
+        "errno": -4078,
+        "sqlState": null,
+        "sqlMessage": null,
+        "message": "connect ECONNREFUSED 127.0.0.1:3397"
+      }
+    },
+    {
+      "id": "maria/native-password",
+      "vendor": "mariadb",
+      "driver": "mariadb",
+      "expect": "connect",
+      "ok": true,
+      "ms": 2,
+      "note": "MariaDB 默认 mysql_native_password 账号",
+      "value": {
+        "ok": true
+      }
+    },
+    {
+      "id": "maria/ed25519",
+      "vendor": "mariadb",
+      "driver": "mariadb",
+      "expect": "connect",
+      "ok": true,
+      "ms": 13,
+      "note": "ed25519 账号必须走 mariadb 驱动",
+      "value": {
+        "ok": true
+      }
+    },
+    {
+      "id": "maria/ed25519-via-mysql2",
+      "vendor": "mariadb",
+      "driver": "mysql2",
+      "expect": "fail",
+      "ok": true,
+      "ms": 1,
+      "note": "mysql2 不支持 ed25519，验证必须分驱动",
+      "error": {
+        "name": "Error",
+        "code": "AUTH_SWITCH_PLUGIN_ERROR",
+        "errno": null,
+        "sqlState": null,
+        "sqlMessage": null,
+        "message": "Server requests authentication using unknown plugin client_ed25519. See TODO: add plugins doco here on how to configure or author authentication plugins."
+      }
+    },
+    {
+      "id": "maria/native-via-mysql2",
+      "vendor": "mariadb",
+      "driver": "mysql2",
+      "expect": "connect",
+      "ok": true,
+      "ms": 2,
+      "note": "对照项：mysql2 可连 MariaDB 的原生密码账号，但不能覆盖 ed25519",
+      "value": {
+        "ok": true
+      }
+    },
+    {
+      "id": "maria/wrong-password",
+      "vendor": "mariadb",
+      "driver": "mariadb",
+      "expect": "fail",
+      "ok": true,
+      "ms": 8,
+      "note": "密码错误应返回 1045",
+      "error": {
+        "name": "SqlError",
+        "code": "ER_ACCESS_DENIED_ERROR",
+        "errno": 1045,
+        "sqlState": "28000",
+        "sqlMessage": "Access denied for user 'ed_user'@'127.0.0.1' (using password: YES)",
+        "message": "(conn:10, no: 1045, SQLState: 28000) Access denied for user 'ed_user'@'127.0.0.1' (using password: YES)"
+      }
+    },
+    {
+      "id": "maria/unknown-database",
+      "vendor": "mariadb",
+      "driver": "mariadb",
+      "expect": "fail",
+      "ok": true,
+      "ms": 1,
+      "note": "用 root 连接不存在的库应返回 1049",
+      "error": {
+        "name": "SqlError",
+        "code": "ER_BAD_DB_ERROR",
+        "errno": 1049,
+        "sqlState": "42000",
+        "sqlMessage": "Unknown database 'dbcraft_missing'",
+        "message": "(conn:11, no: 1049, SQLState: 42000) Unknown database 'dbcraft_missing'"
+      }
+    },
+    {
+      "id": "maria/database-access-denied",
+      "vendor": "mariadb",
+      "driver": "mariadb",
+      "expect": "fail",
+      "ok": true,
+      "ms": 1,
+      "note": "普通账号连未授权库返回 1044",
+      "error": {
+        "name": "SqlError",
+        "code": "ER_DBACCESS_DENIED_ERROR",
+        "errno": 1044,
+        "sqlState": "42000",
+        "sqlMessage": "Access denied for user 'native_user'@'%' to database 'dbcraft_missing'",
+        "message": "(conn:12, no: 1044, SQLState: 42000) Access denied for user 'native_user'@'%' to database 'dbcraft_missing'"
+      }
+    }
+  ]
+}
