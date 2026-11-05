@@ -12,11 +12,17 @@ const DIALECT_LABELS: Record<DatabaseType, string> = {
   mssql: 'T-SQL',
 };
 
-function runtimeBadge(runtime: ConnectionRuntime | null): { text: string; tone: string } {
+function runtimeBadge(
+  runtime: ConnectionRuntime | null,
+  connectionType: DatabaseType | null,
+): { text: string; tone: string } {
   if (!runtime || runtime.status === 'idle') return { text: '未连接', tone: 'badge-warn' };
   if (runtime.status === 'connecting') return { text: '连接中…', tone: 'badge-warn' };
   if (runtime.status === 'error') return { text: '连接失败', tone: 'badge-danger' };
-  return { text: 'SQLite 实时', tone: 'badge-ok' };
+  return {
+    text: `${connectionType ? DIALECT_LABELS[connectionType] : 'SQL'} 实时`,
+    tone: 'badge-ok',
+  };
 }
 
 interface WorkspaceProps {
@@ -48,7 +54,7 @@ export function Workspace({
 }: WorkspaceProps) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const ready = connectionRuntime?.status === 'connected';
-  const badge = runtimeBadge(connectionRuntime);
+  const badge = runtimeBadge(connectionRuntime, connectionType);
 
   return (
     <section className="workspace">

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import type { QueryResult } from '../../../shared/ipc-contract';
+import type { QueryResult, SchemaObject } from '../../../shared/ipc-contract';
+import type { DatabaseSession } from '../DatabaseSession';
 
 type Pending = {
   resolve: (value: unknown) => void;
@@ -16,7 +17,8 @@ type WorkerResponse =
   | { id: number; ok: true; value: unknown }
   | { id: number; ok: false; error: { message: string; code: string | null } };
 
-export class SqliteSession {
+export class SqliteSession implements DatabaseSession {
+  readonly label = 'SQLite';
   serverVersion = 'unknown';
 
   private nextId = 1;
@@ -64,6 +66,21 @@ export class SqliteSession {
 
   query(sql: string): Promise<QueryResult> {
     return this.request<QueryResult>({ type: 'query', sql });
+  }
+
+  async schema(): Promise<SchemaObject[]> {
+    const result = await this.query(
+      `SELECT name, type
+       FROM sqlite_master
+       WHERE type IN ('table', 'view')
+         AND name NOT LIKE 'sqlite_%'
+       ORDER BY type, name`,
+    );
+
+    return result.rows.map((row) => ({
+      name: String(row[0] ?? ''),
+      type: row[1] === 'view' ? 'view' : 'table',
+    }));
   }
 
   async close(): Promise<void> {

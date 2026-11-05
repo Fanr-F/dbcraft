@@ -13,7 +13,7 @@ files:
 asar: true
 
 asarUnpack:
-  - out/main/sqlite-worker.js
+  - out/main/**
   - "**/*.node"
 
 win:

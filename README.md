@@ -2,7 +2,7 @@
 
 轻量级 Electron 数据库客户端，支持 SQLite、MySQL、Percona、MariaDB、MSSQL。
 
-当前处于 **M1 开发中**：SQLite 已接入真实连接、查询和对象树；其余数据库类型仍为连接表单占位。
+当前处于 **M1 开发中**：SQLite、MySQL、Percona、MariaDB 已接入真实连接、查询和对象树；MSSQL 仍为连接表单占位。
 
 ## 技术栈
 
@@ -12,6 +12,7 @@
 - electron-vite 开发/构建，electron-builder 打包
 - zod 校验 IPC 输入
 - better-sqlite3 13（N-API）+ Worker 执行 SQLite 查询
+- mysql2 连接 MySQL/Percona；mariadb 连接 MariaDB
 
 ## 开发
 
@@ -55,7 +56,7 @@ src/
 ├─ main/
 │  ├─ index.ts                 # 窗口、安全默认、生命周期
 │  ├─ ipc/                     # IPC 路由与 zod schema
-│  ├─ services/sqlite/         # 连接管理、Worker 会话
+│  ├─ services/                # 统一连接管理 + SQLite/MySQL/MariaDB 会话
 │  └─ workers/                 # sqlite-worker
 ├─ preload/                    # contextBridge，暴露 window.dbcraft
 ├─ renderer/                   # React 界面
@@ -85,17 +86,21 @@ src/
 
 - 主窗口、暗色界面、标签页、SQL 编辑区、结果区、状态栏
 - 五种数据库类型的连接表单
-- SQLite 连接测试、打开、关闭
-- SQLite 单语句查询（SELECT / PRAGMA / UPDATE / INSERT / DELETE / DDL）
+- SQLite / MySQL / Percona / MariaDB 连接测试、打开、关闭
+- 单语句查询（SELECT / PRAGMA / DML / DDL）
 - 查询结果动态列、行数、耗时、影响行数、错误展示
-- `sqlite_master` 对象树：表/视图列表、刷新、点击填入查询
+- 对象树：SQLite 读 `sqlite_master`；MySQL 系读 `information_schema`
+- 表/视图列表、刷新、点击填入查询
 - SQLite 查询在独立 Worker 中执行，不阻塞主进程
+- MariaDB `ed25519` 账号走 `mariadb` 驱动
+- DATETIME、DECIMAL、JSON、BIGINT 按数据库返回形态展示
 - 结果最多返回 2,000 行，超出标记截断
 
 尚未接入：
 
-- MySQL / Percona / MariaDB / MSSQL 真实驱动
+- MSSQL 真实驱动
 - 多语句执行、查询取消、事务状态跟踪
+- 会话池（当前每个保存连接只有一个会话，多标签页串行）
 - 查询历史、设置、导出、数据编辑、DDL、Agent
 - 10 万行性能验证、打包后 asar Worker 冒烟测试
 

@@ -158,7 +158,7 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-footer">
-        <span className="muted">M1 · SQLite 实时查询</span>
+        <span className="muted">M1 · SQLite / MySQL 系</span>
       </div>
     </aside>
   );

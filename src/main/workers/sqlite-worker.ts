@@ -1,6 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import type { QueryCell, QueryColumn, QueryResult } from '../../shared/ipc-contract';
+import { encodeCell } from '../services/query-values';
 
 type WorkerRequest =
   | { id: number; type: 'open'; filePath: string }
@@ -33,20 +34,6 @@ function errorInfo(error: unknown): WorkerFailure {
     };
   }
   return { message: String(error), code: null };
-}
-
-function encodeCell(value: unknown): QueryCell {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') {
-    return value;
-  }
-  if (value instanceof Uint8Array) {
-    const buffer = Buffer.from(value);
-    const head = buffer.subarray(0, 32).toString('hex');
-    return `0x${head}${buffer.length > 32 ? '…' : ''}`;
-  }
-  return String(value);
 }
 
 function open(filePath: string): { version: string } {

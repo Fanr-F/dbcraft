@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 对应 PRD | `doc/PRD.md` v0.16 |
-| 文档版本 | v0.7（评审修订稿） |
+| 文档版本 | v0.8（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
 | 目标平台 | Windows 10（1809+）/ 11，x64 |
@@ -21,6 +21,7 @@
 | v0.5 | 2026-11-05 | 回写 MySQL 系认证 Spike（S9）：MySQL 8.0.44 `caching_sha2_password`、MariaDB 11.4.13 `ed25519`/`mysql_native_password`、错误码映射与 TLS 行为 16 项通过；修正 `allowPublicKeyRetrieval` 文档错误；注明 unix_socket 在 Windows 不适用、Percona 需真实实例复核 |
 | v0.6 | 2026-11-05 | M0 主工程脚手架落地：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；安全默认、typed IPC、五类连接表单、模拟结果网格与 smoke 检查；构建配置改为 `electron.vite.config.ts` |
 | v0.7 | 2026-11-05 | SQLite 首条真实链路：better-sqlite3 13 N-API + Worker；连接测试/打开/关闭、单语句查询、`sqlite_master` 对象树；500 行示例库验证；记录多语句、取消、10 万行与打包后 Worker 等待办 |
+| v0.8 | 2026-11-05 | MySQL/Percona/MariaDB 驱动接入：mysql2 + mariadb、统一 DatabaseSession、对象树、MariaDB ed25519、DATETIME/DECIMAL/JSON 原值验证；记录单会话、TLS 矩阵与 Percona 实例待办 |
 
 ---
 
@@ -924,7 +925,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 - Vite + electron-builder；
 - Windows NSIS 安装包；
 - better-sqlite3 13 使用 N-API 预编译（`prebuilds/win32-x64.node`），Electron 45 实测直接加载，无需 `@electron/rebuild` 或 node-gyp；
-- `asarUnpack: ["out/main/sqlite-worker.js", "**/*.node"]`；Worker 入口文件随构建产物打包，运行时把 `app.asar` 替换为 `app.asar.unpacked`；对打包后的 exe 做 smoke test；
+- `asarUnpack: ["out/main/**", "**/*.node"]`；Worker 及其共享 chunk 随构建产物解包，运行时把 `app.asar` 替换为 `app.asar.unpacked`；对打包后的 exe 做 smoke test；
 - 固定 Electron 大版本，记录 Node/ABI；
 - 代码签名证书在 GA 前申请；
 - v1.0 不内置静默自动更新，仅提供版本检查/下载链接；
@@ -945,7 +946,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | S6 | Monaco 中文输入法 | 中文输入、补全、撤销无明显异常 |
 | S7 | 启动/内存 | 冷启动 <3s、热启动 <2s、常驻 <300MB 基线 |
 | S8 | 元数据库 migration | 升级/备份/失败回滚可重复验证 |
-| S9 | MySQL 系认证 | ✅ 通过（2026-11-05，`spikes/mysql-auth/`）：MySQL 8.0.44 `caching_sha2_password`、MariaDB 11.4.13 `mysql_native_password`/`ed25519`、TLS、错误码 16 项全通过。待办：Percona 用真实实例复核；`unix_socket` 在 Windows 客户端不适用 |
+| S9 | MySQL 系认证 | ✅ 通过（2026-11-05，`spikes/mysql-auth/`）：MySQL 8.0.44 `caching_sha2_password`、MariaDB 11.4.13 `mysql_native_password`/`ed25519`、TLS、错误码 16 项全通过；已在 M1 连接表单与查询管线复用（见 17.4）。待办：Percona 用真实实例复核；`unix_socket` 在 Windows 客户端不适用 |
 | S10 | SQLite 重建全依赖 | 索引/触发器/视图/外键/`sqlite_sequence` 全部重建；并发会话维护锁有效；失败回滚保留原表 |
 
 ### 17.1 RevoGrid Spike 结果（S4）
@@ -1044,6 +1045,35 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 结论：**S1 部分通过**，作为 M1 SQLite 主路径可用；打包、性能和取消能力待补测。
 
+### 17.4 MySQL / Percona / MariaDB 驱动接入（S9 后续）
+
+- 环境：Electron 45.2.3；MySQL 8.0.44（3307）；MariaDB 11.4.13（3308）；mysql2 3.24.6；mariadb 3.5.4
+- 实现：统一 `DatabaseSession` 接口；`MysqlSession` 负责 MySQL/Percona，`MariaSession` 负责 MariaDB；每个保存的连接对应一个主进程会话
+- 验证账号：MySQL `root`；MariaDB `ed_user`（`ed25519`）
+- 示例表：`demo_users` 100 行 + `active_users` 视图
+
+| 验证项 | 结果 |
+|---|---|
+| MySQL 连接测试 | 通过，9ms |
+| MySQL 对象树 | 1 表 + 1 视图 |
+| MySQL `SELECT` 10 行 | 通过，1–2ms |
+| DATETIME 原值 | `2026-01-01 09:30:00`，未做时区转换 |
+| DECIMAL | `3.25`，按字符串返回，无精度丢失 |
+| JSON | 原文本字符串 |
+| MariaDB ed25519 连接 | 通过，18–37ms |
+| MariaDB 对象树 / 查询 | 1 表 + 1 视图；5 行查询正常 |
+| MariaDB 元数据 | `rowsAsArray` + `meta`，列名通过 `name()` 读取 |
+
+关键发现：
+
+1. mysql2 使用 `rowsAsArray: true` 时仍返回完整 `fields`；MariaDB 通过结果数组的 `meta` 暴露列信息，且列名是方法 `name()` 而非属性。
+2. `dateStrings`、`bigNumberStrings`、`jsonStrings` 能保留数据库返回值形态，符合“不做应用层时区/格式转换”的约束。
+3. 当前每个保存连接只有一个会话，多个标签页共用时请求串行；尚未实现 8 连接会话池。
+4. TLS 的 `prefer` 已实现“失败后回退明文”，但尚未覆盖完整 TLS 矩阵；`verify-ca`/`verify-full` 暂用系统 CA。
+5. Percona 与 MySQL 共用 `MysqlSession`，仍待真实 Percona 实例复核。
+
+结论：**MySQL 与 MariaDB 的 M1 查询链路通过**；Percona 沿用同一代码路径，待实例复核。
+
 ---
 
 ## 18. 里程碑映射
@@ -1056,7 +1086,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | M3 | DDL 生成/预览、SQLite 重建、Agent 列表/详情/启停/脚本 |
 | M4 | 性能/安全专项、签名打包、回归与发布检查 |
 
-> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、模拟结果网格与 `npm run smoke` 冒烟检查。M1 SQLite 主路径已接入（见 17.3）；MySQL 系/MSSQL 驱动、SQL 取消与历史仍待在 M1 后续交付。
+> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、结果网格与 `npm run smoke` 冒烟检查。M1 已接入 SQLite（见 17.3）与 MySQL/Percona/MariaDB（见 17.4）；MSSQL 驱动、会话池、SQL 取消与历史仍待后续交付。
 
 ---
 

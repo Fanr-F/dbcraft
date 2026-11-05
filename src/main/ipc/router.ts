@@ -17,13 +17,8 @@ import {
   executeQuery,
   getSchema,
   openConnection,
-  testSqliteFile,
-} from '../services/sqlite/ConnectionManager';
-
-function describeError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
+  testConnection,
+} from '../services/ConnectionManager';
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.appGetInfo, (): AppInfo => {
@@ -65,31 +60,7 @@ export function registerIpcHandlers(): void {
         };
       }
 
-      if (parsed.data.type !== 'sqlite') {
-        return {
-          status: 'not-implemented',
-          ok: false,
-          message: '当前版本只接入 SQLite 驱动；该连接类型的真实测试将在后续里程碑接入。',
-          elapsedMs: Date.now() - startedAt,
-        };
-      }
-
-      try {
-        const version = testSqliteFile(parsed.data.filePath);
-        return {
-          status: 'ok',
-          ok: true,
-          message: `SQLite ${version} · 文件可读`,
-          elapsedMs: Date.now() - startedAt,
-        };
-      } catch (error) {
-        return {
-          status: 'failed',
-          ok: false,
-          message: describeError(error),
-          elapsedMs: Date.now() - startedAt,
-        };
-      }
+      return testConnection(parsed.data);
     },
   );
 

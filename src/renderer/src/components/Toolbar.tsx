@@ -21,7 +21,7 @@ export function Toolbar({
         <span className="brand-mark">D</span>
         <span className="brand-text">
           <strong>DBCraft</strong>
-          <span>M1 · SQLite</span>
+          <span>M1 · MySQL 系</span>
         </span>
       </div>
 

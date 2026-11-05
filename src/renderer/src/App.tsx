@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppInfo, ConnectionInput, SchemaObject } from '@shared/ipc-contract';
+import type { AppInfo, ConnectionInput, DatabaseType, SchemaObject } from '@shared/ipc-contract';
 import { ConnectionDialog } from './features/connections/ConnectionDialog';
 import { Icon } from './components/Icon';
 import { Sidebar } from './components/Sidebar';
@@ -18,6 +18,14 @@ const INITIAL_SQL = `SELECT name, type, sql
 FROM sqlite_master
 WHERE type IN ('table', 'view')
 ORDER BY type, name;`;
+
+const DEFAULT_SQL: Record<DatabaseType, string> = {
+  sqlite: INITIAL_SQL,
+  mysql: 'SHOW TABLES;',
+  percona: 'SHOW TABLES;',
+  mariadb: 'SHOW TABLES;',
+  mssql: 'SELECT 1;',
+};
 
 const INITIAL_TAB: QueryTab = {
   id: 'query-1',
@@ -119,15 +127,7 @@ export default function App() {
     }
   };
 
-  const openSavedConnection = async (connection: SavedConnection) => {    if (connection.input.type !== 'sqlite') {
-      setRuntimes((current) => ({
-        ...current,
-        [connection.id]: { status: 'idle' },
-      }));
-      showNotice('info', '当前只接入 SQLite 驱动，该数据库类型将在后续里程碑接入。');
-      return;
-    }
-
+  const openSavedConnection = async (connection: SavedConnection) => {
     const api = window.dbcraft;
     if (!api) {
       setRuntimes((current) => ({
@@ -205,8 +205,8 @@ export default function App() {
       return;
     }
 
-    if (activeConnection.input.type !== 'sqlite') {
-      showNotice('error', '当前只接入 SQLite 驱动，该数据库类型尚不能执行查询。');
+    if (activeConnection.input.type === 'mssql') {
+      showNotice('error', 'MSSQL 驱动将在后续里程碑接入。');
       return;
     }
 
@@ -312,6 +312,11 @@ export default function App() {
     setActiveConnectionId(connection.id);
     setRun(EMPTY_RUN);
     setDialogOpen(false);
+    setTabs((current) =>
+      current.map((tab) =>
+        tab.id === activeTabId ? { ...tab, sql: DEFAULT_SQL[input.type] } : tab,
+      ),
+    );
     void openSavedConnection(connection);
   };
 
