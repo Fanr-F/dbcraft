@@ -44,3 +44,13 @@ Get-CimInstance Win32_Process |
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     Write-Host "stopped leftover $($_.Name) (pid $($_.ProcessId))"
   }
+
+# ExecutablePath 有时不可读，再按监听端口兜底。
+foreach ($port in @(3307, 3308)) {
+  $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if ($listener) {
+    Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
+    Write-Host "stopped leftover on port $port (pid $($listener.OwningProcess))"
+  }
+}
