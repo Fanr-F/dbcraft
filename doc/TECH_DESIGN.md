@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 对应 PRD | `doc/PRD.md` v0.16 |
-| 文档版本 | v0.3（评审修订稿） |
+| 文档版本 | v0.4（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
 | 目标平台 | Windows 10（1809+）/ 11，x64 |
@@ -17,6 +17,7 @@
 | v0.1 | 2026-11-05 | 初稿 |
 | v0.2 | 2026-11-05 | 根据评审与 Q1–Q4 决策修订：改用 RevoGrid Core；SQLite 重建完整处理索引/触发器/视图/外键；MySQL/Percona/MariaDB 独立连接与认证；补齐会话池、WAL 备份、FTS5 短查询、批量提交等实现细节 |
 | v0.3 | 2026-11-05 | 时区规则修正：显示与导出以数据库返回值为准，不做应用层转换；移除连接时区强制设置；有时区类型保留偏移，无时区类型不补；补充「不模拟数据库行为」边界原则 |
+| v0.4 | 2026-11-05 | 回写 RevoGrid Core Spike 结果：25,000×30 虚拟滚动、区域选择/TSV 复制/粘贴、自定义编辑器、过滤面板、右键菜单通过；记录 pinned 列映射、单格复制、过滤默认操作符等待办 |
 
 ---
 
@@ -930,13 +931,44 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | S1 | better-sqlite3 + Electron ABI | Windows 上安装、查询 10 万行、Worker 中不阻塞 UI |
 | S2 | MSSQL tedious 连接 | SQL 认证 + `encrypt`/`trustServerCertificate` 连接成功；`msdb` 查询可用 |
 | S3 | FTS5 trigram 中文/子串 | 1 万/5 万条下搜索 <100ms/<500ms；`LIKE` 回退可用 |
-| S4 | RevoGrid Core 集成 | React 封装可用；区域选择/剪贴板/编辑/过滤/虚拟滚动通过；日期/枚举/NULL/大文本编辑器可用；IME/无障碍可用；SheetJS 导出可用 |
+| S4 | RevoGrid Core 集成 | ✅ 通过（2026-11-05，`spikes/revogrid/`）：25,000×30 虚拟滚动、区域选择/TSV 复制/粘贴、枚举/布尔/日期/大文本编辑器、过滤面板、自研右键菜单、滚动到行均通过。待办：pinned 列映射、单格复制路径、过滤默认操作符、IME/无障碍人工验证；多区域为 Pro，v1.0 用单区域 |
 | S5 | SQL 解析容错 | 不完整 SQL 下补全不崩溃、可降级 |
 | S6 | Monaco 中文输入法 | 中文输入、补全、撤销无明显异常 |
 | S7 | 启动/内存 | 冷启动 <3s、热启动 <2s、常驻 <300MB 基线 |
 | S8 | 元数据库 migration | 升级/备份/失败回滚可重复验证 |
 | S9 | MySQL 系认证 | MySQL/Percona `caching_sha2_password` 与 MariaDB `ed25519`/`unix_socket` 分别连接成功；驱动/插件错误可读 |
 | S10 | SQLite 重建全依赖 | 索引/触发器/视图/外键/`sqlite_sequence` 全部重建；并发会话维护锁有效；失败回滚保留原表 |
+
+### 17.1 RevoGrid Spike 结果（S4）
+
+- 位置：`spikes/revogrid/`
+- 环境：RevoGrid Core 4.31.4 + React 18 + Vite 6 + Edge Headless
+- 数据：25,000 行 × 30 列
+
+| 验证项 | 结果 | 备注 |
+|---|---|---|
+| 25,000 行渲染/滚动 | 通过 | 行/列虚拟化正常 |
+| 区域选择 | 通过 | 拖拽/Shift 点击 |
+| 复制 TSV | 通过 | 多选区域 `Ctrl+C` |
+| 粘贴区域 | 通过 | `Ctrl+V` 写入 2×2 区域 |
+| 枚举/布尔/日期编辑器 | 通过 | React 自定义编辑器 |
+| 大文本/中文编辑器 | 通过 | `<textarea>`，中文可保存/显示 |
+| 过滤面板 | 通过 | 列头漏斗可打开，默认操作符为 `None` |
+| 右键菜单 | 通过（需自研） | 容器 `contextmenu` + `getSelectedRange()` |
+| 滚动到指定行 | 通过 | `scrollToRow` |
+| 单格复制 | 需确认 | 未触发 `clipboardrangecopy`，正式实现需补路径或确认原生行为 |
+| IME 组合输入 | 待人工 | 中文文本写入通过，组合态未验证 |
+| 无障碍 | 待人工 | 需 NVDA/键盘导航检查 |
+
+关键发现：
+
+1. `getSelectedRange().x` **不包含 pinned 列**；映射列时必须按 `range.colType` 分组：`colPinStart` / `colPinEnd` / `rgCol`。
+2. RevoGrid Core 不带业务右键菜单，需要自研；Spike 已实现并验证。
+3. 单格复制与区域复制行为不同；正式实现需要补单格复制路径。
+4. 过滤面板默认 `None`，建议正式产品默认 `Contains` 或 `Equal`。
+5. Core 只有单区域选择；多区域是 Pro，v1.0 单区域足够。
+
+结论：**RevoGrid Core 通过 S4，可作为 v1.0 数据网格。** 正式实现需补齐 pinned 列映射、自研右键菜单、单格复制、过滤默认操作符，并完成 IME/无障碍人工验证。
 
 ---
 
@@ -955,7 +987,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 ## 19. 待确认项
 
 1. `node-sql-parser` 对不完整 SQL 的容错是否满足补全需求，是否需要更轻的自研 parser。
-2. RevoGrid Core 的复杂单元格编辑器、IME、无障碍与右键菜单需 Spike 验证；多区域选择属 Pro，v1.0 使用单区域。
+2. RevoGrid Core Spike 已完成（见 17.1）；正式实现需补 pinned 列映射、单格复制路径、过滤默认操作符，并完成 IME/无障碍人工验证。多区域属 Pro，v1.0 使用单区域。
 3. SQLite 连接 Worker 的数量上限与回收策略。
 4. 代码签名证书的采购时间与发布渠道。
 
@@ -964,6 +996,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 ## 20. 参考
 
 - `doc/PRD.md` v0.16
+- RevoGrid Core Spike：`spikes/revogrid/`
 - Electron Security Checklist
 - SQLite FTS5 trigram tokenizer
 - RevoGrid Core 文档与 MIT 许可
