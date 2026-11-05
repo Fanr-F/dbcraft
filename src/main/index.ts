@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { app, BrowserWindow, Menu, session } from 'electron';
 import { registerIpcHandlers, bindMainWindow, releaseMainWindow } from './ipc/router';
 import { closeAllSessions } from './services/ConnectionManager';
-import { createLogger, resolveLogLevel } from './logging/logger';
+import { createLogger, resolveLogDirectory, resolveLogLevel } from './logging/logger';
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL']);
 const isSmoke = process.env['DBCRAFT_SMOKE'] === '1';
@@ -143,6 +143,7 @@ if (!app.requestSingleInstanceLock()) {
       electron: process.versions.electron,
       dev: isDev,
       level: resolveLogLevel(),
+      logDir: resolveLogDirectory(),
     });
 
     app.on('activate', () => {

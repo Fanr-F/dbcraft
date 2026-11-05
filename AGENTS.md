@@ -40,6 +40,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   被 KILL 的语句可能仍成功返回（例如 `SLEEP` 返回 1），必须用 `requestId` 的 canceled 标记覆盖响应。
 - 日志统一走 `src/main/logging/logger.ts`（主进程）与 `src/renderer/src/logging.ts`（渲染进程，
   经 `log:write` 汇入主进程）。`npm run dev` 默认 `debug`，打包后 `info`，可用 `DBCRAFT_LOG_LEVEL` 覆盖。
+  开发日志在项目根 `logs/`（已 gitignore），打包后写 userData；可用 `DBCRAFT_LOG_DIR` 覆盖。
   日志不得记录 SQL 文本、密码或连接串；约定见 `doc/LOGGING.md`。
 - 事务状态未跟踪；状态栏写“标签会话”，不要声称自动提交。
 - 连接信息和密码只在内存中，目前不写盘；未接入 safeStorage 前不要加明文持久化。

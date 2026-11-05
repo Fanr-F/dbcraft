@@ -114,8 +114,8 @@ src/
 
 - `npm run dev` 默认 `debug` 级别；打包后默认 `info`。
 - 覆盖级别（PowerShell）：`$env:DBCRAFT_LOG_LEVEL = "debug"; npm run dev`，可选 `error|warn|info|debug`。
-- 主进程写入 `<userData>/logs/dbcraft.log`（Windows 开发环境通常是 `%APPDATA%\dbcraft\logs\dbcraft.log`），
-  单文件 5 MB 轮转、保留 3 个历史文件。
+- 开发/未打包写入项目根 `logs/dbcraft.log`（即当前工作目录下）；打包后写入 `<userData>/logs/dbcraft.log`；
+  可用 `DBCRAFT_LOG_DIR` 覆盖。单文件 5 MB 轮转、保留 3 个历史文件；`logs/` 已加入 `.gitignore`。
 - 渲染进程日志经 `log:write` IPC 汇入同一文件，来源校验与长度校验在 IPC 层完成。
 - 日志不记录 SQL 文本、密码或连接串；敏感字段自动打码。详见 `doc/LOGGING.md`。
 

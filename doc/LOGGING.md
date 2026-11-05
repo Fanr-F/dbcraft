@@ -6,10 +6,18 @@
 | 实现位置 | 主进程 `src/main/logging/logger.ts`；渲染进程 `src/renderer/src/logging.ts` |
 | 默认级别 | `npm run dev` / 未打包：`debug`；打包后：`info` |
 | 覆盖方式 | 环境变量 `DBCRAFT_LOG_LEVEL=error\|warn\|info\|debug` |
-| 落盘位置 | `<userData>/logs/dbcraft.log`（Windows 开发环境通常为 `%APPDATA%\dbcraft\logs`） |
+| 落盘位置 | 开发/未打包：`<工作目录>/logs/dbcraft.log`；打包后：`<userData>/logs/dbcraft.log` |
 | 轮转 | 单文件 5 MB，保留 3 个历史文件（`.1` / `.2`） |
 
 > 约束来自 PRD §5.3：**日志不得记录 SQL 文本、密码或连接串**。本实现按此执行：查询日志只记录 `sqlLength`，错误日志只记录 `code` / `sqlState` / `errno` / `retryable`，不记录 `message` 原文。
+
+### 日志目录
+
+- 开发 / 未打包：`<当前工作目录>/logs/dbcraft.log`，通常就是仓库根下的 `logs/`；
+- 打包后：`<userData>/logs/dbcraft.log`（避免安装目录不可写）；
+- 覆盖：`DBCRAFT_LOG_DIR`，相对路径按当前工作目录解析；
+- `logs/` 已加入 `.gitignore`，不会进入版本库；
+- 从旧版本升级时，`%APPDATA%\dbcraft\logs` 下的历史文件不会被移动或删除，可自行清理。
 
 ---
 
@@ -122,7 +130,7 @@ password / passwd / secret / token / authorization / apiKey / api_key / cookie
 
 - `npm run typecheck` / `npm run build` 通过；
 - `npm run e2e:sqlite` 以未打包模式启动 Electron，应产生 `debug` 级日志；
-- 手工确认：启动应用后检查 `<userData>/logs/dbcraft.log`，应包含 `[INFO] [app] 应用启动` 与 `[DEBUG]` 行；
+- 手工确认：启动应用后检查项目根 `logs/dbcraft.log`，应包含 `[INFO] [app] 应用启动` 与 `[DEBUG]` 行；
 - 退出应用后应看到 `应用退出：关闭会话` 与 `会话已关闭，退出应用`。
 
 ---

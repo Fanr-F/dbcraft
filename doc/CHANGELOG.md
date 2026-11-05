@@ -2,6 +2,13 @@
 
 > 产品差距与模块完成度见 `IMPLEMENTATION_STATUS.md`；日志约定见 `LOGGING.md`。
 
+## 2026-11-05 · 日志目录调整
+
+- 开发/未打包环境改为写入项目根 `logs/dbcraft.log`，不再默认写 `%APPDATA%`。
+- 打包后仍写入 `<userData>/logs`；新增 `DBCRAFT_LOG_DIR` 覆盖，相对路径按当前工作目录解析。
+- `logs/` 加入 `.gitignore`；启动日志额外记录 `logDir`，方便确认落盘位置。
+- 同步更新 `README.md`、`doc/LOGGING.md`、`AGENTS.md`、`doc/IMPLEMENTATION_STATUS.md`。
+
 ## 2026-11-05 · 查询链路加固与日志框架
 
 ### 修复

@@ -1,5 +1,5 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { app } from 'electron';
 import type { LogLevel } from '../../shared/ipc-contract';
 
@@ -87,12 +87,20 @@ function writeConsole(level: LogLevel, text: string): void {
   else console.debug(text);
 }
 
+/** 开发/未打包写项目根 `logs/`；打包后写 userData；可用 DBCRAFT_LOG_DIR 覆盖。 */
+export function resolveLogDirectory(): string {
+  const configured = process.env['DBCRAFT_LOG_DIR']?.trim();
+  if (configured) return resolve(configured);
+  if (!app.isPackaged) return join(process.cwd(), 'logs');
+  return join(app.getPath('userData'), 'logs');
+}
+
 function getLogFile(): string | null {
   if (logFilePath) return logFilePath;
   if (fileInitFailed) return null;
 
   try {
-    const directory = join(app.getPath('userData'), 'logs');
+    const directory = resolveLogDirectory();
     mkdirSync(directory, { recursive: true });
     logFilePath = join(directory, 'dbcraft.log');
     try {

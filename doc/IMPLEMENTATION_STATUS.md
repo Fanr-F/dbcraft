@@ -107,7 +107,7 @@
 | `npm run build` | 通过（日志改动之前；日志改动后待补） |
 | `npm run e2e:sqlite` | 通过（日志改动之前；日志改动后待补） |
 
-> 日志框架加入后仅重新跑了 `typecheck`。受限沙箱下 Vite 会执行 `net use` 探测并触发 `spawn EPERM`，因此 `build` / `e2e:sqlite` 需在完全访问模式或沙箱外补跑；补跑后应检查 `%APPDATA%\dbcraft\logs\dbcraft.log` 是否包含 `[INFO] [app] 应用启动` 与 `[DEBUG]` 行。
+> 日志框架加入后仅重新跑了 `typecheck`。受限沙箱下 Vite 会执行 `net use` 探测并触发 `spawn EPERM`，因此 `build` / `e2e:sqlite` 需在完全访问模式或沙箱外补跑；补跑后应检查项目根 `logs/dbcraft.log` 是否包含 `[INFO] [app] 应用启动` 与 `[DEBUG]` 行。
 
 E2E 新增回归断言：
 
