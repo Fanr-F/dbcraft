@@ -2,22 +2,22 @@ import { app, dialog, ipcMain } from 'electron';
 import {
   IPC_CHANNELS,
   type AppInfo,
-  type ConnectionOpenResult,
   type ConnectionTestResult,
   type QueryResponse,
+  type SessionOpenResult,
 } from '../../shared/ipc-contract';
 import {
   connectionInputSchema,
-  connectionOpenSchema,
   formatConnectionIssues,
   queryExecuteSchema,
+  sessionOpenSchema,
 } from './schemas';
 import {
   cancelQuery,
-  closeConnection,
+  closeSession,
   executeQuery,
   getSchema,
-  openConnection,
+  openSession,
   testConnection,
 } from '../services/ConnectionManager';
 
@@ -66,26 +66,26 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
-    IPC_CHANNELS.connectionOpen,
-    async (_event, rawInput: unknown): Promise<ConnectionOpenResult> => {
+    IPC_CHANNELS.sessionOpen,
+    async (_event, rawInput: unknown): Promise<SessionOpenResult> => {
       const startedAt = Date.now();
-      const parsed = connectionOpenSchema.safeParse(rawInput);
+      const parsed = sessionOpenSchema.safeParse(rawInput);
 
       if (!parsed.success) {
         return {
           ok: false,
-          message: `连接参数无效：${formatConnectionIssues(parsed.error)}`,
+          message: `会话参数无效：${formatConnectionIssues(parsed.error)}`,
           elapsedMs: Date.now() - startedAt,
         };
       }
 
-      return openConnection(parsed.data.connectionId, parsed.data.config);
+      return openSession(parsed.data.sessionId, parsed.data.config);
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.connectionClose, async (_event, rawInput: unknown): Promise<void> => {
+  ipcMain.handle(IPC_CHANNELS.sessionClose, async (_event, rawInput: unknown): Promise<void> => {
     if (typeof rawInput === 'string' && rawInput.length > 0) {
-      await closeConnection(rawInput);
+      await closeSession(rawInput);
     }
   });
 

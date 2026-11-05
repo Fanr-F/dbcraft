@@ -1,12 +1,12 @@
 import Database from 'better-sqlite3';
 import type {
   ConnectionInput,
-  ConnectionOpenResult,
   ConnectionTestResult,
   QueryError,
   QueryRequest,
   QueryResponse,
   SchemaObject,
+  SessionOpenResult,
 } from '../../shared/ipc-contract';
 import type { DatabaseSession } from './DatabaseSession';
 import { MariaSession } from './mariadb/MariaSession';
@@ -16,7 +16,7 @@ import { SqliteSession } from './sqlite/SqliteSession';
 const sessions = new Map<string, DatabaseSession>();
 
 interface RunningQuery {
-  connectionId: string;
+  sessionId: string;
   session: DatabaseSession;
   canceled: boolean;
 }
@@ -55,13 +55,11 @@ function createSession(input: ConnectionInput): Promise<DatabaseSession> {
     case 'mariadb':
       return MariaSession.create(input);
     default:
-      return Promise.reject(
-        new Error('MSSQL 驱动将在后续里程碑接入。'),
-      );
+      return Promise.reject(new Error('MSSQL 驱动将在后续里程碑接入。'));
   }
 }
 
-function connectionMessage(session: DatabaseSession): string {
+function sessionMessage(session: DatabaseSession): string {
   const base = `已连接 ${session.label} ${session.serverVersion}`;
   return session.note ? `${base}（${session.note}）` : base;
 }
@@ -103,7 +101,7 @@ export async function testConnection(input: ConnectionInput): Promise<Connection
     return {
       status: 'ok',
       ok: true,
-      message: connectionMessage(session),
+      message: sessionMessage(session),
       elapsedMs: Date.now() - startedAt,
     };
   } catch (error) {
@@ -120,10 +118,10 @@ export async function testConnection(input: ConnectionInput): Promise<Connection
   }
 }
 
-export async function openConnection(
-  connectionId: string,
+export async function openSession(
+  sessionId: string,
   input: ConnectionInput,
-): Promise<ConnectionOpenResult> {
+): Promise<SessionOpenResult> {
   const startedAt = Date.now();
 
   if (input.type === 'mssql') {
@@ -134,15 +132,15 @@ export async function openConnection(
     };
   }
 
-  await closeConnection(connectionId);
+  await closeSession(sessionId);
 
   try {
     const session = await createSession(input);
-    sessions.set(connectionId, session);
+    sessions.set(sessionId, session);
 
     return {
       ok: true,
-      message: connectionMessage(session),
+      message: sessionMessage(session),
       elapsedMs: Date.now() - startedAt,
       serverVersion: session.serverVersion,
     };
@@ -167,19 +165,19 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
     };
   }
 
-  const session = sessions.get(request.connectionId);
+  const session = sessions.get(request.sessionId);
   if (!session) {
     return {
       ok: false,
       error: {
-        message: '连接未打开，请重新连接后再执行。',
+        message: '会话未打开，请重新执行或切换标签页。',
         code: 'NOT_CONNECTED',
       },
     };
   }
 
   const entry: RunningQuery = {
-    connectionId: request.connectionId,
+    sessionId: request.sessionId,
     session,
     canceled: false,
   };
@@ -188,12 +186,12 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
   try {
     const result = await session.query(request.sql);
     if (entry.canceled) {
-      return canceledResponse(request.connectionId, session);
+      return canceledResponse(request.sessionId, session);
     }
     return { ok: true, result };
   } catch (error) {
     if (entry.canceled) {
-      return canceledResponse(request.connectionId, session);
+      return canceledResponse(request.sessionId, session);
     }
     return { ok: false, error: errorDetails(error) };
   } finally {
@@ -201,9 +199,9 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
   }
 }
 
-function canceledResponse(connectionId: string, session: DatabaseSession): QueryResponse {
+function canceledResponse(sessionId: string, session: DatabaseSession): QueryResponse {
   if (session.cancelDisconnects) {
-    sessions.delete(connectionId);
+    sessions.delete(sessionId);
   }
   return {
     ok: false,
@@ -228,8 +226,8 @@ export async function cancelQuery(requestId: string): Promise<boolean> {
   }
 }
 
-export async function getSchema(connectionId: string): Promise<SchemaObject[]> {
-  const session = sessions.get(connectionId);
+export async function getSchema(sessionId: string): Promise<SchemaObject[]> {
+  const session = sessions.get(sessionId);
   if (!session) return [];
 
   try {
@@ -239,15 +237,15 @@ export async function getSchema(connectionId: string): Promise<SchemaObject[]> {
   }
 }
 
-export async function closeConnection(connectionId: string): Promise<void> {
-  const session = sessions.get(connectionId);
+export async function closeSession(sessionId: string): Promise<void> {
+  const session = sessions.get(sessionId);
   if (!session) return;
 
-  sessions.delete(connectionId);
+  sessions.delete(sessionId);
   await session.close().catch(() => undefined);
 }
 
-export async function closeAllConnections(): Promise<void> {
+export async function closeAllSessions(): Promise<void> {
   const ids = [...sessions.keys()];
-  await Promise.all(ids.map((id) => closeConnection(id)));
+  await Promise.all(ids.map((id) => closeSession(id)));
 }

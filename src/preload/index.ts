@@ -14,10 +14,11 @@ const api: DBCraftApi = {
   },
   connection: {
     test: (input: ConnectionInput) => ipcRenderer.invoke(IPC_CHANNELS.connectionTest, input),
-    open: (connectionId: string, input: ConnectionInput) =>
-      ipcRenderer.invoke(IPC_CHANNELS.connectionOpen, { connectionId, config: input }),
-    close: (connectionId: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.connectionClose, connectionId),
+  },
+  session: {
+    open: (sessionId: string, input: ConnectionInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, { sessionId, config: input }),
+    close: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.sessionClose, sessionId),
   },
   query: {
     execute: (request) => ipcRenderer.invoke(IPC_CHANNELS.queryExecute, request),

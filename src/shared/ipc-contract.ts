@@ -46,7 +46,7 @@ export interface ConnectionTestResult {
   elapsedMs: number;
 }
 
-export interface ConnectionOpenResult {
+export interface SessionOpenResult {
   ok: boolean;
   message: string;
   elapsedMs: number;
@@ -82,7 +82,7 @@ export type QueryResponse =
 
 export interface QueryRequest {
   requestId: string;
-  connectionId: string;
+  sessionId: string;
   sql: string;
 }
 
@@ -109,15 +109,17 @@ export interface DBCraftApi {
   };
   connection: {
     test: (input: ConnectionInput) => Promise<ConnectionTestResult>;
-    open: (connectionId: string, input: ConnectionInput) => Promise<ConnectionOpenResult>;
-    close: (connectionId: string) => Promise<void>;
+  };
+  session: {
+    open: (sessionId: string, input: ConnectionInput) => Promise<SessionOpenResult>;
+    close: (sessionId: string) => Promise<void>;
   };
   query: {
     execute: (request: QueryRequest) => Promise<QueryResponse>;
     cancel: (requestId: string) => Promise<boolean>;
   };
   schema: {
-    get: (connectionId: string) => Promise<SchemaObject[]>;
+    get: (sessionId: string) => Promise<SchemaObject[]>;
   };
 }
 
@@ -125,8 +127,8 @@ export const IPC_CHANNELS = {
   appGetInfo: 'app:get-info',
   dialogSelectSqliteFile: 'dialog:select-sqlite-file',
   connectionTest: 'connection:test',
-  connectionOpen: 'connection:open',
-  connectionClose: 'connection:close',
+  sessionOpen: 'session:open',
+  sessionClose: 'session:close',
   queryExecute: 'query:execute',
   queryCancel: 'query:cancel',
   schemaGet: 'schema:get',

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AppInfo, ConnectionInput, DatabaseType, SchemaObject } from '@shared/ipc-contract';
 import { ConnectionDialog } from './features/connections/ConnectionDialog';
 import { Icon } from './components/Icon';
@@ -7,11 +7,11 @@ import { StatusBar } from './components/StatusBar';
 import { Toolbar } from './components/Toolbar';
 import { Workspace } from './components/Workspace';
 import type {
-  ConnectionRuntime,
   Notice,
   QueryTab,
   RunState,
   SavedConnection,
+  SessionRuntime,
 } from './types';
 
 const INITIAL_SQL = `SELECT name, type, sql
@@ -31,6 +31,7 @@ const INITIAL_TAB: QueryTab = {
   id: 'query-1',
   title: '查询 1',
   sql: INITIAL_SQL,
+  connectionId: null,
 };
 
 const EMPTY_RUN: RunState = {
@@ -51,21 +52,20 @@ function createId(prefix: string): string {
 
 export default function App() {
   const [connections, setConnections] = useState<SavedConnection[]>([]);
-  const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null);
-  const [runtimes, setRuntimes] = useState<Record<string, ConnectionRuntime>>({});
-  const [schemas, setSchemas] = useState<Record<string, SchemaObject[]>>({});
-  const [schemaLoadingId, setSchemaLoadingId] = useState<string | null>(null);
   const [tabs, setTabs] = useState<QueryTab[]>([INITIAL_TAB]);
   const [activeTabId, setActiveTabId] = useState(INITIAL_TAB.id);
+  const [sessions, setSessions] = useState<Record<string, SessionRuntime>>({});
+  const [schemas, setSchemas] = useState<Record<string, SchemaObject[]>>({});
+  const [schemaLoadingId, setSchemaLoadingId] = useState<string | null>(null);
+  const [runs, setRuns] = useState<Record<string, RunState>>({});
+  const [runningTabs, setRunningTabs] = useState<Record<string, boolean>>({});
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [run, setRun] = useState<RunState>(EMPTY_RUN);
-  const [running, setRunning] = useState(false);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const tabCounter = useRef(2);
   const noticeTimer = useRef<number | null>(null);
-  const runningRequestId = useRef<string | null>(null);
+  const runningRequests = useRef<Record<string, string>>({});
 
   useEffect(() => {
     const api = window.dbcraft;
@@ -92,17 +92,13 @@ export default function App() {
     };
   }, []);
 
-  const activeConnection = useMemo(
-    () => connections.find((connection) => connection.id === activeConnectionId) ?? null,
-    [connections, activeConnectionId],
-  );
-
-  const activeRuntime = activeConnection ? (runtimes[activeConnection.id] ?? null) : null;
-  const activeSchema = activeConnection ? (schemas[activeConnection.id] ?? []) : [];
-  const activeSchemaLoading = activeConnection
-    ? schemaLoadingId === activeConnection.id
-    : false;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const activeConnection =
+    connections.find((connection) => connection.id === activeTab.connectionId) ?? null;
+  const activeRuntime = sessions[activeTab.id] ?? null;
+  const activeSchema = schemas[activeTab.id] ?? [];
+  const activeRun = runs[activeTab.id] ?? EMPTY_RUN;
+  const running = Boolean(runningTabs[activeTab.id]);
 
   const showNotice = (kind: Notice['kind'], text: string) => {
     setNotice({ id: Date.now(), kind, text });
@@ -112,172 +108,211 @@ export default function App() {
     noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
   };
 
-  const loadSchema = async (connectionId: string) => {
+  const loadSchema = async (sessionId: string) => {
     const api = window.dbcraft;
     if (!api) return;
 
-    setSchemaLoadingId(connectionId);
+    setSchemaLoadingId(sessionId);
     try {
-      const objects = await api.schema.get(connectionId);
-      setSchemas((current) => ({ ...current, [connectionId]: objects }));
+      const objects = await api.schema.get(sessionId);
+      setSchemas((current) => ({ ...current, [sessionId]: objects }));
     } catch (error) {
-      setSchemas((current) => ({ ...current, [connectionId]: [] }));
+      setSchemas((current) => ({ ...current, [sessionId]: [] }));
       showNotice('error', error instanceof Error ? error.message : '加载对象树失败。');
     } finally {
-      setSchemaLoadingId((current) => (current === connectionId ? null : current));
+      setSchemaLoadingId((current) => (current === sessionId ? null : current));
     }
   };
 
-  const openSavedConnection = async (connection: SavedConnection) => {
+  const closeTabSession = async (tabId: string) => {
+    const api = window.dbcraft;
+    setSessions((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
+    setSchemas((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
+
+    if (!api) return;
+    await api.session.close(tabId).catch(() => undefined);
+  };
+
+  const openTabSession = async (tab: QueryTab, input: ConnectionInput): Promise<boolean> => {
     const api = window.dbcraft;
     if (!api) {
-      setRuntimes((current) => ({
+      setSessions((current) => ({
         ...current,
-        [connection.id]: { status: 'error', message: 'IPC 未就绪' },
+        [tab.id]: { status: 'error', message: 'IPC 未就绪' },
       }));
       showNotice('error', '未检测到 Electron IPC 桥接。');
-      return;
+      return false;
     }
 
-    setRuntimes((current) => ({
+    setSessions((current) => ({
       ...current,
-      [connection.id]: { status: 'connecting' },
+      [tab.id]: { status: 'opening' },
     }));
 
     try {
-      const result = await api.connection.open(connection.id, connection.input);
+      const result = await api.session.open(tab.id, input);
       if (result.ok) {
-        setRuntimes((current) => ({
+        setSessions((current) => ({
           ...current,
-          [connection.id]: {
-            status: 'connected',
+          [tab.id]: {
+            status: 'ready',
             message: result.message,
             version: result.serverVersion,
           },
         }));
-        showNotice('info', result.message);
-        void loadSchema(connection.id);
-      } else {
-        setRuntimes((current) => ({
-          ...current,
-          [connection.id]: { status: 'error', message: result.message },
-        }));
-        showNotice('error', result.message);
+        void loadSchema(tab.id);
+        return true;
       }
+
+      setSessions((current) => ({
+        ...current,
+        [tab.id]: { status: 'error', message: result.message },
+      }));
+      showNotice('error', result.message);
+      return false;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRuntimes((current) => ({
+      setSessions((current) => ({
         ...current,
-        [connection.id]: { status: 'error', message },
+        [tab.id]: { status: 'error', message },
       }));
       showNotice('error', message);
+      return false;
     }
   };
 
-  const selectConnection = (id: string) => {
-    if (id !== activeConnectionId) {
-      setRun(EMPTY_RUN);
-    }
-    setActiveConnectionId(id);
+  const rebindActiveTab = (connectionId: string) => {
+    const connection = connections.find((item) => item.id === connectionId);
+    if (!connection) return;
 
-    const target = connections.find((connection) => connection.id === id);
-    if (!target) return;
-
-    const runtime = runtimes[id];
-    if (runtime?.status === 'connected') {
-      if (!schemas[id]) void loadSchema(id);
+    if (activeTab.connectionId === connectionId) {
+      if (sessions[activeTab.id]?.status === 'ready') return;
+      void openTabSession(activeTab, connection.input);
       return;
     }
-    if (runtime?.status === 'connecting') return;
-    void openSavedConnection(target);
+
+    const nextTab: QueryTab = { ...activeTab, connectionId };
+    setTabs((current) => current.map((tab) => (tab.id === activeTab.id ? nextTab : tab)));
+    setRuns((current) => {
+      const next = { ...current };
+      delete next[activeTab.id];
+      return next;
+    });
+
+    void (async () => {
+      await closeTabSession(activeTab.id);
+      await openTabSession(nextTab, connection.input);
+    })();
   };
 
   const runQuery = async () => {
     if (running) return;
 
+    const tab = activeTab;
+    const connection = connections.find((item) => item.id === tab.connectionId);
+    if (!connection) {
+      showNotice('error', '当前标签没有绑定连接，请先选择连接。');
+      return;
+    }
+
+    if (connection.input.type === 'mssql') {
+      showNotice('error', 'MSSQL 驱动将在后续里程碑接入。');
+      return;
+    }
+
     const api = window.dbcraft;
     if (!api) {
       showNotice('error', '未检测到 Electron IPC 桥接。');
       return;
     }
 
-    if (!activeConnection) {
-      showNotice('error', '请先新建或选择一个连接。');
-      return;
-    }
-
-    if (activeConnection.input.type === 'mssql') {
-      showNotice('error', 'MSSQL 驱动将在后续里程碑接入。');
-      return;
-    }
-
-    if (runtimes[activeConnection.id]?.status !== 'connected') {
-      showNotice('error', '连接尚未就绪，请等待连接完成或重新连接。');
-      return;
-    }
-
-    const sql = activeTab.sql.trim();
+    const sql = tab.sql.trim();
     if (!sql) {
       showNotice('error', 'SQL 不能为空。');
       return;
     }
 
-    setRunning(true);
+    let ready = sessions[tab.id]?.status === 'ready';
+    if (!ready) {
+      ready = await openTabSession(tab, connection.input);
+    }
+    if (!ready) return;
+
     const requestId = createId('query');
-    runningRequestId.current = requestId;
+    runningRequests.current[tab.id] = requestId;
+    setRunningTabs((current) => ({ ...current, [tab.id]: true }));
+
     try {
       const response = await api.query.execute({
         requestId,
-        connectionId: activeConnection.id,
+        sessionId: tab.id,
         sql,
       });
 
       if (response.ok) {
-        setRun({
-          ...response.result,
-          executedAt: Date.now(),
-          error: null,
-        });
+        setRuns((current) => ({
+          ...current,
+          [tab.id]: {
+            ...response.result,
+            executedAt: Date.now(),
+            error: null,
+          },
+        }));
         if (response.result.truncated) {
           showNotice('info', `结果超过 ${response.result.rowCount} 行，已截断。`);
         }
       } else {
-        setRun((current) => ({
+        setRuns((current) => ({
           ...current,
-          elapsedMs: 0,
-          executedAt: Date.now(),
-          error: response.error.message,
+          [tab.id]: {
+            ...(current[tab.id] ?? EMPTY_RUN),
+            elapsedMs: 0,
+            executedAt: Date.now(),
+            error: response.error.message,
+          },
         }));
         if (response.error.connectionClosed) {
-          setRuntimes((current) => ({
+          setSessions((current) => ({
             ...current,
-            [activeConnection.id]: {
-              status: 'error',
-              message: response.error.message,
-            },
+            [tab.id]: { status: 'error', message: response.error.message },
           }));
         }
         showNotice('error', response.error.message);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRun((current) => ({
+      setRuns((current) => ({
         ...current,
-        elapsedMs: 0,
-        executedAt: Date.now(),
-        error: message,
+        [tab.id]: {
+          ...(current[tab.id] ?? EMPTY_RUN),
+          elapsedMs: 0,
+          executedAt: Date.now(),
+          error: message,
+        },
       }));
       showNotice('error', message);
     } finally {
-      if (runningRequestId.current === requestId) {
-        runningRequestId.current = null;
+      if (runningRequests.current[tab.id] === requestId) {
+        delete runningRequests.current[tab.id];
       }
-      setRunning(false);
+      setRunningTabs((current) => {
+        const next = { ...current };
+        delete next[tab.id];
+        return next;
+      });
     }
   };
 
   const cancelQuery = async () => {
-    const requestId = runningRequestId.current;
+    const requestId = runningRequests.current[activeTab.id];
     if (!requestId) return;
 
     const api = window.dbcraft;
@@ -293,13 +328,22 @@ export default function App() {
   const addTab = () => {
     const number = tabCounter.current;
     tabCounter.current += 1;
+
+    const connection =
+      connections.find((item) => item.id === activeTab.connectionId) ?? null;
     const tab: QueryTab = {
       id: `query-${number}`,
       title: `查询 ${number}`,
-      sql: 'SELECT * FROM sqlite_master LIMIT 100;',
+      sql: connection ? DEFAULT_SQL[connection.input.type] : 'SELECT 1;',
+      connectionId: connection?.id ?? null,
     };
+
     setTabs((current) => [...current, tab]);
     setActiveTabId(tab.id);
+
+    if (connection) {
+      void openTabSession(tab, connection.input);
+    }
   };
 
   const closeTab = (id: string) => {
@@ -310,6 +354,12 @@ export default function App() {
 
     const next = tabs.filter((tab) => tab.id !== id);
     setTabs(next);
+    void closeTabSession(id);
+    setRuns((current) => {
+      const copy = { ...current };
+      delete copy[id];
+      return copy;
+    });
 
     if (activeTabId === id) {
       const fallback = next[Math.max(0, index - 1)] ?? next[0];
@@ -324,13 +374,12 @@ export default function App() {
   };
 
   const refreshSchema = () => {
-    if (activeConnection) {
-      void loadSchema(activeConnection.id);
+    if (sessions[activeTab.id]?.status === 'ready') {
+      void loadSchema(activeTab.id);
     }
   };
 
   const openTable = (name: string) => {
-    if (!activeConnection) return;
     const quoted = `"${name.replace(/"/g, '""')}"`;
     updateSql(`SELECT * FROM ${quoted} LIMIT 100;`);
     showNotice('info', `已填入 ${name} 查询，按 Ctrl+Enter 执行。`);
@@ -339,34 +388,43 @@ export default function App() {
   const saveConnection = (input: ConnectionInput) => {
     const connection: SavedConnection = { id: createId('conn'), input };
     setConnections((current) => [...current, connection]);
-    setActiveConnectionId(connection.id);
-    setRun(EMPTY_RUN);
     setDialogOpen(false);
-    setTabs((current) =>
-      current.map((tab) =>
-        tab.id === activeTabId ? { ...tab, sql: DEFAULT_SQL[input.type] } : tab,
-      ),
-    );
-    void openSavedConnection(connection);
+
+    const nextTab: QueryTab = {
+      ...activeTab,
+      connectionId: connection.id,
+      sql: DEFAULT_SQL[input.type],
+    };
+    setTabs((current) => current.map((tab) => (tab.id === activeTab.id ? nextTab : tab)));
+    setRuns((current) => {
+      const next = { ...current };
+      delete next[activeTab.id];
+      return next;
+    });
+
+    void (async () => {
+      await closeTabSession(activeTab.id);
+      await openTabSession(nextTab, input);
+    })();
   };
 
   return (
     <main className="app-shell" data-testid="app-shell">
       <Toolbar
         connections={connections}
-        activeConnectionId={activeConnectionId}
-        onSelectConnection={selectConnection}
+        activeConnectionId={activeTab.connectionId}
+        onSelectConnection={rebindActiveTab}
         onNewConnection={() => setDialogOpen(true)}
       />
 
       <div className="app-body">
         <Sidebar
           connections={connections}
-          activeConnectionId={activeConnectionId}
+          activeConnectionId={activeTab.connectionId}
           activeConnection={activeConnection}
           schemaObjects={activeSchema}
-          schemaLoading={activeSchemaLoading}
-          onSelectConnection={selectConnection}
+          schemaLoading={schemaLoadingId === activeTab.id}
+          onSelectConnection={rebindActiveTab}
           onNewConnection={() => setDialogOpen(true)}
           onRefreshSchema={refreshSchema}
           onOpenTable={openTable}
@@ -375,10 +433,10 @@ export default function App() {
         <Workspace
           tabs={tabs}
           activeTabId={activeTabId}
-          run={run}
+          run={activeRun}
           running={running}
           connectionType={activeConnection?.input.type ?? null}
-          connectionRuntime={activeRuntime}
+          sessionRuntime={activeRuntime}
           onSelectTab={setActiveTabId}
           onCloseTab={closeTab}
           onAddTab={addTab}
@@ -390,8 +448,8 @@ export default function App() {
 
       <StatusBar
         activeConnection={activeConnection}
-        connectionRuntime={activeRuntime}
-        run={run}
+        sessionRuntime={activeRuntime}
+        run={activeRun}
         running={running}
         appInfo={appInfo}
       />

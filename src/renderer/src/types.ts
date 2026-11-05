@@ -9,6 +9,7 @@ export interface QueryTab {
   id: string;
   title: string;
   sql: string;
+  connectionId: string | null;
 }
 
 export interface RunState {
@@ -23,10 +24,10 @@ export interface RunState {
   error: string | null;
 }
 
-export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
+export type SessionStatus = 'idle' | 'opening' | 'ready' | 'error';
 
-export interface ConnectionRuntime {
-  status: ConnectionStatus;
+export interface SessionRuntime {
+  status: SessionStatus;
   message?: string;
   version?: string;
 }

@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  停止 setup.ps1 启动的 MySQL / MariaDB 便携版实例。
+  Stop the portable MySQL / MariaDB instances started by setup.ps1.
 #>
 param(
   [string]$BaseDir = (Join-Path $env:TEMP 'dbcraft-mysql-auth'),
@@ -35,7 +35,7 @@ if ($RemoveData) {
   }
 }
 
-# 启动器进程可能先退出，真正的 mysqld/mariadbd 仍在监听端口；按可执行文件路径兜底清理。
+# The launcher may exit while mysqld/mariadbd keeps listening. Clean up by path.
 Get-CimInstance Win32_Process |
   Where-Object {
     $_.ExecutablePath -and $_.ExecutablePath.StartsWith($BaseDir, [System.StringComparison]::OrdinalIgnoreCase)
@@ -45,7 +45,7 @@ Get-CimInstance Win32_Process |
     Write-Host "stopped leftover $($_.Name) (pid $($_.ProcessId))"
   }
 
-# ExecutablePath 有时不可读，再按监听端口兜底。
+# ExecutablePath can be unreadable; fall back to listening ports.
 foreach ($port in @(3307, 3308)) {
   $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
     Select-Object -First 1

@@ -1,5 +1,5 @@
 import type { AppInfo, DatabaseType } from '@shared/ipc-contract';
-import type { ConnectionRuntime, RunState, SavedConnection } from '../types';
+import type { RunState, SavedConnection, SessionRuntime } from '../types';
 
 const DIALECT_LABELS: Record<DatabaseType, string> = {
   sqlite: 'SQLite',
@@ -11,7 +11,7 @@ const DIALECT_LABELS: Record<DatabaseType, string> = {
 
 interface StatusBarProps {
   activeConnection: SavedConnection | null;
-  connectionRuntime: ConnectionRuntime | null;
+  sessionRuntime: SessionRuntime | null;
   run: RunState;
   running: boolean;
   appInfo: AppInfo | null;
@@ -19,23 +19,23 @@ interface StatusBarProps {
 
 export function StatusBar({
   activeConnection,
-  connectionRuntime,
+  sessionRuntime,
   run,
   running,
   appInfo,
 }: StatusBarProps) {
-  const online = connectionRuntime?.status === 'connected';
+  const online = sessionRuntime?.status === 'ready';
 
   return (
     <footer className="statusbar">
       <span className={`status-dot ${online ? 'is-online' : ''}`} />
       <span>{activeConnection ? activeConnection.input.name : '未连接'}</span>
 
-      {connectionRuntime?.status === 'connecting' && <span className="status-warn">连接中…</span>}
-      {connectionRuntime?.status === 'error' && <span className="status-error">连接失败</span>}
+      {sessionRuntime?.status === 'opening' && <span className="status-warn">打开会话…</span>}
+      {sessionRuntime?.status === 'error' && <span className="status-error">会话失败</span>}
       {online && activeConnection && (
         <span className="status-strong">
-          {DIALECT_LABELS[activeConnection.input.type]} {connectionRuntime.version ?? ''}
+          {DIALECT_LABELS[activeConnection.input.type]} {sessionRuntime.version ?? ''}
         </span>
       )}
 
@@ -44,7 +44,7 @@ export function StatusBar({
       <span>{run.executedAt && !run.error ? `${run.elapsedMs} ms` : ''}</span>
       {run.truncated && <span className="status-warn">已截断</span>}
       <span className="status-sep" />
-      <span>单会话</span>
+      <span>标签会话</span>
 
       <span className="status-spacer" />
       <span>{appInfo ? `v${appInfo.version} · Electron ${appInfo.electron}` : 'DBCraft'}</span>

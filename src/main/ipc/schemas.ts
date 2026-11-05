@@ -39,14 +39,14 @@ export const connectionInputSchema: z.ZodType<ConnectionInput> = z.discriminated
   mssqlSchema,
 ]);
 
-export const connectionOpenSchema = z.object({
-  connectionId: z.string().min(1).max(128),
+export const sessionOpenSchema = z.object({
+  sessionId: z.string().min(1).max(128),
   config: connectionInputSchema,
 });
 
 export const queryExecuteSchema = z.object({
   requestId: z.string().min(1).max(128),
-  connectionId: z.string().min(1).max(128),
+  sessionId: z.string().min(1).max(128),
   sql: z.string().trim().min(1).max(1_000_000),
 });
 

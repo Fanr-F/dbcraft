@@ -128,6 +128,61 @@ try {
     { timeout: 15000 },
   );
 
+  // 标签页 = 独立会话：标签 1 的长查询不应阻塞标签 2。
+  await page.locator('.tab-add').click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('.tab').length === 2,
+    null,
+    { timeout: 5000 },
+  );
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
+    null,
+    { timeout: 15000 },
+  );
+
+  await page.locator('.sql-editor').fill('SELECT 2 AS ok;');
+  await page.getByRole('button', { name: '执行' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
+    null,
+    { timeout: 10000 },
+  );
+
+  await page.locator('.tab', { hasText: '查询 1' }).click();
+  await page.locator('.sql-editor').fill(
+    'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
+  );
+  await page.getByRole('button', { name: '执行' }).click();
+  await page.waitForTimeout(300);
+
+  await page.locator('.tab', { hasText: '查询 2' }).click();
+  const secondStarted = Date.now();
+  await page.locator('.sql-editor').fill('SELECT 3 AS ok;');
+  await page.getByRole('button', { name: '执行' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('执行中'),
+    null,
+    { timeout: 3000 },
+  );
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
+    null,
+    { timeout: 3000 },
+  );
+  const secondElapsed = Date.now() - secondStarted;
+  assert(secondElapsed < 3000, `tab 2 was blocked by tab 1 (${secondElapsed}ms)`);
+  console.log('[e2e:sqlite] independent session query ms:', secondElapsed);
+
+  await page.locator('.tab', { hasText: '查询 2' }).click();
+  await page.locator('.sql-editor').fill('SELECT 4 AS ok;');
+  await page.getByRole('button', { name: '执行' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
+    null,
+    { timeout: 10000 },
+  );
+
   await page.screenshot({ path: screenshotPath });
   console.log('[e2e:sqlite] passed');
   console.log('[e2e:sqlite]', await statusText(page));

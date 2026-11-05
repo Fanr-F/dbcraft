@@ -1,5 +1,5 @@
 import type { DatabaseType } from '@shared/ipc-contract';
-import type { ConnectionRuntime, QueryTab, RunState } from '../types';
+import type { QueryTab, RunState, SessionRuntime } from '../types';
 import { SqlEditor } from '../features/editor/SqlEditor';
 import { ResultGrid } from '../features/grid/ResultGrid';
 import { Icon } from './Icon';
@@ -13,14 +13,14 @@ const DIALECT_LABELS: Record<DatabaseType, string> = {
 };
 
 function runtimeBadge(
-  runtime: ConnectionRuntime | null,
+  runtime: SessionRuntime | null,
   connectionType: DatabaseType | null,
 ): { text: string; tone: string } {
-  if (!runtime || runtime.status === 'idle') return { text: '未连接', tone: 'badge-warn' };
-  if (runtime.status === 'connecting') return { text: '连接中…', tone: 'badge-warn' };
-  if (runtime.status === 'error') return { text: '连接失败', tone: 'badge-danger' };
+  if (!runtime || runtime.status === 'idle') return { text: '无会话', tone: 'badge-warn' };
+  if (runtime.status === 'opening') return { text: '打开会话…', tone: 'badge-warn' };
+  if (runtime.status === 'error') return { text: '会话失败', tone: 'badge-danger' };
   return {
-    text: `${connectionType ? DIALECT_LABELS[connectionType] : 'SQL'} 实时`,
+    text: `${connectionType ? DIALECT_LABELS[connectionType] : 'SQL'} 会话`,
     tone: 'badge-ok',
   };
 }
@@ -31,7 +31,7 @@ interface WorkspaceProps {
   run: RunState;
   running: boolean;
   connectionType: DatabaseType | null;
-  connectionRuntime: ConnectionRuntime | null;
+  sessionRuntime: SessionRuntime | null;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onAddTab: () => void;
@@ -46,7 +46,7 @@ export function Workspace({
   run,
   running,
   connectionType,
-  connectionRuntime,
+  sessionRuntime,
   onSelectTab,
   onCloseTab,
   onAddTab,
@@ -55,8 +55,8 @@ export function Workspace({
   onCancel,
 }: WorkspaceProps) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
-  const ready = connectionRuntime?.status === 'connected';
-  const badge = runtimeBadge(connectionRuntime, connectionType);
+  const ready = sessionRuntime?.status === 'ready';
+  const badge = runtimeBadge(sessionRuntime, connectionType);
 
   return (
     <section className="workspace">
