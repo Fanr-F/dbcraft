@@ -1,5 +1,5 @@
 import { DATABASE_TYPE_LABELS, ENVIRONMENT_LABELS } from '@shared/ipc-contract';
-import type { ConnectionInput } from '@shared/ipc-contract';
+import type { ConnectionInput, SchemaObject } from '@shared/ipc-contract';
 import type { SavedConnection } from '../types';
 import { Icon } from './Icon';
 
@@ -7,8 +7,12 @@ interface SidebarProps {
   connections: SavedConnection[];
   activeConnectionId: string | null;
   activeConnection: SavedConnection | null;
+  schemaObjects: SchemaObject[];
+  schemaLoading: boolean;
   onSelectConnection: (id: string) => void;
   onNewConnection: () => void;
+  onRefreshSchema: () => void;
+  onOpenTable: (name: string) => void;
 }
 
 function fileName(filePath: string): string {
@@ -24,9 +28,16 @@ export function Sidebar({
   connections,
   activeConnectionId,
   activeConnection,
+  schemaObjects,
+  schemaLoading,
   onSelectConnection,
   onNewConnection,
+  onRefreshSchema,
+  onOpenTable,
 }: SidebarProps) {
+  const tables = schemaObjects.filter((object) => object.type === 'table');
+  const views = schemaObjects.filter((object) => object.type === 'view');
+
   return (
     <aside className="sidebar">
       <div className="sidebar-heading">
@@ -71,7 +82,13 @@ export function Sidebar({
       <div className="sidebar-section">
         <div className="sidebar-heading">
           <span>对象</span>
-          <button type="button" className="icon-btn" title="刷新（M1 接入）" disabled>
+          <button
+            type="button"
+            className="icon-btn"
+            title="刷新对象"
+            onClick={onRefreshSchema}
+            disabled={!activeConnection || schemaLoading}
+          >
             <Icon name="refresh" size={14} />
           </button>
         </div>
@@ -82,20 +99,56 @@ export function Sidebar({
               <Icon name="database" size={15} />
               <span>{summarize(activeConnection.input)}</span>
             </div>
-            <div className="tree-group">
-              <div className="tree-row tree-muted">
-                <Icon name="folder" size={14} />
-                <span>表</span>
-              </div>
-              <div className="tree-row tree-muted tree-child">
-                <Icon name="table" size={14} />
-                <span>M1 接入元数据</span>
-              </div>
-              <div className="tree-row tree-muted">
-                <Icon name="folder" size={14} />
-                <span>视图</span>
-              </div>
-            </div>
+
+            {schemaLoading ? (
+              <div className="tree-empty">正在加载对象…</div>
+            ) : (
+              <>
+                <div className="tree-row tree-muted">
+                  <Icon name="folder" size={14} />
+                  <span>表</span>
+                  <span className="tree-count">{tables.length}</span>
+                </div>
+                {tables.length === 0 ? (
+                  <div className="tree-empty tree-child">无表</div>
+                ) : (
+                  tables.map((table) => (
+                    <button
+                      key={`table-${table.name}`}
+                      type="button"
+                      className="tree-row tree-item tree-child"
+                      title={`查询 ${table.name}`}
+                      onClick={() => onOpenTable(table.name)}
+                    >
+                      <Icon name="table" size={14} />
+                      <span>{table.name}</span>
+                    </button>
+                  ))
+                )}
+
+                <div className="tree-row tree-muted">
+                  <Icon name="folder" size={14} />
+                  <span>视图</span>
+                  <span className="tree-count">{views.length}</span>
+                </div>
+                {views.length === 0 ? (
+                  <div className="tree-empty tree-child">无视图</div>
+                ) : (
+                  views.map((view) => (
+                    <button
+                      key={`view-${view.name}`}
+                      type="button"
+                      className="tree-row tree-item tree-child"
+                      title={`查询 ${view.name}`}
+                      onClick={() => onOpenTable(view.name)}
+                    >
+                      <Icon name="table" size={14} />
+                      <span>{view.name}</span>
+                    </button>
+                  ))
+                )}
+              </>
+            )}
           </div>
         ) : (
           <div className="sidebar-empty compact">
@@ -105,7 +158,7 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-footer">
-        <span className="muted">M0 · 界面与 IPC 原型</span>
+        <span className="muted">M1 · SQLite 实时查询</span>
       </div>
     </aside>
   );

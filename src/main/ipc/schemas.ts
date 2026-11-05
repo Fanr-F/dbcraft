@@ -39,6 +39,16 @@ export const connectionInputSchema: z.ZodType<ConnectionInput> = z.discriminated
   mssqlSchema,
 ]);
 
+export const connectionOpenSchema = z.object({
+  connectionId: z.string().min(1).max(128),
+  config: connectionInputSchema,
+});
+
+export const queryExecuteSchema = z.object({
+  connectionId: z.string().min(1).max(128),
+  sql: z.string().trim().min(1).max(1_000_000),
+});
+
 export function formatConnectionIssues(error: z.ZodError): string {
   return error.issues
     .map((issue) => {

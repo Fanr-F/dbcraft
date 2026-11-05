@@ -2,15 +2,16 @@
 
 轻量级 Electron 数据库客户端，支持 SQLite、MySQL、Percona、MariaDB、MSSQL。
 
-当前处于 **M0 原型**：窗口骨架、typed IPC、连接表单、结果网格原型。查询执行与真实驱动将在 M1 接入。
+当前处于 **M1 开发中**：SQLite 已接入真实连接、查询和对象树；其余数据库类型仍为连接表单占位。
 
 ## 技术栈
 
-- Electron + TypeScript
+- Electron 45 + TypeScript
 - React 18 + Vite
 - RevoGrid Core 数据网格
 - electron-vite 开发/构建，electron-builder 打包
 - zod 校验 IPC 输入
+- better-sqlite3 13（N-API）+ Worker 执行 SQLite 查询
 
 ## 开发
 
@@ -28,12 +29,21 @@ $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
 node node_modules/electron/install.js
 ```
 
+生成演示数据库：
+
+```bash
+npm run demo:db   # samples/demo.db，500 用户 + 1,500 订单
+```
+
+然后在应用里新建 SQLite 连接，选择 `samples/demo.db`。
+
 ## 构建与检查
 
 ```bash
 npm run typecheck   # TypeScript 检查
-npm run build       # 构建 main / preload / renderer
+npm run build       # 构建 main / preload / renderer / sqlite worker
 npm run smoke       # 构建后启动 Electron，检查窗口与 preload 桥接
+npm run e2e:sqlite  # 构建后跑 SQLite 真实链路 E2E（连接、对象树、查询、错误）
 npm run pack        # 生成未打包目录（release/）
 npm run dist        # 生成 Windows NSIS 安装包
 ```
@@ -42,11 +52,13 @@ npm run dist        # 生成 Windows NSIS 安装包
 
 ```text
 src/
-├─ main/                 # Electron 主进程、窗口、IPC
-│  ├─ index.ts
-│  └─ ipc/
-├─ preload/              # contextBridge，暴露 window.dbcraft
-├─ renderer/             # React 界面
+├─ main/
+│  ├─ index.ts                 # 窗口、安全默认、生命周期
+│  ├─ ipc/                     # IPC 路由与 zod schema
+│  ├─ services/sqlite/         # 连接管理、Worker 会话
+│  └─ workers/                 # sqlite-worker
+├─ preload/                    # contextBridge，暴露 window.dbcraft
+├─ renderer/                   # React 界面
 │  ├─ index.html
 │  └─ src/
 │     ├─ components/
@@ -54,8 +66,8 @@ src/
 │     │  ├─ connections/
 │     │  ├─ editor/
 │     │  └─ grid/
-│     └─ data/
-└─ shared/               # IPC 契约与共享类型
+│     └─ types.ts
+└─ shared/                     # IPC 契约与共享类型
 ```
 
 ## 安全默认
@@ -67,22 +79,25 @@ src/
 - 生产环境注入 CSP
 - preload 只暴露白名单 IPC 方法
 
-## M0 边界
+## 当前进度
 
-已完成/演示：
+已完成：
 
-- 主窗口与暗色界面骨架
-- 对象树、标签页、SQL 编辑区、结果区、状态栏
+- 主窗口、暗色界面、标签页、SQL 编辑区、结果区、状态栏
 - 五种数据库类型的连接表单
-- `app.get-info`、`dialog.select-sqlite-file`、`connection.test` 三个 typed IPC 通道
-- 500 行模拟结果集，RevoGrid 区域选择与复制
+- SQLite 连接测试、打开、关闭
+- SQLite 单语句查询（SELECT / PRAGMA / UPDATE / INSERT / DELETE / DDL）
+- 查询结果动态列、行数、耗时、影响行数、错误展示
+- `sqlite_master` 对象树：表/视图列表、刷新、点击填入查询
+- SQLite 查询在独立 Worker 中执行，不阻塞主进程
+- 结果最多返回 2,000 行，超出标记截断
 
 尚未接入：
 
-- 真实数据库驱动与连接测试
-- SQL 执行/取消、结果流
-- 元数据、对象树真实数据
-- 历史、设置、导出、数据编辑、DDL、Agent
+- MySQL / Percona / MariaDB / MSSQL 真实驱动
+- 多语句执行、查询取消、事务状态跟踪
+- 查询历史、设置、导出、数据编辑、DDL、Agent
+- 10 万行性能验证、打包后 asar Worker 冒烟测试
 
 连接信息当前只保存在渲染进程内存中，密码不写盘。
 

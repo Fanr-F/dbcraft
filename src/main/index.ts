@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, Menu, session } from 'electron';
 import { registerIpcHandlers } from './ipc/router';
+import { closeAllConnections } from './services/sqlite/ConnectionManager';
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL']);
 const isSmoke = process.env['DBCRAFT_SMOKE'] === '1';
@@ -128,6 +129,10 @@ if (!app.requestSingleInstanceLock()) {
         mainWindow = createWindow();
       }
     });
+  });
+
+  app.on('before-quit', () => {
+    void closeAllConnections();
   });
 
   app.on('window-all-closed', () => {

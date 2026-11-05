@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 对应 PRD | `doc/PRD.md` v0.16 |
-| 文档版本 | v0.6（评审修订稿） |
+| 文档版本 | v0.7（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
 | 目标平台 | Windows 10（1809+）/ 11，x64 |
@@ -20,6 +20,7 @@
 | v0.4 | 2026-11-05 | 回写 RevoGrid Core Spike 结果：25,000×30 虚拟滚动、区域选择/TSV 复制/粘贴、自定义编辑器、过滤面板、右键菜单通过；记录 pinned 列映射、单格复制、过滤默认操作符等待办 |
 | v0.5 | 2026-11-05 | 回写 MySQL 系认证 Spike（S9）：MySQL 8.0.44 `caching_sha2_password`、MariaDB 11.4.13 `ed25519`/`mysql_native_password`、错误码映射与 TLS 行为 16 项通过；修正 `allowPublicKeyRetrieval` 文档错误；注明 unix_socket 在 Windows 不适用、Percona 需真实实例复核 |
 | v0.6 | 2026-11-05 | M0 主工程脚手架落地：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；安全默认、typed IPC、五类连接表单、模拟结果网格与 smoke 检查；构建配置改为 `electron.vite.config.ts` |
+| v0.7 | 2026-11-05 | SQLite 首条真实链路：better-sqlite3 13 N-API + Worker；连接测试/打开/关闭、单语句查询、`sqlite_master` 对象树；500 行示例库验证；记录多语句、取消、10 万行与打包后 Worker 等待办 |
 
 ---
 
@@ -898,7 +899,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 - docker-compose：MySQL 5.7/8.0/8.4、Percona 8.0/8.4、MariaDB 10.3/10.6/11.x、MSSQL 2017/2019/2022；EOL 版本仅做冒烟；
 - SQLite 固定 fixture 文件；
 - 覆盖 MySQL/Percona/MariaDB/MSSQL 连接与认证、分页、事务提交、DDL、Agent 查询；
-- Windows CI 额外验证 better-sqlite3 ABI。
+- Windows CI 额外验证 better-sqlite3 N-API 预编译、打包后 Worker 路径与 native 模块解包。
 
 ### 15.3 E2E（Playwright for Electron）
 
@@ -907,6 +908,8 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 - RevoGrid 区域选择 → 复制 TSV → 粘贴回网格；
 - DDL 预览 → 执行；
 - Agent 列表 → 启停 → 刷新。
+
+已落地：`npm run e2e:sqlite` 覆盖 SQLite 连接测试、对象树、查询、写入、错误与多语句拒绝。
 
 ### 15.4 性能基线
 
@@ -920,8 +923,8 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 - Vite + electron-builder；
 - Windows NSIS 安装包；
-- better-sqlite3 使用 prebuild-install + `@electron/rebuild`，CI 按 Electron ABI 重编译；
-- `asarUnpack: ["**/*.node"]`；Worker 入口文件随构建产物打包；对打包后的 exe 做 smoke test；
+- better-sqlite3 13 使用 N-API 预编译（`prebuilds/win32-x64.node`），Electron 45 实测直接加载，无需 `@electron/rebuild` 或 node-gyp；
+- `asarUnpack: ["out/main/sqlite-worker.js", "**/*.node"]`；Worker 入口文件随构建产物打包，运行时把 `app.asar` 替换为 `app.asar.unpacked`；对打包后的 exe 做 smoke test；
 - 固定 Electron 大版本，记录 Node/ABI；
 - 代码签名证书在 GA 前申请；
 - v1.0 不内置静默自动更新，仅提供版本检查/下载链接；
@@ -934,7 +937,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 | # | 风险 | Spike 验收标准 |
 |---|---|---|
-| S1 | better-sqlite3 + Electron ABI | Windows 上安装、查询 10 万行、Worker 中不阻塞 UI |
+| S1 | better-sqlite3 + Electron ABI | 🟡 部分通过（2026-11-05）：better-sqlite3 13.0.3 N-API 预编译在 Electron 45 直接加载，Worker 内查询/写入/对象树已跑通；10 万行性能、取消、打包后 asar Worker 待验证 |
 | S2 | MSSQL tedious 连接 | SQL 认证 + `encrypt`/`trustServerCertificate` 连接成功；`msdb` 查询可用 |
 | S3 | FTS5 trigram 中文/子串 | 1 万/5 万条下搜索 <100ms/<500ms；`LIKE` 回退可用 |
 | S4 | RevoGrid Core 集成 | ✅ 通过（2026-11-05，`spikes/revogrid/`）：25,000×30 虚拟滚动、区域选择/TSV 复制/粘贴、枚举/布尔/日期/大文本编辑器、过滤面板、自研右键菜单、滚动到行均通过。待办：pinned 列映射、单格复制路径、过滤默认操作符、IME/无障碍人工验证；多区域为 Pro，v1.0 用单区域 |
@@ -1013,6 +1016,34 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 结论：**S9 对 MySQL 与 MariaDB 通过**；Percona 视为同一认证路径、待真实实例复核；`unix_socket` 标记为 Windows 不适用。
 
+### 17.3 SQLite 真实查询链路（S1 部分）
+
+- 环境：Windows + Electron 45.2.3 + better-sqlite3 13.0.3（N-API 预编译）+ worker_threads
+- 代码：`src/main/services/sqlite/`、`src/main/workers/sqlite-worker.ts`
+- 能力：连接测试、打开、关闭；单语句查询；`sqlite_master` 对象树；结果列/行/耗时/影响行数/截断标记
+- 验证数据：`npm run demo:db` 生成 500 用户、1,500 订单、2 表 + 1 视图
+- 自动化：`npm run e2e:sqlite` 覆盖连接、对象树、SELECT、UPDATE、错误与多语句拒绝
+
+| 验证项 | 结果 |
+|---|---|
+| Electron 45 加载 better-sqlite3 13 | 通过（无需 rebuild） |
+| 连接测试 | `SQLite 3.53.4 · 文件可读`，17ms |
+| 打开连接 | 成功，状态栏显示版本 |
+| `sqlite_master` 查询 | 4 行，0–2ms |
+| `SELECT` 100 行 | 通过，2–3ms |
+| `UPDATE` | `1 行受影响` |
+| 表不存在 | `no such table: missing_table`，UI 展示错误 |
+| 多语句 | 按预期拒绝，提示一次只能执行一条 SQL |
+| 对象树 | 2 表 + 1 视图，点击填入 `SELECT * FROM "table" LIMIT 100;` |
+
+关键结论：
+
+1. **better-sqlite3 13 的 N-API 预编译可直接用于 Electron 45**，原先“必须 `@electron/rebuild`”的假设不成立；仍需在打包产物中验证 `asarUnpack` 后的 Worker 路径。
+2. Worker 按连接隔离，SQLite 同步 API 不阻塞主进程事件循环。
+3. 当前限制：单语句、最多 2,000 行、无取消、无事务状态跟踪、多语句与 10 万行性能未验证。
+
+结论：**S1 部分通过**，作为 M1 SQLite 主路径可用；打包、性能和取消能力待补测。
+
 ---
 
 ## 18. 里程碑映射
@@ -1025,7 +1056,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | M3 | DDL 生成/预览、SQLite 重建、Agent 列表/详情/启停/脚本 |
 | M4 | 性能/安全专项、签名打包、回归与发布检查 |
 
-> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、模拟结果网格与 `npm run smoke` 冒烟检查。真实驱动、SQL 执行与对象树数据仍按 M1 交付。
+> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、模拟结果网格与 `npm run smoke` 冒烟检查。M1 SQLite 主路径已接入（见 17.3）；MySQL 系/MSSQL 驱动、SQL 取消与历史仍待在 M1 后续交付。
 
 ---
 
@@ -1036,7 +1067,8 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 3. MySQL 系认证 Spike 已完成（见 17.2）；Percona 仍需真实实例复核，`unix_socket`/PAM 在 Windows 客户端不适用。
 4. mysql2 非 TLS 下无法拒绝服务端公钥获取；正式实现默认引导 TLS，并在连接表单明确标注未加密连接的风险。
 5. SQLite 连接 Worker 的数量上限与回收策略。
-6. 代码签名证书的采购时间与发布渠道。
+6. SQLite 已完成单语句查询；多语句、取消、事务状态、10 万行性能与打包后 asar Worker 路径待验证。
+7. 代码签名证书的采购时间与发布渠道。
 
 ---
 

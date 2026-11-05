@@ -426,6 +426,30 @@ button:disabled {
   padding-left: 34px;
 }
 
+.tree-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+
+.tree-item:hover {
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.tree-count {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.tree-empty {
+  padding: 4px 12px 6px 34px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
 .tree-group {
   margin-top: 3px;
 }
@@ -566,6 +590,16 @@ button:disabled {
   color: #fcd34d;
 }
 
+.badge-ok {
+  background: rgba(52, 211, 153, 0.12);
+  color: #6ee7b7;
+}
+
+.badge-danger {
+  background: rgba(248, 113, 113, 0.14);
+  color: #fca5a5;
+}
+
 .spacer {
   flex: 1;
 }
@@ -634,6 +668,39 @@ button:disabled {
   --revo-grid-primary: #0ea5e9;
 }
 
+.grid-empty {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--faint);
+}
+
+.grid-empty strong {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.grid-empty span {
+  font-size: 11px;
+}
+
+.result-error {
+  margin: 8px 10px 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 7px;
+  background: rgba(248, 113, 113, 0.08);
+  color: #fecaca;
+  font-size: 12px;
+}
+
 /* ---------- status bar ---------- */
 
 .statusbar {
@@ -674,6 +741,10 @@ button:disabled {
 
 .status-warn {
   color: var(--warn);
+}
+
+.status-error {
+  color: var(--danger);
 }
 
 .status-spacer {
@@ -920,4 +991,39 @@ button:disabled {
   margin: 12px 0 0;
   color: var(--faint);
   font-size: 11px;
+}
+
+/* ---------- toast ---------- */
+
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 38px;
+  z-index: 120;
+  display: flex;
+  max-width: 480px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: #0f172a;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+.toast-info {
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #bae6fd;
+}
+
+.toast-error {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #fecaca;
+}
+
+.toast .icon-btn {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
 }

@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppInfo, ConnectionInput } from '@shared/ipc-contract';
+import type { AppInfo, ConnectionInput, SchemaObject } from '@shared/ipc-contract';
 import { ConnectionDialog } from './features/connections/ConnectionDialog';
+import { Icon } from './components/Icon';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
 import { Toolbar } from './components/Toolbar';
 import { Workspace } from './components/Workspace';
-import { createDemoRows } from './data/mock';
-import type { QueryTab, RunState, SavedConnection } from './types';
+import type {
+  ConnectionRuntime,
+  Notice,
+  QueryTab,
+  RunState,
+  SavedConnection,
+} from './types';
 
-const DEMO_ROWS = createDemoRows(500);
-
-const INITIAL_SQL = `SELECT id, name, email, status, created_at, amount, note
-FROM demo_users
-ORDER BY id
-LIMIT 500;`;
+const INITIAL_SQL = `SELECT name, type, sql
+FROM sqlite_master
+WHERE type IN ('table', 'view')
+ORDER BY type, name;`;
 
 const INITIAL_TAB: QueryTab = {
   id: 'query-1',
@@ -21,11 +25,16 @@ const INITIAL_TAB: QueryTab = {
   sql: INITIAL_SQL,
 };
 
-const INITIAL_RUN: RunState = {
-  rows: DEMO_ROWS,
-  elapsedMs: 12,
+const EMPTY_RUN: RunState = {
+  columns: [],
+  rows: [],
+  rowCount: 0,
+  elapsedMs: 0,
+  statementType: null,
+  changes: null,
+  truncated: false,
   executedAt: null,
-  simulated: true,
+  error: null,
 };
 
 function createId(prefix: string): string {
@@ -35,15 +44,19 @@ function createId(prefix: string): string {
 export default function App() {
   const [connections, setConnections] = useState<SavedConnection[]>([]);
   const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null);
+  const [runtimes, setRuntimes] = useState<Record<string, ConnectionRuntime>>({});
+  const [schemas, setSchemas] = useState<Record<string, SchemaObject[]>>({});
+  const [schemaLoadingId, setSchemaLoadingId] = useState<string | null>(null);
   const [tabs, setTabs] = useState<QueryTab[]>([INITIAL_TAB]);
   const [activeTabId, setActiveTabId] = useState(INITIAL_TAB.id);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [run, setRun] = useState<RunState>(INITIAL_RUN);
+  const [run, setRun] = useState<RunState>(EMPTY_RUN);
   const [running, setRunning] = useState(false);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   const tabCounter = useRef(2);
-  const runTimer = useRef<number | null>(null);
+  const noticeTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const api = window.dbcraft;
@@ -64,8 +77,8 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (runTimer.current !== null) {
-        window.clearTimeout(runTimer.current);
+      if (noticeTimer.current !== null) {
+        window.clearTimeout(noticeTimer.current);
       }
     };
   }, []);
@@ -75,19 +88,176 @@ export default function App() {
     [connections, activeConnectionId],
   );
 
-  const runQuery = () => {
+  const activeRuntime = activeConnection ? (runtimes[activeConnection.id] ?? null) : null;
+  const activeSchema = activeConnection ? (schemas[activeConnection.id] ?? []) : [];
+  const activeSchemaLoading = activeConnection
+    ? schemaLoadingId === activeConnection.id
+    : false;
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+
+  const showNotice = (kind: Notice['kind'], text: string) => {
+    setNotice({ id: Date.now(), kind, text });
+    if (noticeTimer.current !== null) {
+      window.clearTimeout(noticeTimer.current);
+    }
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
+  };
+
+  const loadSchema = async (connectionId: string) => {
+    const api = window.dbcraft;
+    if (!api) return;
+
+    setSchemaLoadingId(connectionId);
+    try {
+      const objects = await api.schema.get(connectionId);
+      setSchemas((current) => ({ ...current, [connectionId]: objects }));
+    } catch (error) {
+      setSchemas((current) => ({ ...current, [connectionId]: [] }));
+      showNotice('error', error instanceof Error ? error.message : '加载对象树失败。');
+    } finally {
+      setSchemaLoadingId((current) => (current === connectionId ? null : current));
+    }
+  };
+
+  const openSavedConnection = async (connection: SavedConnection) => {    if (connection.input.type !== 'sqlite') {
+      setRuntimes((current) => ({
+        ...current,
+        [connection.id]: { status: 'idle' },
+      }));
+      showNotice('info', '当前只接入 SQLite 驱动，该数据库类型将在后续里程碑接入。');
+      return;
+    }
+
+    const api = window.dbcraft;
+    if (!api) {
+      setRuntimes((current) => ({
+        ...current,
+        [connection.id]: { status: 'error', message: 'IPC 未就绪' },
+      }));
+      showNotice('error', '未检测到 Electron IPC 桥接。');
+      return;
+    }
+
+    setRuntimes((current) => ({
+      ...current,
+      [connection.id]: { status: 'connecting' },
+    }));
+
+    try {
+      const result = await api.connection.open(connection.id, connection.input);
+      if (result.ok) {
+        setRuntimes((current) => ({
+          ...current,
+          [connection.id]: {
+            status: 'connected',
+            message: result.message,
+            version: result.serverVersion,
+          },
+        }));
+        showNotice('info', result.message);
+        void loadSchema(connection.id);
+      } else {
+        setRuntimes((current) => ({
+          ...current,
+          [connection.id]: { status: 'error', message: result.message },
+        }));
+        showNotice('error', result.message);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimes((current) => ({
+        ...current,
+        [connection.id]: { status: 'error', message },
+      }));
+      showNotice('error', message);
+    }
+  };
+
+  const selectConnection = (id: string) => {
+    if (id !== activeConnectionId) {
+      setRun(EMPTY_RUN);
+    }
+    setActiveConnectionId(id);
+
+    const target = connections.find((connection) => connection.id === id);
+    if (!target) return;
+
+    const runtime = runtimes[id];
+    if (runtime?.status === 'connected') {
+      if (!schemas[id]) void loadSchema(id);
+      return;
+    }
+    if (runtime?.status === 'connecting') return;
+    void openSavedConnection(target);
+  };
+
+  const runQuery = async () => {
     if (running) return;
+
+    const api = window.dbcraft;
+    if (!api) {
+      showNotice('error', '未检测到 Electron IPC 桥接。');
+      return;
+    }
+
+    if (!activeConnection) {
+      showNotice('error', '请先新建或选择一个连接。');
+      return;
+    }
+
+    if (activeConnection.input.type !== 'sqlite') {
+      showNotice('error', '当前只接入 SQLite 驱动，该数据库类型尚不能执行查询。');
+      return;
+    }
+
+    if (runtimes[activeConnection.id]?.status !== 'connected') {
+      showNotice('error', '连接尚未就绪，请等待连接完成或重新连接。');
+      return;
+    }
+
+    const sql = activeTab.sql.trim();
+    if (!sql) {
+      showNotice('error', 'SQL 不能为空。');
+      return;
+    }
+
     setRunning(true);
-    runTimer.current = window.setTimeout(() => {
-      setRun({
-        rows: DEMO_ROWS,
-        elapsedMs: 180 + Math.round(Math.random() * 320),
-        executedAt: Date.now(),
-        simulated: true,
+    try {
+      const response = await api.query.execute({
+        connectionId: activeConnection.id,
+        sql,
       });
+
+      if (response.ok) {
+        setRun({
+          ...response.result,
+          executedAt: Date.now(),
+          error: null,
+        });
+        if (response.result.truncated) {
+          showNotice('info', `结果超过 ${response.result.rowCount} 行，已截断。`);
+        }
+      } else {
+        setRun((current) => ({
+          ...current,
+          elapsedMs: 0,
+          executedAt: Date.now(),
+          error: response.error.message,
+        }));
+        showNotice('error', response.error.message);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRun((current) => ({
+        ...current,
+        elapsedMs: 0,
+        executedAt: Date.now(),
+        error: message,
+      }));
+      showNotice('error', message);
+    } finally {
       setRunning(false);
-      runTimer.current = null;
-    }, 420);
+    }
   };
 
   const addTab = () => {
@@ -96,7 +266,7 @@ export default function App() {
     const tab: QueryTab = {
       id: `query-${number}`,
       title: `查询 ${number}`,
-      sql: 'SELECT * FROM demo_users LIMIT 100;',
+      sql: 'SELECT * FROM sqlite_master LIMIT 100;',
     };
     setTabs((current) => [...current, tab]);
     setActiveTabId(tab.id);
@@ -123,11 +293,26 @@ export default function App() {
     );
   };
 
+  const refreshSchema = () => {
+    if (activeConnection) {
+      void loadSchema(activeConnection.id);
+    }
+  };
+
+  const openTable = (name: string) => {
+    if (!activeConnection) return;
+    const quoted = `"${name.replace(/"/g, '""')}"`;
+    updateSql(`SELECT * FROM ${quoted} LIMIT 100;`);
+    showNotice('info', `已填入 ${name} 查询，按 Ctrl+Enter 执行。`);
+  };
+
   const saveConnection = (input: ConnectionInput) => {
     const connection: SavedConnection = { id: createId('conn'), input };
     setConnections((current) => [...current, connection]);
     setActiveConnectionId(connection.id);
+    setRun(EMPTY_RUN);
     setDialogOpen(false);
+    void openSavedConnection(connection);
   };
 
   return (
@@ -135,7 +320,7 @@ export default function App() {
       <Toolbar
         connections={connections}
         activeConnectionId={activeConnectionId}
-        onSelectConnection={setActiveConnectionId}
+        onSelectConnection={selectConnection}
         onNewConnection={() => setDialogOpen(true)}
       />
 
@@ -144,8 +329,12 @@ export default function App() {
           connections={connections}
           activeConnectionId={activeConnectionId}
           activeConnection={activeConnection}
-          onSelectConnection={setActiveConnectionId}
+          schemaObjects={activeSchema}
+          schemaLoading={activeSchemaLoading}
+          onSelectConnection={selectConnection}
           onNewConnection={() => setDialogOpen(true)}
+          onRefreshSchema={refreshSchema}
+          onOpenTable={openTable}
         />
 
         <Workspace
@@ -154,16 +343,18 @@ export default function App() {
           run={run}
           running={running}
           connectionType={activeConnection?.input.type ?? null}
+          connectionRuntime={activeRuntime}
           onSelectTab={setActiveTabId}
           onCloseTab={closeTab}
           onAddTab={addTab}
           onSqlChange={updateSql}
-          onRun={runQuery}
+          onRun={() => void runQuery()}
         />
       </div>
 
       <StatusBar
         activeConnection={activeConnection}
+        connectionRuntime={activeRuntime}
         run={run}
         running={running}
         appInfo={appInfo}
@@ -171,6 +362,20 @@ export default function App() {
 
       {dialogOpen && (
         <ConnectionDialog onClose={() => setDialogOpen(false)} onSave={saveConnection} />
+      )}
+
+      {notice && (
+        <div className={`toast toast-${notice.kind}`} role="status">
+          <span>{notice.text}</span>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="关闭提示"
+            onClick={() => setNotice(null)}
+          >
+            <Icon name="close" size={13} />
+          </button>
+        </div>
       )}
     </main>
   );

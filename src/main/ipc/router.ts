@@ -2,12 +2,27 @@ import { app, dialog, ipcMain } from 'electron';
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type ConnectionOpenResult,
   type ConnectionTestResult,
+  type QueryResponse,
 } from '../../shared/ipc-contract';
-import { connectionInputSchema, formatConnectionIssues } from './schemas';
+import {
+  connectionInputSchema,
+  connectionOpenSchema,
+  formatConnectionIssues,
+  queryExecuteSchema,
+} from './schemas';
+import {
+  closeConnection,
+  executeQuery,
+  getSchema,
+  openConnection,
+  testSqliteFile,
+} from '../services/sqlite/ConnectionManager';
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 export function registerIpcHandlers(): void {
@@ -50,15 +65,81 @@ export function registerIpcHandlers(): void {
         };
       }
 
-      // M0 只验证 IPC 契约与表单流程，真实驱动在 M1 接入。
-      await delay(250);
+      if (parsed.data.type !== 'sqlite') {
+        return {
+          status: 'not-implemented',
+          ok: false,
+          message: '当前版本只接入 SQLite 驱动；该连接类型的真实测试将在后续里程碑接入。',
+          elapsedMs: Date.now() - startedAt,
+        };
+      }
 
-      return {
-        status: 'not-implemented',
-        ok: false,
-        message: 'M0 原型：连接测试接口已打通，真实驱动将在 M1 接入。',
-        elapsedMs: Date.now() - startedAt,
-      };
+      try {
+        const version = testSqliteFile(parsed.data.filePath);
+        return {
+          status: 'ok',
+          ok: true,
+          message: `SQLite ${version} · 文件可读`,
+          elapsedMs: Date.now() - startedAt,
+        };
+      } catch (error) {
+        return {
+          status: 'failed',
+          ok: false,
+          message: describeError(error),
+          elapsedMs: Date.now() - startedAt,
+        };
+      }
     },
   );
+
+  ipcMain.handle(
+    IPC_CHANNELS.connectionOpen,
+    async (_event, rawInput: unknown): Promise<ConnectionOpenResult> => {
+      const startedAt = Date.now();
+      const parsed = connectionOpenSchema.safeParse(rawInput);
+
+      if (!parsed.success) {
+        return {
+          ok: false,
+          message: `连接参数无效：${formatConnectionIssues(parsed.error)}`,
+          elapsedMs: Date.now() - startedAt,
+        };
+      }
+
+      return openConnection(parsed.data.connectionId, parsed.data.config);
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.connectionClose, async (_event, rawInput: unknown): Promise<void> => {
+    if (typeof rawInput === 'string' && rawInput.length > 0) {
+      await closeConnection(rawInput);
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.queryExecute,
+    async (_event, rawInput: unknown): Promise<QueryResponse> => {
+      const parsed = queryExecuteSchema.safeParse(rawInput);
+
+      if (!parsed.success) {
+        return {
+          ok: false,
+          error: {
+            message: `SQL 无效：${formatConnectionIssues(parsed.error)}`,
+            code: 'INVALID_REQUEST',
+          },
+        };
+      }
+
+      return executeQuery(parsed.data.connectionId, parsed.data.sql);
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.schemaGet, async (_event, rawInput: unknown) => {
+    if (typeof rawInput !== 'string' || rawInput.length === 0) {
+      return [];
+    }
+    return getSchema(rawInput);
+  });
 }

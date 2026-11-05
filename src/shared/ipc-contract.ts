@@ -46,6 +46,49 @@ export interface ConnectionTestResult {
   elapsedMs: number;
 }
 
+export interface ConnectionOpenResult {
+  ok: boolean;
+  message: string;
+  elapsedMs: number;
+  serverVersion?: string;
+}
+
+export type QueryCell = string | number | boolean | null;
+
+export interface QueryColumn {
+  name: string;
+  declaredType: string | null;
+}
+
+export interface QueryResult {
+  columns: QueryColumn[];
+  rows: QueryCell[][];
+  rowCount: number;
+  elapsedMs: number;
+  statementType: 'select' | 'change';
+  changes: number | null;
+  truncated: boolean;
+}
+
+export interface QueryError {
+  message: string;
+  code: string | null;
+}
+
+export type QueryResponse =
+  | { ok: true; result: QueryResult }
+  | { ok: false; error: QueryError };
+
+export interface QueryRequest {
+  connectionId: string;
+  sql: string;
+}
+
+export interface SchemaObject {
+  name: string;
+  type: 'table' | 'view';
+}
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -64,6 +107,14 @@ export interface DBCraftApi {
   };
   connection: {
     test: (input: ConnectionInput) => Promise<ConnectionTestResult>;
+    open: (connectionId: string, input: ConnectionInput) => Promise<ConnectionOpenResult>;
+    close: (connectionId: string) => Promise<void>;
+  };
+  query: {
+    execute: (request: QueryRequest) => Promise<QueryResponse>;
+  };
+  schema: {
+    get: (connectionId: string) => Promise<SchemaObject[]>;
   };
 }
 
@@ -71,6 +122,10 @@ export const IPC_CHANNELS = {
   appGetInfo: 'app:get-info',
   dialogSelectSqliteFile: 'dialog:select-sqlite-file',
   connectionTest: 'connection:test',
+  connectionOpen: 'connection:open',
+  connectionClose: 'connection:close',
+  queryExecute: 'query:execute',
+  schemaGet: 'schema:get',
 } as const;
 
 export const DATABASE_TYPES: DatabaseType[] = ['sqlite', 'mysql', 'percona', 'mariadb', 'mssql'];

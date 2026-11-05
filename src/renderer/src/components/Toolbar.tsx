@@ -21,7 +21,7 @@ export function Toolbar({
         <span className="brand-mark">D</span>
         <span className="brand-text">
           <strong>DBCraft</strong>
-          <span>M0 原型</span>
+          <span>M1 · SQLite</span>
         </span>
       </div>
 

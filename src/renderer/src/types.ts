@@ -1,5 +1,4 @@
-import type { ConnectionInput } from '@shared/ipc-contract';
-import type { DemoRow } from './data/mock';
+import type { ConnectionInput, QueryCell, QueryColumn } from '@shared/ipc-contract';
 
 export interface SavedConnection {
   id: string;
@@ -13,8 +12,27 @@ export interface QueryTab {
 }
 
 export interface RunState {
-  rows: DemoRow[];
+  columns: QueryColumn[];
+  rows: QueryCell[][];
+  rowCount: number;
   elapsedMs: number;
+  statementType: 'select' | 'change' | null;
+  changes: number | null;
+  truncated: boolean;
   executedAt: number | null;
-  simulated: boolean;
+  error: string | null;
+}
+
+export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
+
+export interface ConnectionRuntime {
+  status: ConnectionStatus;
+  message?: string;
+  version?: string;
+}
+
+export interface Notice {
+  id: number;
+  kind: 'info' | 'error';
+  text: string;
 }

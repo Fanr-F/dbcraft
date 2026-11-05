@@ -12,6 +12,10 @@ files:
 
 asar: true
 
+asarUnpack:
+  - out/main/sqlite-worker.js
+  - "**/*.node"
+
 win:
   target:
     - target: nsis

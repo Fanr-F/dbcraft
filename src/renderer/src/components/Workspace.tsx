@@ -1,5 +1,5 @@
 import type { DatabaseType } from '@shared/ipc-contract';
-import type { QueryTab, RunState } from '../types';
+import type { ConnectionRuntime, QueryTab, RunState } from '../types';
 import { SqlEditor } from '../features/editor/SqlEditor';
 import { ResultGrid } from '../features/grid/ResultGrid';
 import { Icon } from './Icon';
@@ -12,12 +12,20 @@ const DIALECT_LABELS: Record<DatabaseType, string> = {
   mssql: 'T-SQL',
 };
 
+function runtimeBadge(runtime: ConnectionRuntime | null): { text: string; tone: string } {
+  if (!runtime || runtime.status === 'idle') return { text: '未连接', tone: 'badge-warn' };
+  if (runtime.status === 'connecting') return { text: '连接中…', tone: 'badge-warn' };
+  if (runtime.status === 'error') return { text: '连接失败', tone: 'badge-danger' };
+  return { text: 'SQLite 实时', tone: 'badge-ok' };
+}
+
 interface WorkspaceProps {
   tabs: QueryTab[];
   activeTabId: string;
   run: RunState;
   running: boolean;
   connectionType: DatabaseType | null;
+  connectionRuntime: ConnectionRuntime | null;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onAddTab: () => void;
@@ -31,6 +39,7 @@ export function Workspace({
   run,
   running,
   connectionType,
+  connectionRuntime,
   onSelectTab,
   onCloseTab,
   onAddTab,
@@ -38,6 +47,8 @@ export function Workspace({
   onRun,
 }: WorkspaceProps) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const ready = connectionRuntime?.status === 'connected';
+  const badge = runtimeBadge(connectionRuntime);
 
   return (
     <section className="workspace">
@@ -81,7 +92,13 @@ export function Workspace({
 
       <div className="editor-pane">
         <div className="pane-toolbar">
-          <button type="button" className="btn btn-run" onClick={onRun} disabled={running}>
+          <button
+            type="button"
+            className="btn btn-run"
+            onClick={onRun}
+            disabled={running || !ready}
+            title={ready ? '执行 SQL（Ctrl+Enter）' : '先连接数据库'}
+          >
             <Icon name="play" size={14} />
             {running ? '执行中…' : '执行'}
           </button>
@@ -92,7 +109,7 @@ export function Workspace({
           <span className="chip">{connectionType ? DIALECT_LABELS[connectionType] : 'SQL'}</span>
           <span className="pane-hint">Ctrl+Enter 执行</span>
           <span className="spacer" />
-          <span className="badge badge-warn">M0 模拟执行</span>
+          <span className={`badge ${badge.tone}`}>{badge.text}</span>
         </div>
 
         <SqlEditor value={activeTab.sql} onChange={onSqlChange} onRun={onRun} />
@@ -101,17 +118,33 @@ export function Workspace({
       <div className="result-pane">
         <div className="pane-toolbar">
           <strong>结果</strong>
-          <span className="pane-hint">
-            {run.rows.length} 行 · {run.elapsedMs} ms
-          </span>
-          {run.simulated && <span className="badge badge-warn">示例数据</span>}
+          {run.error ? (
+            <span className="badge badge-danger">执行失败</span>
+          ) : run.statementType === 'change' ? (
+            <span className="pane-hint">
+              {run.changes ?? 0} 行受影响 · {run.elapsedMs} ms
+            </span>
+          ) : run.executedAt ? (
+            <span className="pane-hint">
+              {run.rowCount} 行 · {run.elapsedMs} ms
+            </span>
+          ) : (
+            <span className="pane-hint">尚未执行</span>
+          )}
+          {run.truncated && <span className="badge badge-warn">已截断</span>}
           <span className="spacer" />
-          <button type="button" className="btn" disabled title="Excel / CSV 导出在 M1 接入">
+          <button type="button" className="btn" disabled title="导出在后续里程碑接入">
             导出
           </button>
         </div>
 
-        <ResultGrid rows={run.rows} />
+        {run.error && (
+          <div className="result-error" role="alert">
+            {run.error}
+          </div>
+        )}
+
+        <ResultGrid columns={run.columns} rows={run.rows} />
       </div>
     </section>
   );
