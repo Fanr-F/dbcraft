@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 对应 PRD | `doc/PRD.md` v0.16 |
-| 文档版本 | v0.5（评审修订稿） |
+| 文档版本 | v0.6（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
 | 目标平台 | Windows 10（1809+）/ 11，x64 |
@@ -19,6 +19,7 @@
 | v0.3 | 2026-11-05 | 时区规则修正：显示与导出以数据库返回值为准，不做应用层转换；移除连接时区强制设置；有时区类型保留偏移，无时区类型不补；补充「不模拟数据库行为」边界原则 |
 | v0.4 | 2026-11-05 | 回写 RevoGrid Core Spike 结果：25,000×30 虚拟滚动、区域选择/TSV 复制/粘贴、自定义编辑器、过滤面板、右键菜单通过；记录 pinned 列映射、单格复制、过滤默认操作符等待办 |
 | v0.5 | 2026-11-05 | 回写 MySQL 系认证 Spike（S9）：MySQL 8.0.44 `caching_sha2_password`、MariaDB 11.4.13 `ed25519`/`mysql_native_password`、错误码映射与 TLS 行为 16 项通过；修正 `allowPublicKeyRetrieval` 文档错误；注明 unix_socket 在 Windows 不适用、Percona 需真实实例复核 |
+| v0.6 | 2026-11-05 | M0 主工程脚手架落地：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；安全默认、typed IPC、五类连接表单、模拟结果网格与 smoke 检查；构建配置改为 `electron.vite.config.ts` |
 
 ---
 
@@ -177,7 +178,7 @@ dbcraft/
 ├─ scripts/
 ├─ package.json
 ├─ electron-builder.yml
-├─ vite.config.ts
+├─ electron.vite.config.ts
 └─ LICENSE
 ```
 
@@ -1023,6 +1024,8 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | M2 | 元数据库 migration、历史/FTS5、网格事务/乐观锁 |
 | M3 | DDL 生成/预览、SQLite 重建、Agent 列表/详情/启停/脚本 |
 | M4 | 性能/安全专项、签名打包、回归与发布检查 |
+
+> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、模拟结果网格与 `npm run smoke` 冒烟检查。真实驱动、SQL 执行与对象树数据仍按 M1 交付。
 
 ---
 
