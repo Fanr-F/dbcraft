@@ -12,12 +12,16 @@ export const HISTORY_RETENTION_OPTIONS = [1000, 5000, 10000, 50000] as const;
 /** 查询超时档位（毫秒），0 表示不自动取消。 */
 export const QUERY_TIMEOUT_OPTIONS = [0, 10_000, 30_000, 60_000, 120_000] as const;
 
+/** 连接/测试连接超时档位（毫秒）。 */
+export const CONNECT_TIMEOUT_OPTIONS = [3_000, 5_000, 8_000, 10_000, 30_000] as const;
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   resultRowLimit: 2000,
   theme: 'dark',
   editorFontSize: 13,
   historyRetention: 10000,
   queryTimeoutMs: 30_000,
+  connectTimeoutMs: 8_000,
   historyEnabled: true,
 };
 
@@ -46,6 +50,10 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
   const timeoutAllowed = QUERY_TIMEOUT_OPTIONS.some(
     (option) => option === requestedTimeout,
   );
+  const requestedConnectTimeout = Number(record.connectTimeoutMs);
+  const connectTimeoutAllowed = CONNECT_TIMEOUT_OPTIONS.some(
+    (option) => option === requestedConnectTimeout,
+  );
   return {
     resultRowLimit: allowed ? requested : DEFAULT_APP_SETTINGS.resultRowLimit,
     theme: record.theme === 'light' ? 'light' : 'dark',
@@ -58,6 +66,9 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
     queryTimeoutMs: timeoutAllowed
       ? requestedTimeout
       : DEFAULT_APP_SETTINGS.queryTimeoutMs,
+    connectTimeoutMs: connectTimeoutAllowed
+      ? requestedConnectTimeout
+      : DEFAULT_APP_SETTINGS.connectTimeoutMs,
     historyEnabled: record.historyEnabled !== false,
   };
 }

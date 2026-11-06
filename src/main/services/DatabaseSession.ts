@@ -1,4 +1,5 @@
 import type {
+  DatabaseInfo,
   DatabaseType,
   DdlObjectKind,
   QueryCell,
@@ -6,6 +7,7 @@ import type {
   SchemaGetOptions,
   SchemaObject,
   TableDetail,
+  TableExtras,
   TableMeta,
 } from '../../shared/ipc-contract';
 
@@ -22,6 +24,12 @@ export interface DatabaseSession {
   /** `params` 使用驱动占位符（SQLite/MySQL 系均为 `?`）；`maxRows` 控制保留行数。 */
   query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult>;
   schema(options?: SchemaGetOptions): Promise<SchemaObject[]>;
+  /** 当前账号可见的数据库列表（SQLite 返回单库）。 */
+  databases(): Promise<DatabaseInfo[]>;
+  /** 切换会话当前数据库；SQLite 不支持时抛错。 */
+  useDatabase(database: string): Promise<void>;
+  /** 表下的约束/触发器/索引；database 用于跨库查询，不改变会话当前库。 */
+  tableExtras(database: string, table: string): Promise<TableExtras>;
   /** 返回对象当前的建表/建视图 SQL；找不到时抛错。 */
   getDdl(name: string, kind: DdlObjectKind): Promise<string>;
   /** 表/视图的列、主键与可编辑性；视图也会返回列信息。 */

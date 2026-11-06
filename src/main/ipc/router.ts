@@ -9,6 +9,10 @@ import { writeFile, readFile, readdir, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   IPC_CHANNELS,
+  type AgentActionResult,
+  type AgentDetailResult,
+  type AgentListResult,
+  type AgentScriptResult,
   type AppInfo,
   type ConnectionDeleteResult,
   type ConnectionImportResult,
@@ -37,6 +41,10 @@ import {
   type TableMetaResult,
 } from '../../shared/ipc-contract';
 import {
+  agentActionSchema,
+  agentDetailSchema,
+  agentListSchema,
+  agentScriptSchema,
   connectionInputSchema,
   connectionOpenSchema,
   connectionSaveSchema,
@@ -50,8 +58,11 @@ import {
   logWriteSchema,
   queryExecuteSchema,
   schemaDescribeSchema,
+  schemaDatabasesSchema,
   schemaGetSchema,
+  schemaTableExtrasSchema,
   schemaTableSchema,
+  schemaUseDatabaseSchema,
   settingsSaveSchema,
   tableApplySchema,
 } from './schemas';
@@ -64,11 +75,21 @@ import {
   executeDdl,
   getSchema,
   getTableDetail,
+  getTableExtras,
   getTableMeta,
   getDdl,
+  getMssqlSession,
+  listDatabases,
   openSessionById,
   testConnection,
+  useDatabase,
 } from '../services/ConnectionManager';
+import {
+  getAgentEditScript,
+  getAgentJobDetail,
+  listAgentJobs,
+  runAgentJobAction,
+} from '../services/mssql/agent';
 import { parseConnectionExport } from '../../shared/connection-export';
 import {
   listConnections,
@@ -319,7 +340,45 @@ export function registerIpcHandlers(): void {
 
       return getSchema(parsed.data.sessionId, {
         includeSystemObjects: parsed.data.includeSystemObjects,
+        ...(parsed.data.database ? { database: parsed.data.database } : {}),
       });
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.schemaDatabases,
+    async (_event, rawInput: unknown) => {
+      const parsed = schemaDatabasesSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false as const, message: '会话参数无效。' };
+      }
+      return listDatabases(parsed.data.sessionId);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.schemaUseDatabase,
+    async (_event, rawInput: unknown) => {
+      const parsed = schemaUseDatabaseSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false as const, message: '数据库参数无效。' };
+      }
+      return useDatabase(parsed.data.sessionId, parsed.data.database);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.schemaTableExtras,
+    async (_event, rawInput: unknown) => {
+      const parsed = schemaTableExtrasSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false as const, message: '表子对象参数无效。' };
+      }
+      return getTableExtras(
+        parsed.data.sessionId,
+        parsed.data.database,
+        parsed.data.table,
+      );
     },
   );
 
@@ -361,6 +420,74 @@ export function registerIpcHandlers(): void {
       }
 
       return applyTableEdits(parsed.data);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.agentList,
+    async (_event, rawInput: unknown): Promise<AgentListResult> => {
+      const parsed = agentListSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: 'Agent 参数无效。' };
+      }
+      const session = getMssqlSession(parsed.data.sessionId);
+      if (!session) {
+        return { ok: false, message: '当前标签不是 MSSQL 会话，请先连接 MSSQL。' };
+      }
+      return listAgentJobs(session, parsed.data.search);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.agentDetail,
+    async (_event, rawInput: unknown): Promise<AgentDetailResult> => {
+      const parsed = agentDetailSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: 'Agent 参数无效。' };
+      }
+      const session = getMssqlSession(parsed.data.sessionId);
+      if (!session) {
+        return { ok: false, message: '当前标签不是 MSSQL 会话，请先连接 MSSQL。' };
+      }
+      return getAgentJobDetail(
+        session,
+        parsed.data.jobName,
+        parsed.data.historyLimit ?? 100,
+      );
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.agentAction,
+    async (_event, rawInput: unknown): Promise<AgentActionResult> => {
+      const parsed = agentActionSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: 'Agent 操作参数无效。' };
+      }
+      const session = getMssqlSession(parsed.data.sessionId);
+      if (!session) {
+        return { ok: false, message: '当前标签不是 MSSQL 会话，请先连接 MSSQL。' };
+      }
+      return runAgentJobAction(session, parsed.data.action, parsed.data.jobName, {
+        connectionId: parsed.data.connectionId,
+        connectionName: parsed.data.connectionName,
+        database: parsed.data.database,
+      });
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.agentScript,
+    async (_event, rawInput: unknown): Promise<AgentScriptResult> => {
+      const parsed = agentScriptSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: 'Agent 参数无效。' };
+      }
+      const session = getMssqlSession(parsed.data.sessionId);
+      if (!session) {
+        return { ok: false, message: '当前标签不是 MSSQL 会话，请先连接 MSSQL。' };
+      }
+      return getAgentEditScript(session, parsed.data.jobName);
     },
   );
 

@@ -34,6 +34,10 @@
     "test:xlsx": "node --no-warnings --experimental-strip-types scripts/test-xlsx.mjs",
     "test:sqlite-rebuild": "node --no-warnings --experimental-strip-types scripts/test-sqlite-rebuild.mjs",
     "test:checks": "node --no-warnings --experimental-strip-types scripts/test-checks.mjs",
+    "test:mssql": "node --no-warnings --experimental-strip-types scripts/test-mssql.mjs",
+    "check:mssql": "node --no-warnings --env-file=.env.local scripts/check-mssql-session.mjs",
+    "check:mssql-agent": "node --no-warnings --env-file=.env.local scripts/check-mssql-agent.mjs",
+    "check:mssql-multidb": "node --no-warnings --env-file=.env.local scripts/check-mssql-multidb.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --win nsis"
   },
@@ -41,13 +45,16 @@
     "@revolist/react-datagrid": "^4.31.4",
     "better-sqlite3": "^13.0.3",
     "mariadb": "^3.5.4",
+    "mssql": "^12.7.14",
     "mysql2": "^3.24.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tedious": "^20.3.8",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
+    "@types/mssql": "^12.3.0",
     "@types/node": "^24.19.2",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",

@@ -13,7 +13,7 @@ export function buildCreateTable(
   const warnings: string[] = [];
 
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings };
   }
 
   const tableName = definition.name.trim();
@@ -110,7 +110,7 @@ export function buildAddColumn(
   column: DdlColumnDefinition,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   const table = requireName(tableName, '表名');
@@ -164,7 +164,7 @@ export function buildDropObject(
   kind: 'table' | 'view',
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   const target = requireName(name, kind === 'view' ? '视图名' : '表名');
@@ -187,7 +187,7 @@ export function buildRenameTable(
   newName: string,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   const from = requireName(oldName, '原表名');
@@ -225,7 +225,7 @@ export function buildCreateIndex(
   options: { name?: string; unique?: boolean } = {},
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   const table = requireName(tableName, '表名');
@@ -254,7 +254,7 @@ export function buildDropIndex(  dialect: DatabaseType,
   tableName?: string,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   const index = requireName(indexName, '索引名');
@@ -285,7 +285,7 @@ export function buildTableComment(
   comment: string,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
   if (dialect === 'sqlite') {
     return {
@@ -315,7 +315,7 @@ export function buildCreateView(
   selectSql: string,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   const view = requireName(viewName, '视图名');
@@ -345,7 +345,7 @@ export function buildDropColumn(
   columnName: string,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   const table = requireName(tableName, '表名');
@@ -378,7 +378,7 @@ export function buildRenameColumn(
   newName: string,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   const table = requireName(tableName, '表名');
@@ -428,7 +428,7 @@ export function buildModifyColumn(
   column: DdlColumnDefinition,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 驱动尚未接入，暂不支持生成 DDL。', warnings: [] };
+    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
   }
 
   if (dialect === 'sqlite') {

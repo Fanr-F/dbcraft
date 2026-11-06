@@ -2,7 +2,7 @@
 
 轻量级 Electron 数据库客户端，支持 SQLite、MySQL、Percona、MariaDB、MSSQL。
 
-当前处于 **M1 开发中**：SQLite、MySQL、Percona、MariaDB 已接入真实连接、查询和对象树；MSSQL 仍为连接表单占位。
+当前处于 **M1 开发中**：SQLite、MySQL、Percona、MariaDB、MSSQL 均已接入真实连接、查询和对象树；MSSQL Agent 作业在左侧对象树展开，支持详情/启停/启用/禁用与脚本生成。
 
 ## 技术栈
 
@@ -12,7 +12,7 @@
 - electron-vite 开发/构建，electron-builder 打包
 - zod 校验 IPC 输入
 - better-sqlite3 13（N-API）+ Worker 执行 SQLite 查询
-- mysql2 连接 MySQL/Percona；mariadb 连接 MariaDB
+- mysql2 连接 MySQL/Percona；mariadb 连接 MariaDB；tedious 连接 MSSQL
 
 ## 开发
 
@@ -49,6 +49,22 @@ npm run pack        # 生成未打包目录（release/）
 npm run dist        # 生成 Windows NSIS 安装包
 ```
 
+MSSQL 联调（需要可连的 SQL Server）：
+
+```powershell
+# 项目根创建 .env.local（已被 .gitignore 忽略）
+# DBCRAFT_MSSQL_HOST=127.0.0.1
+# DBCRAFT_MSSQL_PORT=1433
+# DBCRAFT_MSSQL_USER=sa
+# DBCRAFT_MSSQL_PASSWORD=...
+# DBCRAFT_MSSQL_DATABASE=master
+# DBCRAFT_MSSQL_ENCRYPT=true
+# DBCRAFT_MSSQL_TRUST=true
+# 命名实例可加：DBCRAFT_MSSQL_INSTANCE=MSSQLSERVER（与 PORT 互斥，走 SQL Browser UDP 1434）
+npm run check:mssql        # 建删临时表，验证查询/对象树/DDL/表编辑/取消
+npm run check:mssql-agent  # 创建/启停/删除临时作业，验证 Agent 列表/详情/脚本/历史
+```
+
 ## 目录
 
 ```text
@@ -56,7 +72,7 @@ src/
 ├─ main/
 │  ├─ index.ts                 # 窗口、安全默认、生命周期
 │  ├─ ipc/                     # IPC 路由与 zod schema
-│  ├─ services/                # 统一连接管理 + SQLite/MySQL/MariaDB 会话
+│  ├─ services/                # 统一连接管理 + SQLite/MySQL/MariaDB/MSSQL 会话
 │  └─ workers/                 # sqlite-worker
 ├─ preload/                    # contextBridge，暴露 window.dbcraft
 ├─ renderer/                   # React 界面
@@ -86,13 +102,21 @@ src/
 
 - 主窗口、暗色界面、标签页、SQL 编辑区、结果区、状态栏
 - 五种数据库类型的连接表单
-- SQLite / MySQL / Percona / MariaDB 连接测试、打开、关闭
+- SQLite / MySQL / Percona / MariaDB / MSSQL 连接测试、打开、关闭
 - 单语句查询（SELECT / PRAGMA / DML / DDL）
 - 查询结果动态列、行数、耗时、影响行数、错误展示
-- 对象树：SQLite 读 `sqlite_master`；MySQL 系读 `information_schema`
+- 对象树：SQLite 读 `sqlite_master`；MySQL 系读 `information_schema`；MSSQL 读 `sys.objects`
+- 多数据库对象树：MSSQL / MySQL 系连接后列出有权限的数据库，库下分表/视图/存储过程，
+  表下可展开约束/触发器/索引；点击数据库切换当前库
 - 表/视图列表、刷新、点击填入查询
 - SQLite 查询在独立 Worker 中执行，不阻塞主进程
 - MariaDB `ed25519` 账号走 `mariadb` 驱动
+- MSSQL 走 `tedious` 单连接：查询、对象树、表结构、查看 DDL、表数据页、参数化 DML 与取消
+- MSSQL 命名实例（`host\instance`）：通过 SQL Browser（UDP 1434）解析端口，也可直接填 `host:port`；
+  已在 SQL Server 2016 默认实例上验证（`DBCRAFT_MSSQL_INSTANCE=MSSQLSERVER`）
+- SQL Server Agent：左侧对象树 `SQL Server Agent → 作业` 展开作业列表；单击选中，双击打开详情页签
+  （步骤/计划/最近 100/500 条历史、启停/启用/禁用、T-SQL 步骤命令在编辑器打开、生成 `sp_update_job*` 脚本）；
+  生命周期操作写入查询历史（来源 `agent-control`）
 - DATETIME、DECIMAL、JSON、BIGINT 按数据库返回形态展示
 - 查询取消：MySQL/MariaDB 用 `KILL QUERY`，连接保留；SQLite 终止 Worker，需要重连
 - 每个 SQL 标签一个独立会话/物理连接；标签间查询与取消互不阻塞
@@ -100,7 +124,8 @@ src/
 
 尚未接入：
 
-- MSSQL 真实驱动与 MOD-08 Agent
+- MSSQL Agent 30s 自动刷新与作业运行中状态（P1）
+- MSSQL UI 建表/改表（查看 DDL 与表结构已支持）
 - 列/别名补全、错误波浪线、多结果集
 - 真流式导出/进度/取消（当前导出前最多加载 1 万行）
 - 打包/安装包、性能基线与无障碍
@@ -123,6 +148,8 @@ src/
 - `doc/PRD.md`：需求
 - `doc/TECH_DESIGN.md`：技术设计
 - `doc/PROJECT_STATUS.md`：实现现状、差距、缺陷、验收、DDL 方案、日志约定与变更里程碑
+- `doc/WORKLOG.md`：追加式操作日志（每次代码/文档改动的诉求、变更、文件、验证、遗留）
+- `doc/UI_TODO.md`：UI 逐项调整清单与真机验收状态
 
 ## 许可证
 

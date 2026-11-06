@@ -943,7 +943,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | # | 风险 | Spike 验收标准 |
 |---|---|---|
 | S1 | better-sqlite3 + Electron ABI | 🟡 部分通过（2026-11-05）：better-sqlite3 13.0.3 N-API 预编译在 Electron 45 直接加载，Worker 内查询/写入/对象树已跑通；10 万行性能、取消、打包后 asar Worker 待验证 |
-| S2 | MSSQL tedious 连接 | SQL 认证 + `encrypt`/`trustServerCertificate` 连接成功；`msdb` 查询可用 |
+| S2 | MSSQL tedious 连接 | 🟡 部分通过（2026-11-06）：tedious 直连 SQL Server 2016 SP2，连接/查询/对象树/表元数据/查看 DDL/表数据页/参数化 DML/取消/视图通过；Agent 列表/详情/脚本/启停/禁用/历史通过（见 17.8）；SQL Browser 默认实例解析通过（UDP 1434 → 1433）；命名实例（非默认）与动态端口、TLS 严格校验、多 schema 待验证 |
 | S3 | FTS5 trigram 中文/子串 | 1 万/5 万条下搜索 <100ms/<500ms；`LIKE` 回退可用 |
 | S4 | RevoGrid Core 集成 | ✅ 通过（2026-11-05，`spikes/revogrid/`）：25,000×30 虚拟滚动、区域选择/TSV 复制/粘贴、枚举/布尔/日期/大文本编辑器、过滤面板、自研右键菜单、滚动到行均通过。待办：pinned 列映射、单格复制路径、过滤默认操作符、IME/无障碍人工验证；多区域为 Pro，v1.0 用单区域 |
 | S5 | SQL 解析容错 | 不完整 SQL 下补全不崩溃、可降级 |
@@ -1115,6 +1115,72 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 结论：**一标签一会话模型通过**；标签间查询、取消、SQLite Worker 均相互隔离。
 
+### 17.7 MSSQL 真实实例（S2 部分）
+
+- 环境：SQL Server 2016 SP2（`13.0.5026.0`，Developer Edition），Windows 远程实例，SQL 认证。
+- 实现：`src/main/services/mssql/MssqlSession.ts`；每个标签一个 `tedious.Connection`（不引入连接池），
+  参数用 `@p1`/`@p2`，`useUTC: true`，`requestTimeout: 0`（超时与取消由主进程统一控制）。
+- 验证脚本：`npm run check:mssql`（读取 `.env.local`，建删 `dbo.dbcraft_check` 临时表）。
+
+| 验证项 | 结果 |
+|---|---|
+| 测试连接 / 版本 | 通过，`@@VERSION` 首行与 ProductVersion 正常 |
+| `SELECT` 常见类型 | INT→number、NVARCHAR→string、DECIMAL→字符串、DATETIME2→`YYYY-MM-DD HH:mm:ss.SSS`、VARBINARY→hex 摘要 |
+| 重复列名 `SELECT 1 AS dup, 2 AS dup` | 列与单元格都保留 |
+| 对象树（`sys.objects`） | 通过；`sys.objects.type` 为 `char(2)`，需 trim |
+| 表元数据 / 表结构 | 列、主键、IDENTITY、默认值、索引、外键、CHECK、表注释（扩展属性） |
+| 查看 DDL | 表按 `sys.columns` 生成；视图读 `sys.sql_modules` |
+| 表数据页 | `OFFSET/FETCH` + `LIKE @p1 ESCAPE '!'` 参数化过滤通过 |
+| 参数化 DML / 乐观锁 | INSERT/UPDATE/DELETE 通过；原值不匹配时 UPDATE 影响 0 行 |
+| 取消 | `WAITFOR DELAY` 可取消，取消后同一会话仍可继续查询 |
+| 视图 | `getTableMeta` 标记只读（`reasonCode=view`），DDL 可取 |
+| Agent | 实例 `Agent XPs=0`，未验证；需先启动 SQL Server Agent 服务 |
+
+已知限制：`datetimeoffset` 的原始偏移被 tedious 归一化为 UTC；`decimal` 超过 15 位有效数字会丢精度；
+`datetime2` 的 7 位小数只保留到毫秒；一个连接同一时刻只能跑一个请求，元数据查询必须串行。
+
+### 17.8 MSSQL Agent（MOD-08 主路径）
+
+- 环境：同一 SQL Server 2016 SP2；测试前启动 SQL Server Agent（`Agent XPs` 自动为 1）。
+- 实现：`services/mssql/agent-queries.ts`（列表/详情/脚本/动作校验，纯逻辑）+ `agent.ts`（历史与 IPC 包装）；
+  UI 入口为对象树 `SQL Server Agent → 作业`，展开后在树中列出作业，单击选中、双击打开详情页签
+  （按用户反馈，覆盖 PRD 的作业列表页签）；生命周期 SQL 复用 `shared/agent.ts` 的生成器。
+- 脚本：`USE msdb` + `GO` + `sp_update_job` / `sp_update_jobstep` / `sp_update_schedule`，
+  字符串按 `N'...''...'` 转义，共享计划警告，step/schedule 使用生成时 id 快照。
+- 验证脚本：`npm run check:mssql-agent`（创建 `dbcraft_agent_check` 临时作业后删除）。
+
+| 验证项 | 结果 |
+|---|---|
+| 作业列表 / 名称搜索 | 通过（默认作业 `syspolicy_purge_history`） |
+| 详情：步骤 / 计划 / 频率描述 | 通过（每天、每周位掩码等） |
+| 生成编辑脚本 | 含 `USE msdb`、`sp_update_job`、`sp_update_jobstep`、`sp_update_schedule`，引号正确转义 |
+| 禁用作业直接启动 | 被拒绝，提示「请先启用」 |
+| 启用 / 启动 / 停止 / 禁用 | 通过；停止后历史出现 `run_status=3`（已取消） |
+| 运行历史 | 通过（step_id=0 作业级结果 + 步骤结果） |
+| 多服务器作业 | 代码路径只读并禁用按钮；无真实多服务器作业可测 |
+
+已知偏差：30s 自动刷新与「运行中/空闲」状态（P1）未实现；Agent XPs 禁用/权限不足的真实错误透传
+尚未回归；步骤命令「在编辑器中打开」已实现（仅 T-SQL 步骤）。
+
+### 17.9 多数据库对象树
+
+- 契约：`SchemaObject.type` 增加 `procedure`；`schema:get` 支持 `database`；
+  新增 `schema:databases` / `schema:use-database` / `schema:table-extras`。
+- 驱动：
+  - MSSQL：`sys.databases`（`HAS_DBACCESS` + `state=0`）列表；`[db].sys.objects` 取表/视图/存储过程；
+    `[db].sys.objects / sys.triggers / sys.indexes` 取表子对象；`USE [db]` 切库。对象名仍保持
+    `dbo` 短名，其他 schema 用 `schema.name`。
+  - MySQL / MariaDB：`SHOW DATABASES`；`information_schema.TABLES / ROUTINES`；表子对象来自
+    `TABLE_CONSTRAINTS / TRIGGERS / STATISTICS`；`USE \`db\``。
+  - SQLite：单库 `main`，表子对象用 `PRAGMA index_list / index_info / foreign_key_list` +
+    `sqlite_master` 触发器；`useDatabase` 明确报错。
+- 渲染：`components/ObjectTree.tsx` 负责多库树与表子对象懒加载；`App` 按标签缓存数据库列表、
+  当前库、按库对象和表子对象。表数据页把所属库写入 `QueryTab.table.database`，
+  查询/元数据/DML 前通过 `ensureDatabase` 切回目标库；新查询/DDL 页签继承当前库。
+- 验证：`npm run check:mssql-multidb` 在 SQL Server 2016 SP2 通过（4 个数据库、tempdb 跨库表/存储过程、
+  USE 切换与恢复、约束 2 / 触发器 1 / 索引 2，临时对象已清理）；MySQL/MariaDB 未真机回归。
+- 限制：跨库搜索未做；表子对象缓存不随 DDL 自动失效；同一 MSSQL 会话的并发请求仍受单请求限制。
+
 ---
 
 ## 18. 里程碑映射
@@ -1127,7 +1193,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | M3 | DDL 生成/预览、SQLite 重建、Agent 列表/详情/启停/脚本 |
 | M4 | 性能/安全专项、签名打包、回归与发布检查 |
 
-> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、结果网格与 `npm run smoke` 冒烟检查。M1 已接入 SQLite（见 17.3）、MySQL/Percona/MariaDB（见 17.4）、查询取消（见 17.5）与一标签一会话（见 17.6）；MSSQL 驱动与历史仍待后续交付。
+> M0 脚手架已落地（2026-11-05）：Electron 45 + electron-vite 6 + React 18 + RevoGrid Core；包含安全默认、typed IPC、五类连接表单、结果网格与 `npm run smoke` 冒烟检查。M1 已接入 SQLite（见 17.3）、MySQL/Percona/MariaDB（见 17.4）、查询取消（见 17.5）、一标签一会话（见 17.6）、MSSQL（见 17.7）与 Agent 主路径（见 17.8）；Agent 页签已对齐 PRD，30s 自动刷新待补，SQL Browser 默认实例已真机回归。
 
 ---
 

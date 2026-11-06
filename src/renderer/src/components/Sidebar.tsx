@@ -1,16 +1,31 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DATABASE_TYPE_LABELS, ENVIRONMENT_LABELS } from '@shared/ipc-contract';
-import type { ConnectionInput, DdlObjectKind, SchemaObject } from '@shared/ipc-contract';
+import type {
+  AgentJobSummary,
+  ConnectionInput,
+  DatabaseInfo,
+  DdlObjectKind,
+  SchemaObject,
+  TableExtras,
+} from '@shared/ipc-contract';
+import { agentRunStatusLabel } from '@shared/agent';
 import type { SavedConnection } from '../types';
 import { buildGroupTree, countGroup, type GroupNode } from '../utils/groups';
 import { ContextMenu } from './ContextMenu';
 import { Icon } from './Icon';
+import { ObjectTree } from './ObjectTree';
 
 interface SidebarProps {
   connections: SavedConnection[];
   activeConnectionId: string | null;
   activeConnection: SavedConnection | null;
   schemaObjects: SchemaObject[];
+  databases: DatabaseInfo[];
+  objectsByDatabase: Record<string, SchemaObject[]>;
+  currentDatabase: string | null;
+  databaseLoading: string | null;
+  tableExtras: Record<string, TableExtras>;
+  tableExtrasLoadingKey: string | null;
   schemaLoading: boolean;
   showSystemObjects: boolean;
   systemObjectsSupported: boolean;
@@ -19,8 +34,11 @@ interface SidebarProps {
   onNewConnection: () => void;
   onRefreshSchema: () => void;
   onToggleSystemObjects: (next: boolean) => void;
-  onOpenTable: (name: string) => void;
-  onOpenTableData: (name: string, kind: 'table' | 'view') => void;
+  onSelectDatabase: (database: string) => void;
+  onLoadTableExtras: (database: string, table: string) => void;
+  onOpenTable: (name: string, database?: string) => void;
+  onOpenTableData: (name: string, kind: 'table' | 'view', database?: string) => void;
+  onOpenProcedure: (name: string, database?: string) => void;
   onDeleteConnection: (id: string) => void;
   onEditConnection: (id: string) => void;
   onDuplicateConnection: (id: string) => void;
@@ -29,18 +47,18 @@ interface SidebarProps {
   onRenameGroup: (oldPath: string, newPath: string) => void;
   onDeleteGroup: (path: string) => void;
   onMoveConnection: (id: string, group: string) => void;
-  onViewDdl: (name: string, kind: DdlObjectKind) => void;
-  onCopyDdl: (name: string, kind: DdlObjectKind) => void;
-  onRenameTable: (name: string) => void;
-  onDropTable: (name: string) => void;
-  onDropView: (name: string) => void;
-  onAddColumn: (name: string) => void;
-  onRenameColumn: (name: string) => void;
-  onModifyColumn: (name: string) => void;
-  onShowStructure: (name: string) => void;
-  onCreateIndex: (name: string) => void;
-  onDropIndex: (name: string) => void;
-  onDropColumn: (name: string) => void;
+  onViewDdl: (name: string, kind: DdlObjectKind, database?: string) => void;
+  onCopyDdl: (name: string, kind: DdlObjectKind, database?: string) => void;
+  onRenameTable: (name: string, database?: string) => void;
+  onDropTable: (name: string, database?: string) => void;
+  onDropView: (name: string, database?: string) => void;
+  onAddColumn: (name: string, database?: string) => void;
+  onRenameColumn: (name: string, database?: string) => void;
+  onModifyColumn: (name: string, database?: string) => void;
+  onShowStructure: (name: string, database?: string) => void;
+  onCreateIndex: (name: string, database?: string) => void;
+  onDropIndex: (name: string, database?: string) => void;
+  onDropColumn: (name: string, database?: string) => void;
   onNewTable: () => void;
   onNewView: () => void;
   onRunScript: () => void;
@@ -48,6 +66,16 @@ interface SidebarProps {
   onExportConnection: (connectionId: string) => void;
   onExportAllConnections: () => void;
   onImportConnections: () => void;
+  /** MSSQL 连接下显示 SQL Server Agent 入口。 */
+  agentAvailable: boolean;
+  /** 当前活动会话的作业缓存；null 表示还没展开加载过。 */
+  agentJobs: AgentJobSummary[] | null;
+  agentJobsLoading: boolean;
+  agentJobsError: string | null;
+  /** 当前详情页签对应的作业名，用于树中高亮。 */
+  activeAgentJob: string | null;
+  onLoadAgentJobs: () => void;
+  onOpenAgentJob: (jobName: string) => void;
 }
 
 function fileName(filePath: string): string {
@@ -75,6 +103,12 @@ export function Sidebar({
   activeConnectionId,
   activeConnection,
   schemaObjects,
+  databases,
+  objectsByDatabase,
+  currentDatabase,
+  databaseLoading,
+  tableExtras,
+  tableExtrasLoadingKey,
   schemaLoading,
   showSystemObjects,
   systemObjectsSupported,
@@ -83,8 +117,11 @@ export function Sidebar({
   onNewConnection,
   onRefreshSchema,
   onToggleSystemObjects,
+  onSelectDatabase,
+  onLoadTableExtras,
   onOpenTable,
   onOpenTableData,
+  onOpenProcedure,
   onDeleteConnection,
   onEditConnection,
   onDuplicateConnection,
@@ -112,8 +149,36 @@ export function Sidebar({
   onExportConnection,
   onExportAllConnections,
   onImportConnections,
+  agentAvailable,
+  agentJobs,
+  agentJobsLoading,
+  agentJobsError,
+  activeAgentJob,
+  onLoadAgentJobs,
+  onOpenAgentJob,
 }: SidebarProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    tables: true,
+    views: true,
+    agent: true,
+    jobs: false,
+  });
+  const [selectedAgentJob, setSelectedAgentJob] = useState<string | null>(null);
+  const toggleSection = (key: string) => {
+    const willExpand = !expandedSections[key];
+    setExpandedSections((current) => ({ ...current, [key]: willExpand }));
+    if (key === 'jobs' && willExpand) onLoadAgentJobs();
+  };
+
+  // 切换标签/连接后，若作业树仍处于展开状态，自动加载新会话的作业。
+  useEffect(() => {
+    if (agentAvailable && expandedSections.jobs && agentJobs === null && !agentJobsLoading) {
+      onLoadAgentJobs();
+    }
+    // onLoadAgentJobs 每次渲染都是新函数；仅依赖影响加载条件的状态。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentAvailable, expandedSections.jobs, agentJobs, agentJobsLoading, activeConnectionId]);
   const [connectionQuery, setConnectionQuery] = useState('');
   const [objectQuery, setObjectQuery] = useState('');
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null);
@@ -133,6 +198,7 @@ export function Sidebar({
     y: number;
     name: string;
     kind: DdlObjectKind;
+    database?: string;
   } | null>(null);
 
   const normalizedConnectionQuery = connectionQuery.trim().toLowerCase();
@@ -141,10 +207,9 @@ export function Sidebar({
     : connections;
 
   const normalizedObjectQuery = objectQuery.trim().toLowerCase();
-  const matchesObject = (object: SchemaObject) =>
-    normalizedObjectQuery.length === 0 || object.name.toLowerCase().includes(normalizedObjectQuery);
-  const tables = schemaObjects.filter((object) => object.type === 'table' && matchesObject(object));
-  const views = schemaObjects.filter((object) => object.type === 'view' && matchesObject(object));
+  const filteredJobs = (agentJobs ?? []).filter(
+    (job) => normalizedObjectQuery.length === 0 || job.name.toLowerCase().includes(normalizedObjectQuery),
+  );
 
   const tree = useMemo(() => buildGroupTree(filteredConnections), [filteredConnections]);
   const hasGroups = filteredConnections.some(
@@ -485,7 +550,7 @@ export function Sidebar({
               <Icon name="search" size={13} />
               <input
                 value={objectQuery}
-                placeholder="搜索表/视图…"
+                placeholder="搜索表/视图/作业…"
                 aria-label="搜索对象"
                 onChange={(event) => setObjectQuery(event.target.value)}
               />
@@ -508,81 +573,122 @@ export function Sidebar({
               <span>显示系统对象</span>
             </label>
 
-            {schemaLoading ? (
-              <div className="tree-empty">正在加载对象…</div>
-            ) : (
-              <>
-                <div className="tree-row tree-muted">
-                  <Icon name="folder" size={14} />
-                  <span>表</span>
-                  <span className="tree-count">{tables.length}</span>
-                </div>
-                {tables.length === 0 ? (
-                  <div className="tree-empty tree-child">
-                    {normalizedObjectQuery ? '无匹配表' : '无表'}
-                  </div>
-                ) : (
-                  tables.map((table) => (
-                    <button
-                      key={`table-${table.name}`}
-                      type="button"
-                      className="tree-row tree-item tree-child"
-                      title={`查询 ${table.name}（双击查看数据）`}
-                      onClick={() => onOpenTable(table.name)}
-                      onDoubleClick={() => onOpenTableData(table.name, 'table')}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setObjectMenu({
-                          x: event.clientX,
-                          y: event.clientY,
-                          name: table.name,
-                          kind: 'table',
-                        });
-                      }}
-                    >
-                      <Icon name="table" size={14} />
-                      <span>{table.name}</span>
-                    </button>
-                  ))
-                )}
+            {agentAvailable && (
+              <div className="agent-tree">
+                <button
+                  type="button"
+                  className="tree-row tree-item"
+                  aria-expanded={expandedSections.agent}
+                  title="SQL Server Agent 作业（监控 + 启停/启用/禁用）"
+                  onClick={() => toggleSection('agent')}
+                >
+                  <Icon
+                    name="chevron"
+                    size={12}
+                    className={expandedSections.agent ? 'chevron' : 'chevron collapsed'}
+                  />
+                  <Icon name="play" size={14} />
+                  <span>SQL Server Agent</span>
+                </button>
 
-                <div className="tree-row tree-muted">
-                  <Icon name="folder" size={14} />
-                  <span>视图</span>
-                  <span className="tree-count">{views.length}</span>
-                </div>
-                {views.length === 0 ? (
-                  <div className="tree-empty tree-child">
-                    {normalizedObjectQuery ? '无匹配视图' : '无视图'}
-                  </div>
-                ) : (
-                  views.map((view) => (
+                {expandedSections.agent && (
+                  <>
                     <button
-                      key={`view-${view.name}`}
                       type="button"
                       className="tree-row tree-item tree-child"
-                      title={`查询 ${view.name}（双击查看数据）`}
-                      onClick={() => onOpenTable(view.name)}
-                      onDoubleClick={() => onOpenTableData(view.name, 'view')}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setObjectMenu({
-                          x: event.clientX,
-                          y: event.clientY,
-                          name: view.name,
-                          kind: 'view',
-                        });
-                      }}
+                      aria-expanded={expandedSections.jobs}
+                      title="展开/收起作业列表"
+                      onClick={() => toggleSection('jobs')}
                     >
-                      <Icon name="table" size={14} />
-                      <span>{view.name}</span>
+                      <Icon
+                        name="chevron"
+                        size={12}
+                        className={expandedSections.jobs ? 'chevron' : 'chevron collapsed'}
+                      />
+                      <Icon name="folder" size={14} />
+                      <span>作业</span>
+                      <span className="tree-count">
+                        {agentJobsLoading ? '…' : agentJobs ? filteredJobs.length : ''}
+                      </span>
                     </button>
-                  ))
+
+                    {expandedSections.jobs &&
+                      (agentJobsLoading ? (
+                        <div className="tree-empty tree-child-2">正在加载作业…</div>
+                      ) : agentJobsError ? (
+                        <div
+                          className="tree-empty tree-child-2 tree-error-text"
+                          title={agentJobsError}
+                        >
+                          {agentJobsError}
+                        </div>
+                      ) : !agentJobs ? (
+                        <div className="tree-empty tree-child-2">展开后加载作业</div>
+                      ) : filteredJobs.length === 0 ? (
+                        <div className="tree-empty tree-child-2">
+                          {normalizedObjectQuery ? '无匹配作业' : '没有作业'}
+                        </div>
+                      ) : (
+                        filteredJobs.map((job) => (
+                          <button
+                            key={job.jobId}
+                            type="button"
+                            className={`tree-row tree-item tree-child-2 agent-job ${
+                              activeAgentJob === job.name || selectedAgentJob === job.name
+                                ? 'is-active'
+                                : ''
+                            }`}
+                            title={`${job.enabled ? '已启用' : '已禁用'} · 上次：${
+                              job.lastRunAt ?? '从未运行'
+                            } · ${agentRunStatusLabel(job.lastRunStatus)}${
+                              job.multiServer ? ' · 多服务器' : ''
+                            }；单击选中，双击打开详情`}
+                            onClick={() => setSelectedAgentJob(job.name)}
+                            onDoubleClick={() => onOpenAgentJob(job.name)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') onOpenAgentJob(job.name);
+                            }}
+                          >
+                            <span
+                              className={`agent-job-dot ${job.enabled ? 'is-on' : 'is-off'}`}
+                            />
+                            <span>{job.name}</span>
+                            {job.multiServer && <span className="agent-job-tag">MSX</span>}
+                            {!job.enabled && <span className="agent-job-tag">禁用</span>}
+                          </button>
+                        ))
+                      ))}
+                  </>
                 )}
-              </>
+              </div>
             )}
+
+            <ObjectTree
+              dialect={activeConnection.input.type}
+              query={objectQuery}
+              databases={databases}
+              currentDatabase={currentDatabase}
+              objectsByDatabase={objectsByDatabase}
+              schemaObjects={schemaObjects}
+              loadingDatabase={databaseLoading}
+              loading={schemaLoading}
+              tableExtras={tableExtras}
+              tableExtrasLoadingKey={tableExtrasLoadingKey}
+              onSelectDatabase={onSelectDatabase}
+              onLoadTableExtras={onLoadTableExtras}
+              onOpenTable={onOpenTable}
+              onOpenTableData={onOpenTableData}
+              onOpenProcedure={onOpenProcedure}
+              onTableContextMenu={(event, name, kind, database) => {
+                setObjectMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  name,
+                  kind,
+                  ...(database ? { database } : {}),
+                });
+              }}
+            />
           </div>
         ) : (
           <div className="sidebar-empty compact">
@@ -592,7 +698,7 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-footer">
-        <span className="muted">M1 · SQLite / MySQL 系</span>
+        <span className="muted">M1 · SQLite / MySQL 系 / MSSQL</span>
       </div>
 
       {menu && (
@@ -683,62 +789,62 @@ export function Sidebar({
           items={[
             {
               label: '查询数据',
-              onSelect: () => onOpenTable(objectMenu.name),
+              onSelect: () => onOpenTable(objectMenu.name, objectMenu.database),
             },
             {
               label: '查看 DDL',
-              onSelect: () => onViewDdl(objectMenu.name, objectMenu.kind),
+              onSelect: () => onViewDdl(objectMenu.name, objectMenu.kind, objectMenu.database),
             },
             {
               label: '复制 DDL',
-              onSelect: () => onCopyDdl(objectMenu.name, objectMenu.kind),
+              onSelect: () => onCopyDdl(objectMenu.name, objectMenu.kind, objectMenu.database),
             },
             ...(objectMenu.kind === 'table'
               ? [
                   {
                     label: '表结构…',
-                    onSelect: () => onShowStructure(objectMenu.name),
+                    onSelect: () => onShowStructure(objectMenu.name, objectMenu.database),
                   },
                   {
                     label: '添加列…',
-                    onSelect: () => onAddColumn(objectMenu.name),
+                    onSelect: () => onAddColumn(objectMenu.name, objectMenu.database),
                   },
                   {
                     label: '重命名列…',
-                    onSelect: () => onRenameColumn(objectMenu.name),
+                    onSelect: () => onRenameColumn(objectMenu.name, objectMenu.database),
                   },
                   {
                     label: '修改列…',
-                    onSelect: () => onModifyColumn(objectMenu.name),
+                    onSelect: () => onModifyColumn(objectMenu.name, objectMenu.database),
                   },
                   {
                     label: '删除列…',
                     danger: true,
-                    onSelect: () => onDropColumn(objectMenu.name),
+                    onSelect: () => onDropColumn(objectMenu.name, objectMenu.database),
                   },
                   {
                     label: '创建索引…',
-                    onSelect: () => onCreateIndex(objectMenu.name),
+                    onSelect: () => onCreateIndex(objectMenu.name, objectMenu.database),
                   },
                   {
                     label: '删除索引…',
-                    onSelect: () => onDropIndex(objectMenu.name),
+                    onSelect: () => onDropIndex(objectMenu.name, objectMenu.database),
                   },
                   {
                     label: '重命名表…',
-                    onSelect: () => onRenameTable(objectMenu.name),
+                    onSelect: () => onRenameTable(objectMenu.name, objectMenu.database),
                   },
                   {
                     label: '删除表…',
                     danger: true,
-                    onSelect: () => onDropTable(objectMenu.name),
+                    onSelect: () => onDropTable(objectMenu.name, objectMenu.database),
                   },
                 ]
               : [
                   {
                     label: '删除视图…',
                     danger: true,
-                    onSelect: () => onDropView(objectMenu.name),
+                    onSelect: () => onDropView(objectMenu.name, objectMenu.database),
                   },
                 ]),
           ]}

@@ -1,14 +1,19 @@
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import type {
+  DatabaseInfo,
   DdlObjectKind,
   QueryCell,
   QueryResult,
   SchemaGetOptions,
   SchemaObject,
   TableColumnMeta,
+  TableConstraintInfo,
   TableDetail,
+  TableExtras,
+  TableIndexInfo,
   TableMeta,
+  TableTriggerInfo,
 } from '../../../shared/ipc-contract';
 import type { DatabaseSession } from '../DatabaseSession';
 import { quoteIdent } from '../../../shared/dialect/identifiers';
@@ -111,6 +116,62 @@ export class SqliteSession implements DatabaseSession {
       name: String(row[0] ?? ''),
       type: row[1] === 'view' ? 'view' : 'table',
     }));
+  }
+
+  async databases(): Promise<DatabaseInfo[]> {
+    return [{ name: 'main', current: true }];
+  }
+
+  async useDatabase(): Promise<void> {
+    throw new Error('SQLite 不支持切换数据库。');
+  }
+
+  async tableExtras(_database: string, table: string): Promise<TableExtras> {
+    const quoted = quoteIdent('sqlite', table);
+
+    const info = await this.query(`PRAGMA table_info(${quoted})`);
+    const constraints: TableConstraintInfo[] = [];
+    if (info.rows.some((row) => Number(row[5] ?? 0) > 0)) {
+      constraints.push({ name: 'PRIMARY KEY', kind: 'PRIMARY KEY' });
+    }
+
+    const indexList = await this.query(`PRAGMA index_list(${quoted})`);
+    const indexes: TableIndexInfo[] = [];
+    for (const row of indexList.rows) {
+      const indexName = String(row[1] ?? '');
+      if (!indexName) continue;
+      const columns = await this.query(`PRAGMA index_info(${quoteIdent('sqlite', indexName)})`);
+      const unique = Number(row[2] ?? 0) !== 0;
+      indexes.push({
+        name: indexName,
+        unique,
+        columns: columns.rows.map((item) => String(item[2] ?? '')),
+      });
+      // origin='u' 是 UNIQUE 约束自动创建的索引；origin='c' 是普通 CREATE INDEX。
+      if (String(row[3] ?? '') === 'u') {
+        constraints.push({ name: indexName, kind: 'UNIQUE' });
+      }
+    }
+
+    const foreignKeys = await this.query(`PRAGMA foreign_key_list(${quoted})`);
+    const seenForeignKeys = new Set<number>();
+    for (const row of foreignKeys.rows) {
+      const id = Number(row[0] ?? 0);
+      if (seenForeignKeys.has(id)) continue;
+      seenForeignKeys.add(id);
+      constraints.push({ name: `FK_${id}`, kind: 'FOREIGN KEY' });
+    }
+
+    const triggerRows = await this.query(
+      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`,
+      [table],
+    );
+    const triggers: TableTriggerInfo[] = triggerRows.rows.map((row) => ({
+      name: String(row[0] ?? ''),
+      disabled: false,
+    }));
+
+    return { constraints, triggers, indexes };
   }
 
   async getDdl(name: string, kind: DdlObjectKind): Promise<string> {

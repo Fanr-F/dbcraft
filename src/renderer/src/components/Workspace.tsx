@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { DatabaseType, QueryCell, TableMeta } from '@shared/ipc-contract';
 import type { QueryTab, RunState, SessionRuntime } from '../types';
 import { SqlEditor } from '../features/editor/SqlEditor';
@@ -60,6 +61,7 @@ interface WorkspaceProps {
   focusedCell: { rowIndex: number; columnIndex: number } | null;
   onCellFocus: (rowIndex: number, columnIndex: number) => void;
   onViewCell: () => void;
+  onCopyCell: () => void;
   onTablePageChange: (page: number) => void;
   onTablePageSizeChange: (pageSize: number) => void;
   onTableSortChange: (column: string, direction: 'asc' | 'desc') => void;
@@ -74,6 +76,8 @@ interface WorkspaceProps {
   onUndo: () => void;
   onCommitEdits: () => void;
   onRollbackEdits: () => void;
+  /** Agent 作业列表/详情页签内容；由 App 注入，避免 Workspace 了解 IPC 细节。 */
+  agentContent?: ReactNode;
 }
 
 export function Workspace({
@@ -110,6 +114,7 @@ export function Workspace({
   focusedCell,
   onCellFocus,
   onViewCell,
+  onCopyCell,
   onTablePageChange,
   onTablePageSizeChange,
   onTableSortChange,
@@ -122,8 +127,10 @@ export function Workspace({
   onUndo,
   onCommitEdits,
   onRollbackEdits,
+  agentContent,
 }: WorkspaceProps) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const isAgentTab = activeTab.kind === 'agent-detail';
   const ready = sessionRuntime?.status === 'ready';
   const badge = runtimeBadge(sessionRuntime, connectionType);
   const sessionMessage = sessionRuntime?.message ?? null;
@@ -172,7 +179,7 @@ export function Workspace({
             }}
           >
             <span>{tab.title}</span>
-            {tabs.length > 1 && (
+            {(tabs.length > 1 || Boolean(tab.kind)) && (
               <button
                 type="button"
                 className="tab-close"
@@ -245,6 +252,10 @@ export function Workspace({
         </div>
       )}
 
+      {isAgentTab ? (
+        <div className="agent-tab-pane">{agentContent}</div>
+      ) : (
+        <>
       <div className="editor-pane">
         <div className="pane-toolbar">
           <button
@@ -335,6 +346,15 @@ export function Workspace({
             onClick={onViewCell}
           >
             查看单元格
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={!focusedCell || run.columns.length === 0}
+            title="复制选中单元格的内容（NULL 复制为空）"
+            onClick={onCopyCell}
+          >
+            复制单元格
           </button>
           <button
             type="button"
@@ -586,6 +606,8 @@ export function Workspace({
           }}
         />
       </div>
+        </>
+      )}
     </section>
   );
 }

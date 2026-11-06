@@ -14,6 +14,7 @@ import {
 } from '@shared/ipc-contract';
 import { Icon } from '../../components/Icon';
 import { explainErrorText } from '@shared/errors';
+import { normalizeMssqlAddress } from '@shared/mssql-address';
 
 interface FormState {
   type: DatabaseType;
@@ -30,6 +31,8 @@ interface FormState {
   charset: string;
   encrypt: boolean;
   trustServerCertificate: boolean;
+  /** MSSQL 命名实例；填写后忽略端口，走 SQL Browser。 */
+  instanceName: string;
 }
 
 const INITIAL_FORM: FormState = {
@@ -47,6 +50,7 @@ const INITIAL_FORM: FormState = {
   charset: '',
   encrypt: true,
   trustServerCertificate: false,
+  instanceName: '',
 };
 
 interface ConnectionDialogProps {
@@ -80,6 +84,7 @@ function formFromInput(input: ConnectionInput): FormState {
       database: input.database,
       encrypt: input.encrypt,
       trustServerCertificate: input.trustServerCertificate,
+      instanceName: input.instanceName ?? '',
     };
   }
 
@@ -106,16 +111,18 @@ function buildInput(form: FormState): ConnectionInput {
   }
 
   if (form.type === 'mssql') {
+    const address = normalizeMssqlAddress(form.host, form.port, form.instanceName);
     return {
       ...common,
       type: 'mssql',
-      host: form.host.trim(),
-      port: form.port,
+      host: address.host,
+      port: address.port,
       username: form.username.trim(),
       password: form.password,
       database: form.database.trim(),
       encrypt: form.encrypt,
       trustServerCertificate: form.trustServerCertificate,
+      ...(address.instanceName ? { instanceName: address.instanceName } : {}),
     };
   }
 
@@ -138,7 +145,12 @@ function validate(form: FormState): string | null {
     return form.filePath.trim() ? null : '请选择 SQLite 数据库文件';
   }
   if (!form.host.trim()) return '请填写主机地址';
-  if (!Number.isInteger(form.port) || form.port < 1 || form.port > 65535) {
+  const instance = form.instanceName.trim();
+  if (form.type === 'mssql' && instance) {
+    if (!/^[A-Za-z0-9_$#-]{1,64}$/.test(instance)) {
+      return '实例名只能包含字母、数字、下划线、$、# 和连字符';
+    }
+  } else if (!Number.isInteger(form.port) || form.port < 1 || form.port > 65535) {
     return '端口必须是 1–65535 的整数';
   }
   if (!form.username.trim()) return '请填写用户名';
@@ -345,12 +357,26 @@ export function ConnectionDialog({
             ) : (
               <>
                 <label className="field">
-                  <span>主机</span>
+                  <span>{form.type === 'mssql' ? '主机 / host\\实例名' : '主机'}</span>
                   <input
                     value={form.host}
+                    placeholder={
+                      form.type === 'mssql' ? '127.0.0.1 或 192.168.0.52\\SQLEXPRESS' : undefined
+                    }
                     onChange={(event) => update('host', event.target.value)}
                   />
                 </label>
+
+                {form.type === 'mssql' && (
+                  <label className="field">
+                    <span>实例名（可选）</span>
+                    <input
+                      value={form.instanceName}
+                      placeholder="如 SQLEXPRESS"
+                      onChange={(event) => update('instanceName', event.target.value)}
+                    />
+                  </label>
+                )}
 
                 <label className="field">
                   <span>端口</span>
@@ -359,9 +385,22 @@ export function ConnectionDialog({
                     min={1}
                     max={65535}
                     value={form.port}
+                    disabled={form.type === 'mssql' && Boolean(form.instanceName.trim())}
+                    title={
+                      form.type === 'mssql' && form.instanceName.trim()
+                        ? '填写实例名时忽略端口，由 SQL Browser 解析'
+                        : undefined
+                    }
                     onChange={(event) => update('port', Number(event.target.value))}
                   />
                 </label>
+
+                {form.type === 'mssql' && (
+                  <p className="form-note">
+                    填写实例名后忽略端口，通过 SQL Browser（UDP 1434）解析实际端口；
+                    需要服务器启动 SQL Server Browser 服务且防火墙放行 UDP 1434。
+                  </p>
+                )}
 
                 <label className="field">
                   <span>用户名</span>
@@ -474,7 +513,7 @@ export function ConnectionDialog({
 
           <p className="form-note">
             连接配置保存在本地元数据库，密码经系统加密后落盘；导出的配置不包含密码。
-            MSSQL 驱动尚未接入；SQLite / MySQL 系测试会真实连接数据库。
+            MSSQL 使用 SQL 认证；命名实例需要 SQL Server Browser（UDP 1434）。
           </p>
         </div>
 

@@ -61,6 +61,15 @@ export const HISTORY_FTS_SCHEMA = `
 export function ensureHistoryFts(db: DB): boolean {
   try {
     db.exec(HISTORY_FTS_SCHEMA);
+    return rebuildHistoryFts(db);
+  } catch {
+    return false;
+  }
+}
+
+/** 重建 FTS 索引；索引损坏时用于自愈。返回 false 表示重建失败。 */
+export function rebuildHistoryFts(db: DB): boolean {
+  try {
     db.exec("INSERT INTO history_fts(history_fts) VALUES ('rebuild')");
     return true;
   } catch {
@@ -283,6 +292,15 @@ export function listHistory(db: DB, options: HistoryListOptions = {}): HistoryRe
     return rows.map(toRecord);
   } catch (error) {
     if (!useFts) throw error;
+    // 索引损坏时先原地重建再重试一次，避免整段搜索降级为全表 LIKE。
+    if (rebuildHistoryFts(db)) {
+      try {
+        const rows = db.prepare(sql).all(...params) as HistoryRow[];
+        return rows.map(toRecord);
+      } catch {
+        // 重建后仍失败，继续走 LIKE 回退。
+      }
+    }
     // FTS 查询异常（例如损坏的索引）时回退到 LIKE，保证搜索可用。
     const fallbackClauses = clauses.map((clause) =>
       clause.includes('history_fts') ? "sql_text LIKE ? ESCAPE '\\'" : clause,

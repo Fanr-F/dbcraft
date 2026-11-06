@@ -36,6 +36,8 @@ export interface MssqlConnectionInput extends ConnectionCommon {
   database: string;
   encrypt: boolean;
   trustServerCertificate: boolean;
+  /** 命名实例；填写后忽略 port，通过 SQL Browser（UDP 1434）解析实际端口。 */
+  instanceName?: string;
 }
 
 export type ConnectionInput = SqliteConnectionInput | MysqlFamilyConnectionInput | MssqlConnectionInput;
@@ -178,8 +180,45 @@ export interface HistoryListOptions {
 
 export interface SchemaObject {
   name: string;
-  type: 'table' | 'view';
+  type: 'table' | 'view' | 'procedure';
 }
+
+export interface DatabaseInfo {
+  name: string;
+  /** 当前会话 USE 的数据库。 */
+  current: boolean;
+}
+
+export type DatabaseListResult =
+  | { ok: true; databases: DatabaseInfo[] }
+  | { ok: false; message: string };
+
+export type SchemaUseDatabaseResult =
+  | { ok: true; database: string }
+  | { ok: false; message: string };
+
+/** 表下的约束（主键/唯一/外键/CHECK/默认值）。 */
+export interface TableConstraintInfo {
+  name: string;
+  /** 展示用类型：PRIMARY KEY / UNIQUE / FOREIGN KEY / CHECK / DEFAULT。 */
+  kind: string;
+}
+
+export interface TableTriggerInfo {
+  name: string;
+  disabled: boolean;
+}
+
+/** 对象树表节点展开时按需加载的子对象。 */
+export interface TableExtras {
+  constraints: TableConstraintInfo[];
+  triggers: TableTriggerInfo[];
+  indexes: TableIndexInfo[];
+}
+
+export type TableExtrasResult =
+  | { ok: true; extras: TableExtras }
+  | { ok: false; message: string };
 
 export type SchemaGetResult =
   | { ok: true; objects: SchemaObject[] }
@@ -317,10 +356,96 @@ export type DdlExecuteResult =
 export interface DdlExecuteOptions {
   /** SQLite 重建表时需要临时关闭外键；执行结束后恢复。 */
   sqliteForeignKeysOff?: boolean;
+  /** 历史记录用的连接快照；UI 调用会传入，旧调用可省略。 */
+  connectionId?: string;
+  connectionName?: string;
+  database?: string;
 }
 
 export type ExportFormat = 'csv' | 'json' | 'sql' | 'xlsx';
 
+export type AgentJobAction = 'start' | 'stop' | 'enable' | 'disable';
+
+/** SQL Server Agent 作业列表行（PRD 4.8.3 的 8 列）。 */
+export interface AgentJobSummary {
+  jobId: string;
+  name: string;
+  enabled: boolean;
+  category: string;
+  owner: string;
+  /** sysjobhistory.run_status（step_id = 0 的最近一条）；从未运行为 null。 */
+  lastRunStatus: number | null;
+  lastRunAt: string | null;
+  lastRunDurationSeconds: number | null;
+  nextRunAt: string | null;
+  /** 多服务器作业只读展示，禁用启停按钮。 */
+  multiServer: boolean;
+}
+
+export interface AgentJobStep {
+  stepId: number;
+  stepName: string;
+  subsystem: string;
+  command: string;
+  onSuccessAction: number;
+  onSuccessStepId: number;
+  onFailAction: number;
+  onFailStepId: number;
+  retryAttempts: number;
+  retryInterval: number;
+}
+
+export interface AgentJobSchedule {
+  scheduleId: number;
+  name: string;
+  enabled: boolean;
+  /** 由 freq_* 字段生成的可读描述；复杂组合显示原始字段提示。 */
+  frequency: string;
+  nextRunAt: string | null;
+  /** 被多个作业共享时脚本修改会影响其他作业。 */
+  shared: boolean;
+  freqType: number;
+  freqInterval: number;
+  freqSubdayType: number;
+  freqSubdayInterval: number;
+  freqRelativeInterval: number;
+  freqRecurrenceFactor: number;
+}
+
+export interface AgentJobHistory {
+  instanceId: number;
+  stepId: number;
+  stepName: string;
+  runStatus: number;
+  runAt: string;
+  durationSeconds: number;
+  message: string;
+}
+
+export interface AgentJobDetail extends AgentJobSummary {
+  description: string;
+  createdAt: string | null;
+  modifiedAt: string | null;
+  steps: AgentJobStep[];
+  schedules: AgentJobSchedule[];
+  history: AgentJobHistory[];
+}
+
+export type AgentListResult =
+  | { ok: true; jobs: AgentJobSummary[] }
+  | { ok: false; message: string };
+
+export type AgentDetailResult =
+  | { ok: true; detail: AgentJobDetail }
+  | { ok: false; message: string };
+
+export type AgentActionResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+export type AgentScriptResult =
+  | { ok: true; script: string; warnings: string[] }
+  | { ok: false; message: string };
 export interface ExportXlsxRequest {
   suggestedName: string;
   columns: string[];
@@ -339,6 +464,8 @@ export type ExportSaveResult =
 export interface SchemaGetOptions {
   /** 是否包含数据库系统对象（SQLite 的 sqlite_* 等）；默认 false。 */
   includeSystemObjects?: boolean;
+  /** 目标数据库；MSSQL / MySQL 系不传时使用当前会话数据库。 */
+  database?: string;
 }
 
 export interface AppInfo {
@@ -362,6 +489,8 @@ export interface AppSettings {
   historyRetention: number;
   /** 单次查询超时（毫秒）；0 表示不自动取消。 */
   queryTimeoutMs: number;
+  /** 建立连接/测试连接超时（毫秒）；环境变量 `DBCRAFT_CONNECT_TIMEOUT_MS` 优先。 */
+  connectTimeoutMs: number;
   /** 是否记录查询历史。 */
   historyEnabled: boolean;
 }
@@ -437,11 +566,29 @@ export interface DBCraftApi {
   };
   schema: {
     get: (sessionId: string, options?: SchemaGetOptions) => Promise<SchemaGetResult>;
+    databases: (sessionId: string) => Promise<DatabaseListResult>;
+    useDatabase: (sessionId: string, database: string) => Promise<SchemaUseDatabaseResult>;
+    tableExtras: (
+      sessionId: string,
+      database: string,
+      table: string,
+    ) => Promise<TableExtrasResult>;
     table: (sessionId: string, name: string, kind: DdlObjectKind) => Promise<TableMetaResult>;
     describe: (sessionId: string, name: string) => Promise<TableDetailResult>;
   };
   table: {
     apply: (request: TableApplyRequest) => Promise<TableApplyResult>;
+  };
+  agent: {
+    list: (sessionId: string, search?: string) => Promise<AgentListResult>;
+    detail: (sessionId: string, jobName: string, historyLimit?: number) => Promise<AgentDetailResult>;
+    action: (
+      sessionId: string,
+      jobName: string,
+      action: AgentJobAction,
+      context?: { connectionId?: string; connectionName?: string; database?: string },
+    ) => Promise<AgentActionResult>;
+    script: (sessionId: string, jobName: string) => Promise<AgentScriptResult>;
   };
   ddl: {
     get: (sessionId: string, name: string, kind: DdlObjectKind) => Promise<DdlGetResult>;
@@ -497,9 +644,16 @@ export const IPC_CHANNELS = {
   queryExecute: 'query:execute',
   queryCancel: 'query:cancel',
   schemaGet: 'schema:get',
+  schemaDatabases: 'schema:databases',
+  schemaUseDatabase: 'schema:use-database',
+  schemaTableExtras: 'schema:table-extras',
   schemaTable: 'schema:table',
   schemaDescribe: 'schema:describe',
   tableApply: 'table:apply',
+  agentList: 'agent:list',
+  agentDetail: 'agent:detail',
+  agentAction: 'agent:action',
+  agentScript: 'agent:script',
   ddlGet: 'ddl:get',
   ddlExecute: 'ddl:execute',
   exportSave: 'export:save',

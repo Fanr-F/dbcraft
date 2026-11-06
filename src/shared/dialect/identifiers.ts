@@ -11,11 +11,20 @@ export function quoteIdent(type: DatabaseType, name: string): string {
     case 'mariadb':
       return `\`${name.replace(/`/g, '``')}\``;
     case 'mssql':
-      return `[${name.replace(/]/g, ']]')}]`;
+      // MSSQL 对象名可能是 `schema.table`；逐段引用，避免整段被当成一个标识符。
+      return name
+        .split('.')
+        .map((part) => `[${part.replace(/]/g, ']]')}]`)
+        .join('.');
     case 'sqlite':
     default:
       return `"${name.replace(/"/g, '""')}"`;
   }
+}
+
+/** MSSQL 的 N 字符串字面量；Agent 脚本与存储过程调用使用。 */
+export function sqlNString(value: string): string {
+  return `N'${value.replace(/'/g, "''")}'`;
 }
 
 /** 对象树点击后填入的预览查询：方言感知的标识符与分页语法。 */
@@ -61,7 +70,8 @@ export function buildTablePageQuery(
   let where = '';
 
   if (filter?.column && filter.value !== '') {
-    where = ` WHERE ${quoteIdent(type, filter.column)} LIKE ? ESCAPE '!'`;
+    const placeholder = type === 'mssql' ? '@p1' : '?';
+    where = ` WHERE ${quoteIdent(type, filter.column)} LIKE ${placeholder} ESCAPE '!'`;
     params.push(`%${escapeLikeValue(filter.value)}%`);
   }
 

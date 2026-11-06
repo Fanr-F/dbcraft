@@ -1,7 +1,7 @@
 # AGENTS.md
 
 DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScript + RevoGrid Core）。
-当前 M1 开发中：SQLite / MySQL / Percona / MariaDB 已接真实查询；MSSQL 只有连接表单，驱动未接入。
+当前 M1 开发中：SQLite / MySQL / Percona / MariaDB / MSSQL 均已接真实查询；MOD-08 MSSQL Agent 已实现主路径（左侧对象树展开作业 + 详情页签、启停/脚本）。
 
 ## 常用命令
 
@@ -35,6 +35,10 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - SQLite 重建表测试：`npm run test:sqlite-rebuild`（纯 Node + 内存 SQLite）
 - CHECK 提取测试：`npm run test:checks`（纯 Node，不启动 Electron）
 - 表格编辑 DML 测试：`npm run test:dml`（纯 Node + 内存 SQLite，覆盖参数化、乐观锁、主键保护）
+- MSSQL 值/分页 SQL 测试：`npm run test:mssql`（纯 Node，不连接数据库）
+- MSSQL 真实实例联调：`npm run check:mssql`（读取 `.env.local`，建删临时表，需 SQL Server）
+- MSSQL Agent 联调：`npm run check:mssql-agent`（读取 `.env.local`，创建/启动/停止/删除测试作业，需 Agent 服务）
+- MSSQL 多库联调：`npm run check:mssql-multidb`（列出数据库、跨库对象、切换库、约束/触发器/索引，需 SQL Server）
 - 构建：`npm run build`（先 typecheck，产物在 `out/`）
 - 冒烟：`npm run smoke`（构建后检查窗口与 preload 桥接）
 - SQLite E2E：`npm run e2e:sqlite`（自动构建、建临时库、启动 Electron）
@@ -48,18 +52,36 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - `src/shared/ipc-contract.ts` 是 IPC 唯一契约；新增/修改通道时同步更新
   `src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`。
 - `src/main/services/ConnectionManager.ts` 持有 sessions；`DatabaseSession` 是驱动接口；
-  SQLite / MySQL / MariaDB 适配器分别在 `services/` 下。
+  SQLite / MySQL / MariaDB / MSSQL 适配器分别在 `services/` 下。
 - 渲染进程只能通过 `window.dbcraft` 访问主进程；保持 `contextIsolation`、`sandbox`、CSP，
   不要把 Node 或数据库驱动引入 renderer。
-- 驱动分工：MySQL / Percona 用 `mysql2`；MariaDB 用 `mariadb`（`ed25519` 只能走它）。
+- 驱动分工：MySQL / Percona 用 `mysql2`；MariaDB 用 `mariadb`（`ed25519` 只能走它）；
+  MSSQL 直接用 `tedious` 的单个 `Connection`（一个标签一个物理连接，不用 `mssql` 的池包装），
+  参数占位符是 `@p1`/`@p2`（`mssql` 包只保留给探活脚本）。
   Percona 与 MySQL 共用代码路径，但还没有真实 Percona 实例验证。
+- MSSQL 值保真：连接固定 `useUTC: true`，datetime/date/time 按 UTC 分量拼回字符串，不做应用层时区转换；
+  `datetimeoffset` 由驱动归一化为时间点（原始偏移丢失），`decimal` 超过 15 位有效数字会丢精度，
+  `datetime2` 只保留到毫秒——这些是驱动限制，不要假装已完全保真。
+  MSSQL 的 `sys.objects.type` 是 `char(2)`，读取后必须 trim。
+- MSSQL 命名实例：`instanceName` 与 `port` 互斥；命名实例走 SQL Browser（UDP 1434），
+  `normalizeMssqlAddress`（`shared/mssql-address.ts`）负责 `host\instance` / `host:port` 归一化。
+  联调脚本可用 `DBCRAFT_MSSQL_INSTANCE=MSSQLSERVER` 覆盖；默认实例路径已于 2016 SP2 真机回归。
+- MSSQL Agent：查询/脚本生成在 `services/mssql/agent-queries.ts`（纯逻辑、可用 Node 联调），
+  历史记录与 IPC 包装在 `services/mssql/agent.ts`；生命周期操作写 `source=agent-control` 历史，
+  作业配置只生成 `sp_update_job*` 脚本、不直接改。UI 入口是对象树的 `SQL Server Agent → 作业`，
+  展开后在树中直接列出作业（单击选中、双击打开详情页签）；不再单独开作业列表页签。
+- 多数据库对象树：MSSQL / MySQL 系由 `DatabaseSession.databases()` 列出可见库、`useDatabase()` 切库、
+  `schema({ database })` 跨库取表/视图/存储过程、`tableExtras(database, table)` 取约束/触发器/索引；
+  `SchemaObject.type` 含 `procedure`。UI 入口是 `components/ObjectTree.tsx`，数据库/表子对象按需加载；
+  表数据页把所属库写入 `QueryTab.table.database`，查询/元数据/DML 前用 `ensureDatabase` 切回该库。
+  MySQL / MariaDB 多库路径目前只有类型检查与 SQL 走查，需真实实例回归。
 - 结果值保真：`dateStrings`、`bigNumberStrings`、`jsonStrings`；不要做时区转换，
   也不要把 DECIMAL 转成 number。
 - 结果默认最多 2,000 行（设置面板可调 100/500/1000/2000/5000，通过 `QueryRequest.maxRows` 下发），
   且只支持单语句。SQLite 多语句会被明确拒绝，不要用简单 split 绕过。
 - 查询默认 30 秒超时，设置面板可调（0/10/30/60/120 秒，通过 `QueryRequest.timeoutMs` 下发并覆盖
-  `DBCRAFT_QUERY_TIMEOUT_MS`，0 关闭）；连接/测试超时读取
-  `DBCRAFT_CONNECT_TIMEOUT_MS`（默认 8000）。超时复用 cancel，
+  `DBCRAFT_QUERY_TIMEOUT_MS`，0 关闭）；连接/测试超时优先读
+  `DBCRAFT_CONNECT_TIMEOUT_MS`，未设置时用设置面板的 `connectTimeoutMs`（默认 8000）。超时复用 cancel，
   SQLite 会终止 Worker 并让会话失效，UI 必须保留重连入口。新增执行路径也要考虑超时与取消。
 - 取消：MySQL/MariaDB 用控制连接执行 `KILL QUERY`；SQLite 终止该标签的 Worker，会话失效需重连。
   被 KILL 的语句可能仍成功返回（例如 `SLEEP` 返回 1），必须用 `requestId` 的 canceled 标记覆盖响应。
@@ -93,7 +115,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 
 ## 构建 / 测试细节
 
-- 没有 CI、lint；现有门槛是 `typecheck` + `test:safety` + `test:groups` + `test:ddl` + `test:dml` + `test:export` + `test:history` + `test:errors` + `test:connection-export` + `test:timeouts` + `test:pagination` + `test:settings` + `test:sql-highlight` + `test:sql-format` + `test:sql-completion` + `test:sql-brackets` + `test:sql-mask` + `test:sql-script` + `test:xlsx` + `test:sqlite-rebuild` + `test:checks` + `build` + `e2e:sqlite`。
+- 没有 CI、lint；现有门槛是 `typecheck` + `test:safety` + `test:groups` + `test:ddl` + `test:dml` + `test:export` + `test:history` + `test:errors` + `test:connection-export` + `test:timeouts` + `test:pagination` + `test:settings` + `test:sql-highlight` + `test:sql-format` + `test:sql-completion` + `test:sql-brackets` + `test:sql-mask` + `test:sql-script` + `test:xlsx` + `test:sqlite-rebuild` + `test:checks` + `test:mssql` + `build` + `e2e:sqlite`。
 - 纯逻辑模块（`shared/dialect/safety.ts`、`shared/dialect/ddl.ts`、`renderer/src/utils/groups.ts`）
   由 Node 类型剥离直接跑测试；这些模块内部 import 其他 `.ts` 文件时要写显式 `.ts` 后缀
   （`tsconfig.json` 已开启 `allowImportingTsExtensions`）。
@@ -110,6 +132,15 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 
   端口 `3307` / `3308`；凭据见 `spikes/mysql-auth/README.md`（root 空密码；ed_user / Spike!Pass123）。
 - `spikes/` 是参考原型，不要 import 到 `src/`。
+
+## 文档记录（强制）
+
+- **每次改动都必须记录**：代码、脚本、配置、文档。改完在 `doc/WORKLOG.md` 末尾追加一条
+  （编号 `W-YYYYMMDD-NN`），写清诉求、变更、涉及文件、验证结果、遗留/风险；不要改写历史条目。
+- UI 改动同时维护 `doc/UI_TODO.md` 的勾选状态；没在真实 Electron 里点过只能标“进行中/未真机验收”，
+  不能写“已完成”。
+- 状态变化同步 `doc/PROJECT_STATUS.md`；需求取舍不擅自改 `doc/PRD.md`，偏差写进状态文档和日志。
+- 文档索引在 `README.md`「文档」一节。
 
 ## 环境坑
 

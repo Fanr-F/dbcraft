@@ -549,6 +549,50 @@ button:disabled {
   padding-left: 34px;
 }
 
+.tree-child-2 {
+  padding-left: 54px;
+}
+
+.agent-job {
+  gap: 6px;
+}
+
+.agent-job.is-active {
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--text);
+}
+
+.agent-job-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.agent-job-dot.is-on {
+  background: var(--ok, #4ade80);
+}
+
+.agent-job-dot.is-off {
+  background: var(--faint);
+}
+
+.agent-job-tag {
+  margin-left: auto;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.16);
+  color: var(--warn);
+  font-size: 10px;
+}
+
+.tree-error-text {
+  color: var(--danger);
+  white-space: normal;
+  line-height: 1.4;
+}
+
 .tree-item {
   width: 100%;
   border: none;
@@ -571,6 +615,90 @@ button:disabled {
   padding: 4px 12px 6px 34px;
   color: var(--faint);
   font-size: 11px;
+}
+
+.tree-empty.tree-child-2 {
+  padding-left: 54px;
+}
+
+.object-tree-body {
+  padding-top: 2px;
+}
+
+.tree-branch {
+  display: block;
+}
+
+.tree-row.is-current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tree-table-row {
+  gap: 4px;
+}
+
+.tree-chevron-btn,
+.tree-label-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.tree-chevron-btn {
+  flex: 0 0 16px;
+  justify-content: center;
+  color: var(--faint);
+}
+
+.tree-chevron-btn:hover {
+  color: var(--text);
+}
+
+.tree-label-btn {
+  flex: 1;
+}
+
+.tree-label-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-child-3 {
+  padding-left: 72px;
+}
+
+.tree-child-4 {
+  padding-left: 92px;
+}
+
+.tree-empty.tree-child-3 {
+  padding-left: 72px;
+}
+
+.tree-empty.tree-child-4 {
+  padding-left: 92px;
+}
+
+.tree-detail-row {
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: default;
+}
+
+.tree-detail-row span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tree-group {
@@ -1997,4 +2125,210 @@ button:disabled {
 
 .context-menu-item.is-danger:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.14);
+}
+
+/* ── SQL Server Agent ─────────────────────────────────────────── */
+.agent-tab-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.agent-tab-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.agent-context {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agent-row-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.btn.btn-mini {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.agent-modal {
+  width: min(1280px, 96vw);
+  max-height: 92vh;
+}
+
+.agent-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.agent-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-search {
+  flex: 0 1 280px;
+}
+
+.agent-layout {
+  display: grid;
+  grid-template-columns: minmax(440px, 1.05fr) minmax(420px, 1fr);
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-list,
+.agent-detail {
+  min-height: 0;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.agent-detail h3 {
+  margin: 2px 0 8px;
+  font-size: 15px;
+}
+
+.agent-detail h4 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+
+.agent-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.agent-table th,
+.agent-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.agent-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elevated);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.agent-table tbody tr {
+  cursor: pointer;
+}
+
+.agent-table tbody tr:hover {
+  background: var(--panel-soft);
+}
+
+.agent-table tbody tr.is-selected {
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.agent-command {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-empty {
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+  cursor: default;
+}
+
+.agent-tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.16);
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.agent-failed {
+  color: var(--danger);
+}
+
+.agent-meta {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 5px 10px;
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.agent-meta dt {
+  color: var(--muted);
+}
+
+.agent-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-notice {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.agent-notice-info {
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--text-soft);
+}
+
+.agent-notice-error {
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--danger);
+}
+
+.agent-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-history-header h4 {
+  margin: 14px 0 0;
 }

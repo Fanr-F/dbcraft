@@ -4,8 +4,8 @@
 |---|---|
 | 对照文档 | `doc/PRD.md` v0.16、`doc/TECH_DESIGN.md` v0.11 |
 | 最近更新 | 2026-11-06 |
-| 代码基线 | 基线提交 `e4e1a10` 之后的工作区（40 轮改动尚未提交） |
-| 文档定位 | 记录「实现到哪、还差什么、怎么验收、有哪些约定与历史」 |
+| 代码基线 | 基线提交 `e4e1a10` 之后的工作区（40+ 轮改动尚未提交） |
+| 文档定位 | 记录「实现到哪、还差什么、怎么验收、有哪些约定与历史」；操作流水见 `doc/WORKLOG.md` |
 
 > 本文由原先的 `IMPLEMENTATION_STATUS.md`、`PRD_AUDIT.md`、`DDL_PLAN.md`、`VERIFICATION.md`、
 > `LOGGING.md`、`CHANGELOG.md`、`SESSION_2026-11-06.md` 合并整理而成，并取代这些文件。
@@ -32,9 +32,9 @@
 
 **新建连接 → 单语句执行 → 结果网格 → 表格编辑 / 导出 / 查询历史 / UI DDL / 设置。**
 
-- 已接真实查询：SQLite、MySQL、Percona、MariaDB；MSSQL 只有连接表单，驱动未接入。
-- 8 个 P0 模块中，MOD-01～MOD-07 已具备可用主路径，MOD-08（MSSQL Agent）为 0%。
-- 按 PRD §7 的 M1 退出标准（含 MSSQL 连接成功），**M1 尚未达标**；其余核心路径已从骨架补到可用。
+- 已接真实查询：SQLite、MySQL、Percona、MariaDB、MSSQL（SQL Server 2016 SP2 已实测）。
+- 8 个 P0 模块中，MOD-01～MOD-07 已具备可用主路径，MOD-08（MSSQL Agent）已实现列表/详情/启停/脚本主路径（对象树入口 + 主区域页签）。
+- MSSQL 驱动已接入，M1 的「MSSQL 连接成功」门槛已满足；`build` / `smoke` / `e2e:sqlite` 与真机 dogfood 仍待补跑。
 - 主查询仍只接受单语句；多语句脚本通过对象区「脚本」入口走 `ddl:execute`，不改变 `query:execute` 的单语句语义。
 
 ### 1.2 模块完成度总览
@@ -43,21 +43,21 @@
 
 | 模块 | 状态 | 估算 | 已有能力摘要 | 主要缺口 |
 |---|---|---:|---|---|
-| MOD-01 连接管理 | 🟡 | 85% | 五类连接表单、测试连接、元数据库持久化（safeStorage）、编辑/复制/删除/断开、多级分组、搜索、最近使用、系统对象开关、生产危险语句拦截、SQLite 只读降级、库级 DDL、连接导入/导出、字符集、证书错误解释、超时 | MSSQL 驱动、SQLite 文件拖入、认证插件字段、连接/测试超时 UI、全量错误码、真实 Percona 回归 |
+| MOD-01 连接管理 | 🟡 | 90% | 五类连接表单、测试连接、元数据库持久化（safeStorage）、编辑/复制/删除/断开、多级分组、搜索、最近使用、系统对象开关、生产危险语句拦截、SQLite 只读降级、库级 DDL、连接导入/导出、字符集、证书错误解释、超时、MSSQL 连接、多数据库对象树（库/表/视图/存储过程/表子对象） | SQLite 文件拖入、认证插件字段、全量错误码、真实 Percona 与 MySQL 多库回归 |
 | MOD-02 SQL 编辑器 | 🟡 | 75% | 多标签、选区执行、取消、语法高亮、行号、括号匹配、格式化、关键字+对象名补全、草稿自动保存/恢复、关闭确认、SQL 文件打开/保存、多语句脚本窗口 | 列/别名/限定名补全、schema 缓存、错误波浪线、光标所在语句、多结果集/消息面板、最近文件、参数化执行、`GO`/`DELIMITER`、快捷键自定义 |
 | MOD-03 查询历史 | 🟢 | 97% | history 表、成功/失败/取消记录、60s 去重、可配置保留条数、FTS5 trigram 搜索（短查询回退 LIKE）、组合过滤、时间/耗时排序、详情、插入/再次执行、JSON 导出、删除/清空、赋值型脱敏、写入队列与退出前 flush | FTS 索引损坏自动重建、更完整的敏感内容识别 |
 | MOD-04 UI DDL | 🟢 | 95% | 查看/复制 DDL、新建表/视图、加/删/重命名/修改列、SQLite 重建表、重命名/删除表、删除视图、索引管理、表结构（列/索引/外键/CHECK/注释）、表注释编辑、多语句脚本逐条结果、库级 DDL | CHECK 约束编辑（PRD 未要求）、列序调整、触发器/视图在重建表中的保留策略、通用预览弹窗抽取 |
 | MOD-05 表数据编辑 | 🟡 | 86% | 数据页、50/200/500 分页、下拉/列头服务端排序、参数化 LIKE 过滤、单元格编辑、多行粘贴、增删行、单事务提交/回滚、乐观锁、本地撤销栈、主键/生成列保护、无主键高风险仅新增、只读提示 | TSV 区域复制、BLOB 大字段查看器 |
-| MOD-06 结果与导出 | 🟡 | 90% | 结果网格、NULL 灰斜体、数字/日期右对齐、长文本悬停、列头本地排序、复制列名、单元格查看器、行数/耗时/截断提示、CSV/JSON/SQL/Excel 导出、导出前加载全部（最多 1 万行） | 真流式导出/进度/取消、多结果集、多列排序、超过 1 万行、网格右键/单格复制 |
+| MOD-06 结果与导出 | 🟡 | 91% | 结果网格、NULL 灰斜体、数字/日期右对齐、长文本悬停、列头本地排序、复制列名、复制单元格、单元格查看器、行数/耗时/截断提示、CSV/JSON/SQL/Excel 导出、导出前加载全部（最多 1 万行） | 真流式导出/进度/取消、多结果集、多列排序、超过 1 万行、网格右键菜单 |
 | MOD-07 设置与偏好 | 🟡 | 85% | settings 表与面板、深浅主题、编辑器字号、结果行数上限、历史开关/保留条数、查询超时、数据目录、本地统计、诊断日志导出、元数据库备份/恢复、恢复默认、重置应用数据、快捷键说明 | 其他编辑器偏好、快捷键自定义、浅色主题个别强调色、migration 可视化 |
-| MOD-08 MSSQL Agent | ❌ | 0% | 仅有连接表单字段 | MSSQL 驱动、Agent 节点、作业列表/详情、启停/启用/禁用、`sp_update_job*` 脚本生成、权限与共享计划处理 |
+| MOD-08 MSSQL Agent | 🟡 | 80% | 对象树 `SQL Server Agent → 作业 → 作业项`、树内搜索/状态、详情页签（步骤/计划/最近 100/500 条历史）、启动/停止/启用/禁用、`sp_update_job*` 脚本生成、共享计划警告、多服务器只读、步骤命令在编辑器打开、`agent-control` 历史 | 30s 自动刷新、运行中/空闲状态、Agent XPs 禁用/权限失败真机回归、>1000 作业分页 |
 
 ### 1.3 需要确认的决策
 
 | # | 问题 | 现状 | 建议 |
 |---|---|---|---|
 | D-1 | 技术栈是否迁到 PRD 附录 A.2 的 Monaco + Ant Design + Zustand + TanStack Query + SheetJS | 当前是原生 textarea 高亮、手写 CSS、useState、零依赖 XLSX | 二选一：按 PRD 迁移，或正式修订 PRD 承认轻量方案；不要长期两套说法 |
-| D-2 | M1 是否必须包含 MSSQL 连接 | PRD 要求连接成功；代码只有表单，`mssql`/`tedious` 未安装 | 补驱动，或下调 M1 退出标准并同步 PRD |
+| D-2 | M1 是否必须包含 MSSQL 连接 | 已接入 `tedious`，SQL Server 2016 SP2 实测连接/查询/对象树/DDL/表编辑/取消通过 | 后续补 MOD-08 Agent，并按真机 dogfood 收口 |
 | D-3 | 切换连接时是否保留当前 SQL 标签 | PRD §3.1 要求不关闭现有标签；当前会把当前标签改绑到新连接并清空结果 | 建议改为新建标签或按标签独立绑定，见缺陷 B-2 |
 | D-4 | 主查询与多语句的边界 | AGENTS 规定 `query:execute` 只支持单语句；PRD MOD-06 提到「返回最后一条语句结果」 | 保留单语句主查询 + 脚本窗口的现状，并回写 PRD 说明 |
 | D-5 | 结果集默认上限是 1000 还是 2000 | PRD 默认 1000；代码与设置默认 2000，可配置 100/500/1000/2000/5000 | 统一为 2000 并回写 PRD，或把默认值改回 1000 |
@@ -71,6 +71,11 @@
 已实现：
 
 - SQLite / MySQL / Percona / MariaDB / MSSQL 连接表单；SQLite 文件选择；测试连接。
+- MSSQL 走 `tedious` 单连接：测试连接、会话、查询、对象树、表元数据/结构、查看 DDL、表数据页、表编辑与取消；
+  已在 SQL Server 2016 SP2（Developer Edition）上跑通。
+- MSSQL 命名实例：支持 `主机\实例名`、`主机:端口` 与独立实例名输入；实例名走 SQL Browser（UDP 1434）解析，
+  与端口互斥；错误提示会引导启动 SQL Server Browser 或改用端口。
+  已在 SQL Server 2016 SP2 默认实例上通过 SQL Browser 解析 `MSSQLSERVER` → 1433 并完成会话/Agent 联调。
 - 元数据库 `<userData>/dbcraft-meta.db` 持久化连接；密码经 `safeStorage` 加密为 BLOB，只在主进程解密，不回传渲染层。
 - 连接编辑、复制、删除、断开、右键菜单；编辑保存后同连接标签自动用新配置重连。
 - 多级分组（`A/B/C`）、折叠、重命名/删除分组、拖拽换组；连接与对象搜索；最近使用排序。
@@ -80,17 +85,21 @@
 - 库级 DDL 汇总；连接配置 JSON 导入/导出（永不含密码）。
 - 字符集配置；自签名/过期/主机名不匹配/证书链不完整四类中文提示。
 - 会话打开/关闭、对象树、失败原因与重连入口；TLS 回退明文警告条。
+- 多数据库对象树（MSSQL / MySQL 系）：列出有权限的数据库、切换当前库、库下表/视图/存储过程、
+  表下约束/触发器/索引（懒加载）；SQLite 维持单库树。
 
 主要缺口：
 
 | 缺口 | 说明 |
 |---|---|
-| MSSQL 驱动 | `mssql`/`tedious` 未安装；测试连接固定返回 `not-implemented` |
 | SQLite 文件拖入 | 无 drag/drop 处理 |
 | 认证插件 | 表单无插件字段，认证行为由驱动默认值决定 |
-| 连接/测试超时 UI | 仅读取 `DBCRAFT_CONNECT_TIMEOUT_MS`（默认 8000），未进设置面板 |
 | 错误码覆盖 | 常见码已有中文建议，未覆盖全部驱动码 |
 | Percona 真机 | 与 MySQL 共用代码路径，但无真实 Percona 实例回归 |
+| 多库真机 | MSSQL 多库已真机验证；MySQL / MariaDB 多库查询未在真实实例回归（便携实例下载失败） |
+| MSSQL 保真边界 | `datetimeoffset` 原始偏移被驱动归一化为 UTC；`decimal` 超过 15 位有效数字会丢精度；`datetime2` 只到毫秒 |
+| MSSQL UI DDL | 查看 DDL/表结构已支持；UI 建表/改表仍返回「尚未实现」提示，需用 SQL 编辑器 |
+| MSSQL 命名实例 | 默认实例经 SQL Browser 已验证；命名实例（非 `MSSQLSERVER`）与动态端口尚未真机回归 |
 
 ### 2.2 MOD-02 SQL 编辑器
 
@@ -132,7 +141,6 @@
 
 主要缺口：
 
-- FTS 索引损坏时只回退 `LIKE`，不自动重建。
 - 敏感内容识别仅覆盖赋值型，不处理 INSERT 值等复杂形式。
 
 ### 2.4 MOD-04 UI DDL
@@ -166,12 +174,12 @@ SQLite 重建表（含复合主键）、重命名/删除表、删除视图、索
 
 - 结果网格；NULL 灰色斜体；数字/日期右对齐；长文本悬停；列头显示类型 tooltip。
 - 普通查询结果列头本地排序；表数据页列头触发服务端排序。
-- 复制列名（制表符分隔）；单元格查看器（完整值、类型、行号、字符数、复制）。
+- 复制列名（制表符分隔）、复制选中单元格（NULL 复制为空）；单元格查看器（完整值、类型、行号、字符数、复制）。
 - 行数/耗时/截断提示；超过上限显示「仅显示前 N 行」。
 - CSV（UTF-8 BOM、CRLF、转义、NULL 空字段）、JSON、SQL Insert（三方言语义）、Excel `.xlsx`。
 - 导出前「加载全部（最多 10000 行）」：重新执行只读语句后导出；超过 1 万行仍截断提示。
 
-剩余：真流式导出与进度/取消、多结果集页签/消息面板、多列排序、超过 1 万行、网格右键与单格复制。
+剩余：真流式导出与进度/取消、多结果集页签/消息面板、多列排序、超过 1 万行、网格右键菜单。
 
 ### 2.7 MOD-07 设置与偏好
 
@@ -180,6 +188,7 @@ SQLite 重建表（含复合主键）、重命名/删除表、删除视图、索
 - 元数据库 `settings` 表；设置面板；非法值回退默认。
 - 深/浅主题；编辑器字号 12/13/14/16 px；结果行数上限 100/500/1000/2000/5000。
 - 查询历史开关与保留条数；查询超时 0/10/30/60/120 秒（0 为不自动取消）。
+- 连接/测试超时 3/5/8/10/30 秒（默认 8 秒，环境变量 `DBCRAFT_CONNECT_TIMEOUT_MS` 优先）。
 - 本地数据目录、本地统计（连接数/历史条数/设置项数/元数据库大小）。
 - 诊断日志导出（最多 10 MB）、打开日志目录。
 - 元数据库备份/恢复（恢复前校验 `connections` 表并留自动备份）；恢复默认；重置应用数据（输入 `RESET`）。
@@ -189,9 +198,22 @@ SQLite 重建表（含复合主键）、重命名/删除表、删除视图、索
 
 ### 2.8 MOD-08 MSSQL Agent
 
-整模块未实现。前置依赖 MSSQL 驱动。PRD 4.8 的 Agent 节点、作业列表（8 列）、详情（步骤/计划/最近 100 条历史）、
-启动/停止/启用/禁用、`sp_update_job*` 脚本生成、共享计划警告、权限错误透传、多服务器作业标注、
-`agent-control` 历史均未落地。
+已实现（左侧对象树展开 + 作业详情页签）：
+
+- 对象树：MSSQL 连接下 `SQL Server Agent → 作业` 可逐级展开，作业直接列在树中（启用状态点、禁用/MSX 标记、
+  上次结果 tooltip），受对象搜索框过滤；单击选中，双击打开详情页签，同一作业重复打开聚焦已有详情页签。
+  按用户反馈，不再单独打开作业列表页签（与 PRD 4.8.2 的列表页签不同）。
+- 作业详情页签：基本信息、步骤（序号/名称/子系统/成功失败动作/命令摘要，T-SQL 步骤可在编辑器打开命令/复制）、
+  计划（频率描述/下次运行/共享标记）、运行历史（最近 100/500 条，失败消息红色）。
+- 生命周期：启动/停止/启用/禁用，操作期间按钮置灰；停止/禁用二次确认；禁用作业启动被拒绝；
+  失败原样展示 SQL Server 原生错误；操作成功后详情页与左侧作业树刷新。
+- 脚本化编辑：生成 `USE msdb` + `GO` + `sp_update_job` / `sp_update_jobstep` / `sp_update_schedule`，
+  在编辑器打开；共享计划警告；步骤/计划用生成时 id 快照。
+- 生命周期操作写入查询历史，`source = agent-control`。
+- 已验证：SQL Server 2016 SP2 上创建临时作业，跑通列表/搜索/详情/脚本/启用/启动/停止/禁用/历史落库。
+
+剩余：30s 自动刷新与「运行中/空闲」状态（P1）、多服务器作业与 Agent XPs 禁用/权限不足的真机回归、
+共享计划真机验证、作业数 >1000 的服务端分页。
 
 ### 2.9 跨模块与非功能
 
@@ -202,10 +224,10 @@ SQLite 重建表（含复合主键）、重命名/删除表、删除视图、索
 | 错误文案中文映射 | 🟡 | 常见认证/库表/锁/语法/约束/网络/TLS 已覆盖，非全量 |
 | 快捷键全集 | 🟡 | 缺 `Shift+Alt+F`、`Ctrl+E`、`F2`、`Delete` 等，且不可自定义 |
 | 单实例 / CSP / IPC 校验 | ✅ | `contextIsolation`、`sandbox`、来源与参数校验 |
-| 结果值保真 | ✅ | `dateStrings`、`bigNumberStrings`、`jsonStrings`；SQLite safeIntegers |
+| 结果值保真 | 🟡 | SQLite/MySQL 系按原值；MSSQL 的 `datetimeoffset`/高精度 `decimal`/`datetime2` 受驱动限制，见 §2.1 |
 | IPC 流式分块/背压 | ❌ | 主进程内部流式读取，IPC 仍是单次 invoke |
 | 版本化 migration / 升级备份 | 🟡 | 有 `user_version` 与在线备份/恢复，无逐版本迁移备份策略 |
-| 自动化测试 | 🟡 | 20 组纯逻辑测试 + SQLite E2E；无 Vitest、无 React 组件测试、无 CI |
+| 自动化测试 | 🟡 | 21 组纯逻辑测试 + SQLite E2E + MSSQL/Agent 真实实例联调脚本；无 Vitest、无 React 组件测试、无 CI |
 | 性能基线 / 无障碍 | ❌ | 无启动/首屏/内存度量，无 WCAG/键盘路径验收 |
 | 打包 / 签名 / 安装包 | ❌ | `pack` / `dist` 未验证 |
 
@@ -217,13 +239,11 @@ SQLite 重建表（含复合主键）、重命名/删除表、删除视图、索
 
 | # | 级别 | 位置 | 说明 |
 |---|---|---|---|
-| B-1 | P0（M1） | 全局 | MSSQL 驱动未接入，MOD-08 无法开始 |
 | B-2 | P2 | `src/renderer/src/App.tsx` | 切换连接会改绑当前标签并清空结果，与 PRD §3.1「切换连接不关闭现有 SQL 标签」冲突 |
 | B-3 | P2 | `src/main/services/query-values.ts` | 二进制只保留前 32 字节 hex；`Date` 走 `toISOString()` 属应用层时区转换（当前 MySQL 系配置 `dateStrings`，通常走不到） |
-| B-4 | P2 | `ResultGrid` / 结果区 | 列过滤固定 `filter: 'string'`；无网格右键菜单与单格复制（NULL 样式、列类型、单元格查看器已补） |
-| B-5 | P2 | 连接设置 | 连接/测试超时只能通过环境变量配置，设置面板无入口；认证插件字段缺失 |
+| B-4 | P2 | `ResultGrid` / 结果区 | 列过滤固定 `filter: 'string'`；无网格右键菜单（单格复制已由结果工具栏的「复制单元格」提供） |
+| B-5 | P2 | 连接设置 | 认证插件字段缺失；连接/测试超时已进设置面板，环境变量仍可覆盖 |
 | B-6 | P2 | 导出 | 非真流式；最多加载 1 万行；无进度与取消 |
-| B-7 | P3 | 历史 | FTS 索引损坏时不自动重建，仅回退 LIKE |
 | B-8 | P2 | 文档 | README / PRD / TECH 存在滞后描述；本次已更新 README 文档索引与功能概览，PRD/TECH 仍需按决策回写 |
 
 > 不要把以上缺陷描述成「已验收通过」；UI 路径目前仍缺真机验收，见 §4.5。
@@ -239,9 +259,15 @@ SQLite 重建表（含复合主键）、重命名/删除表、删除视图、索
 | MySQL/MariaDB 大结果集 | 改为流式读取，只保留上限行数 |
 | 错误模型不足 | `QueryError` 增加 `sqlState`/`errno`/`retryable`，UI 展示原生错误与中文建议 |
 | MSSQL 会话泄漏 | `openSession` 先关闭同 id 旧会话再判断类型 |
+| MSSQL 驱动未接入 | 用 `tedious` 单连接接入：测试连接/查询/对象树/表元数据/查看 DDL/表数据页/表编辑/取消；SQL Server 2016 SP2 实测通过 |
+| MSSQL 请求并发冲突 | 一个物理连接同一时刻只能跑一个请求，元数据查询改为串行，避免 `EINVALIDSTATE` |
+| MSSQL 值格式 | Date 按 UTC 分量拼回 `datetime/datetime2/date/time`，`decimal` 转字符串；`sys.objects.type` 读取后 trim |
 | 退出时未关闭会话 | `before-quit` 等待 `closeAllSessions()` 后退出 |
 | IPC 来源未校验 | 所有 handler 校验主窗口与主框架，拒绝子帧/未知 WebContents |
 | 连接表单过期文案 | 移除「M0 只验证表单」等描述 |
+| DDL 未写入历史 | `ddl:execute` 成功后按 `source=ddl-preview` 落库，失败保留错误摘要，一次执行合并为一条 |
+| 连接/测试超时无 UI | 设置面板新增「连接/测试超时」，环境变量仍优先；MySQL/MariaDB 建连时透传 |
+| FTS 索引损坏不自愈 | MATCH 异常时先重建索引并重试一次，仍失败才回退 LIKE |
 | E2E 取消断言过弱 | 增加同标签重连、失败提示等断言 |
 
 ### 3.3 风险说明
@@ -252,6 +278,8 @@ SQLite 重建表（含复合主键）、重命名/删除表、删除视图、索
 - MySQL / Percona / MariaDB 的流式读取、TLS 回退、`KILL QUERY` 只在代码层完成，未在真实实例回归。
 - 纯逻辑测试不覆盖 React 组件、真实驱动错误与 IPC 端到端攻击面。
 - `build` / `smoke` / `e2e:sqlite` 依赖本机 Electron 与构建工具，受限沙箱下会因 `spawn EPERM` 失败。
+- MSSQL 只在 SQL Server 2016 SP2 上验证过主路径；未验证 TLS 严格校验、多 schema 同名对象、
+  命名实例（非默认实例）与动态端口、Agent 权限不足/Agent XPs 禁用路径。
 
 ---
 
@@ -283,9 +311,11 @@ npm run test:sql-script
 npm run test:xlsx
 npm run test:sqlite-rebuild
 npm run test:checks
+npm run test:mssql
 ```
 
-结果：`typecheck` 通过；**20 组纯逻辑测试全部通过**。`build` / `smoke` / `e2e:sqlite` 本轮未执行。
+结果：`typecheck` 通过；**21 组纯逻辑测试全部通过**；`check:mssql` 在 SQL Server 2016 SP2 上通过。
+`build` / `smoke` / `e2e:sqlite` 本轮未执行。
 
 | 命令 | 覆盖 |
 |---|---|
@@ -309,6 +339,11 @@ npm run test:checks
 | `test:xlsx` | ZIP/OOXML 结构、单元格类型、XML 转义 |
 | `test:sqlite-rebuild` | 重建表语句生成 + 真实 SQLite 回放（数据/索引/类型/复合主键） |
 | `test:checks` | 从 CREATE TABLE 提取 CHECK（嵌套括号/字符串/注释） |
+| `test:mssql` | MSSQL 值格式化（datetime/date/time/decimal/binary）、限定名/命名实例解析、分页过滤 `@p1`、Agent 时间/频率/脚本生成 |
+
+`npm run check:mssql` / `npm run check:mssql-agent` 不是纯逻辑测试：读取 `.env.local`，在真实 SQL Server 上
+建删临时表/作业，覆盖连接、查询、对象树、表元数据/结构、DDL、表数据页、参数化 DML/乐观锁、取消，
+以及 Agent 列表/详情/脚本/启停/启用/禁用与运行历史。
 
 ### 4.2 必须在沙箱外补跑
 
@@ -385,7 +420,8 @@ npm run e2e:sqlite   # 自动构建、建临时库、完整 SQLite E2E
    Excel 打开 CSV 检查中文不乱码、NULL 为空字段；打开 `.xlsx` 检查列名、数字/布尔/NULL 与中文。
 2. 点「加载全部（最多 10000 行）」后行数增加；对 `UPDATE` 执行该操作应提示仅支持查询语句。
 3. 普通查询结果点击列头可本地排序；「复制列名」粘贴后得到制表符分隔的列名。
-4. 点击单元格后「查看单元格」显示完整值、类型、行号与字符数，可复制。
+4. 点击单元格后「查看单元格」显示完整值、类型、行号与字符数，可复制；
+   「复制单元格」直接把当前单元格内容写入剪贴板（NULL 复制为空）。
 5. 超过结果上限时显示「仅显示前 N 行」。
 
 #### 4.4.4 连接安全
@@ -455,15 +491,22 @@ npm run e2e:sqlite   # 自动构建、建临时库、完整 SQLite E2E
 7. 重置：设置中「重置应用数据」，不输入 RESET 取消；输入 RESET 后连接清空、历史清空、
    设置回默认，界面自动重新加载。
 8. 字号 12/14/16 px 立即生效，重开保留；「恢复默认」+保存后回到 13 px。
-9. 关闭并重开应用，查询历史仍存在。
-10. 查询超时改为 10 秒后长查询约 10 秒提示超时；改为「不自动取消」后不再中断。
-11. 历史保留改为 1000 后执行若干查询，历史表最多保留 1000 条。
+9. 执行 DDL（新建表/加列等）后打开查询历史，能看到 `source=ddl-preview` 的记录；
+   「插入到编辑器」可还原执行过的语句。失败 DDL 同样记录并显示错误摘要。
+10. 关闭并重开应用，查询历史仍存在。
+11. 查询超时改为 10 秒后长查询约 10 秒提示超时；改为「不自动取消」后不再中断。
+12. 历史保留改为 1000 后执行若干查询，历史表最多保留 1000 条。
+13. 设置「连接/测试超时」为 3 秒后测试不可达主机，应在约 3 秒内返回超时错误；
+    设置 `DBCRAFT_CONNECT_TIMEOUT_MS=1000` 重启后环境变量优先。
 
 ### 4.5 已知未验证 / 风险点
 
 - 本轮及前 39 轮的 UI 改动未在真实 Electron 中完整运行；最高风险见 §3.3。
 - MySQL / Percona / MariaDB 流式查询、TLS 回退、`KILL QUERY` 仅代码层完成。
-- MSSQL 驱动未接入，相关入口按「不支持」处理。
+- MSSQL 只在 SQL Server 2016 SP2 上验证主路径；TLS 严格校验、多 schema、命名实例（非默认实例）
+  与动态端口、Agent 权限不足/Agent XPs 禁用路径未验证。
+- MSSQL Agent 的 UI（对象树入口、列表/详情页签、按钮置灰、脚本打开新标签）尚未在真实 Electron 中运行；
+  后端查询/脚本/生命周期已用 Node 对真实实例验证。
 - 打包（`npm run pack` / `dist`）与安装包未验证。
 - 自动化测试只覆盖纯逻辑与 SQLite E2E，不覆盖 React 组件和真实驱动。
 
@@ -476,15 +519,17 @@ npm run e2e:sqlite   # 自动构建、建临时库、完整 SQLite E2E
 
 ### 4.7 仍需实现的功能（不做假验收）
 
-1. **MSSQL 驱动 + MOD-08 Agent**：连接、作业列表/详情、启停、脚本生成、权限处理。
+1. **MOD-08 MSSQL Agent 剩余项**：30s 自动刷新、运行中/空闲状态、Agent XPs 禁用/权限失败真机回归、作业数 >1000 的服务端分页。
 2. **MOD-02 高级编辑**：列/别名/限定名补全、schema 缓存、错误波浪线、光标语句、
    多结果集/消息面板、最近文件、参数化执行、`GO`/`DELIMITER`。
-3. **MOD-06 输出**：真流式导出与进度/取消、多结果集、多列排序、超过 1 万行、网格右键/单格复制。
+3. **MOD-06 输出**：真流式导出与进度/取消、多结果集、多列排序、超过 1 万行、网格右键菜单。
 4. **MOD-05**：TSV 区域复制、BLOB 大字段查看器。
-5. **MOD-04**：CHECK 编辑（可选）、列序调整、重建表时保留触发器/视图、通用预览弹窗。
-6. **MOD-01**：SQLite 拖入、认证插件、连接超时 UI、全量错误码、真实 Percona 回归。
+5. **MOD-04**：MSSQL UI 建表/改表、CHECK 编辑（可选）、列序调整、重建表时保留触发器/视图、通用预览弹窗。
+6. **MOD-01**：SQLite 拖入、认证插件、全量错误码、真实 Percona 回归。
 7. **MOD-07**：更多编辑器偏好、快捷键自定义。
 8. **非功能**：打包/签名/安装包、性能基线、无障碍、CI 门禁。
+
+> MSSQL Agent 剩余项见 §2.8；SQL Browser 默认实例路径已回归（2026-11-06）。
 
 ---
 
@@ -492,20 +537,22 @@ npm run e2e:sqlite   # 自动构建、建临时库、完整 SQLite E2E
 
 ### 5.1 范围与边界
 
-- 方言：SQLite + MySQL / Percona / MariaDB；MSSQL 在驱动接入前不提供 DDL。
+- 方言：SQLite + MySQL / Percona / MariaDB 的建表/改表；MSSQL 已支持查看 DDL、表结构与库级 DDL，
+  UI 建表/改表尚未实现（生成器返回明确提示，请用 SQL 编辑器）。
 - 对象：表、视图、索引；视图只支持查看/删除，不做可视编辑。
 - 所有 UI 生成的 DDL 必须先预览，用户确认后才执行；执行后刷新对象树。
-- 不做：MSSQL DDL、ER 图、迁移文件、版本对比、触发器/存储过程编辑。
-- DDL 是否写入查询历史：PRD 要求 `source=ddl-preview`；当前未落库，作为后续可选项。
+- 不做：MSSQL UI 建表/改表、ER 图、迁移文件、版本对比、触发器/存储过程编辑。
+- DDL 是否写入查询历史：PRD 要求 `source=ddl-preview`，已实现；一次执行合并为一条记录，
+  失败时保留错误摘要。
 
 ### 5.2 已完成阶段
 
 | 阶段 | 状态 | 内容 |
 |---|---|---|
-| Phase 1 只读入口 | ✅ | `ddl:get`；SQLite 读 `sqlite_master`，MySQL 系用 `SHOW CREATE TABLE/VIEW`；对象树右键查看/复制 DDL |
+| Phase 1 只读入口 | ✅ | `ddl:get`；SQLite 读 `sqlite_master`，MySQL 系用 `SHOW CREATE TABLE/VIEW`，MSSQL 读 `sys.sql_modules` / `sys.columns` 生成；对象树右键查看/复制 DDL |
 | Phase 2 预览与执行 | ✅ | `ddl:execute`；SQLite 事务包裹，失败 `ROLLBACK`；单次 ≤50 条、单条 ≤100 KB；逐条结果 |
-| Phase 3 新建表 | ✅ | 表名 + 列（类型/主键/自增/非空/唯一/默认值）；`buildCreateTable`；预览可编辑；执行后刷新 |
-| Phase 4 改表 | ✅ | 重命名/删除表、删除视图、添加/删除/重命名列、MySQL 系修改列、SQLite 重建表、新建视图 |
+| Phase 3 新建表 | ✅ | 表名 + 列（类型/主键/自增/非空/唯一/默认值）；`buildCreateTable`；预览可编辑；执行后刷新（MSSQL 暂不支持） |
+| Phase 4 改表 | ✅ | 重命名/删除表、删除视图、添加/删除/重命名列、MySQL 系修改列、SQLite 重建表、新建视图（MSSQL 暂不支持） |
 | Phase 5 索引与结构 | ✅ | 创建/删除索引；表结构查看（列/索引/外键/CHECK/注释）；表注释编辑；多语句脚本逐条结果；库级 DDL |
 
 ### 5.3 SQLite 重建表（已实现）
@@ -535,7 +582,7 @@ npm run e2e:sqlite   # 自动构建、建临时库、完整 SQLite E2E
 |---|---|---|
 | D1 | 预览弹窗用 Monaco 还是 textarea | 继续 textarea（离线、零依赖）；引入 Monaco 后再统一 |
 | D2 | 是否引入 Ant Design | 不引入，保持手写 CSS；若 D-1 决定迁移再统一评估 |
-| D3 | DDL 写入查询历史 | 预留 `source: 'ddl-preview'`，待确认后再接 |
+| D3 | DDL 写入查询历史 | 已实现：所有 `ddl:execute` 走 `source: 'ddl-preview'`，一次执行合并为一条记录 |
 | D4 | 多语句上限 | 维持单次 ≤50 条、单条 ≤100 KB |
 | D5 | 重建表外键/触发器 | 继续用 `PRAGMA foreign_keys=OFF` + `foreign_key_check`；触发器保留另行设计 |
 | D6 | 视图编辑 | 本期不支持，仅查看/删除 |
@@ -556,7 +603,7 @@ npm run e2e:sqlite   # 自动构建、建临时库、完整 SQLite E2E
 - 所有生成 SQL 先预览；删除类必须输入对象名确认；
 - SQLite 重建后数据、显式索引、类型、复合主键保留；外键冲突整体回滚；
 - MySQL 系修改列生成单条 `ALTER`；SQLite 修改列生成多语句预览；
-- MSSQL 入口禁用并说明原因。
+- MSSQL 的 UI 建表/改表入口给出「尚未实现，请用 SQL 编辑器」提示；查看 DDL/表结构可用。
 
 ---
 
@@ -678,12 +725,14 @@ password / passwd / secret / token / authorization / apiKey / api_key / cookie
 | 领域 | 关键内容 |
 |---|---|
 | 编辑器 | 语法高亮、行号、括号匹配、格式化、基础补全、SQL 文件打开/保存、草稿与崩溃恢复、关闭确认、选中执行、多语句脚本 |
-| 查询历史 | FTS5 trigram、组合过滤、时间/耗时排序、详情、再次执行、JSON 导出、按连接清空、赋值型脱敏、写入队列、历史开关、保留条数 |
-| UI DDL | 重命名/删除表、添加/删除/重命名列、MySQL 修改列、SQLite 重建表（含复合主键）、新建视图、索引管理、表结构（索引/外键/CHECK/注释）、表注释编辑、脚本逐条结果 |
+| 查询历史 | FTS5 trigram、索引损坏自愈（重建后重试，仍失败回退 LIKE）、组合过滤、时间/耗时排序、详情、再次执行、JSON 导出、按连接清空、赋值型脱敏、写入队列、历史开关、保留条数 |
+| UI DDL | 重命名/删除表、添加/删除/重命名列、MySQL 修改列、SQLite 重建表（含复合主键）、新建视图、索引管理、表结构（索引/外键/CHECK/注释）、表注释编辑、脚本逐条结果、DDL 执行写入历史 |
 | 表数据编辑 | 单元格编辑、多行粘贴、增删行、单事务提交/回滚、乐观锁、撤销栈、无主键高风险仅新增、服务端过滤、参数化 DML |
-| 结果与导出 | NULL/数字/日期样式、长文本悬停、列头本地排序、复制列名、单元格查看器、Excel 导出、加载全部 1 万行 |
-| 设置与诊断 | settings 表、深浅主题、字号、结果上限、历史保留、查询超时、本地统计、诊断日志导出、元数据库备份/恢复、恢复默认、重置应用数据、快捷键说明 |
-| 测试 | 纯逻辑测试扩到 20 组；E2E 增加 DDL/历史/取消/精度/系统对象等断言 |
+| 结果与导出 | NULL/数字/日期样式、长文本悬停、列头本地排序、复制列名、复制单元格、单元格查看器、Excel 导出、加载全部 1 万行 |
+| MSSQL 驱动 | `tedious` 单连接接入：测试连接/查询/对象树/表元数据/查看 DDL/表数据页/参数化 DML/乐观锁/取消/视图；SQL Server 2016 SP2 实测通过 |
+| MSSQL Agent | 作业列表/详情/启停/启用/禁用/脚本生成/共享计划警告/`agent-control` 历史；SQL Server 2016 SP2 实测通过 |
+| 设置与诊断 | settings 表、深浅主题、字号、结果上限、历史保留、查询超时、连接/测试超时、本地统计、诊断日志导出、元数据库备份/恢复、恢复默认、重置应用数据、快捷键说明 |
+| 测试 | 纯逻辑测试扩到 21 组（新增 MSSQL 值/分页）；E2E 增加 DDL/历史/取消/精度/系统对象等断言 |
 | 文档 | 多份状态文档（本次合并为本文） |
 
 ### 7.3 验证快照
@@ -692,9 +741,21 @@ password / passwd / secret / token / authorization / apiKey / api_key / cookie
 |---|---|
 | 2026-11-05 | `typecheck` 与 9 组纯逻辑测试通过；`build`/E2E 受沙箱阻塞 |
 | 2026-11-06（40 轮收尾） | 旧文档记录为 17～21 组通过，统计口径不一致 |
-| 2026-11-06（本次整理） | `typecheck` + **20 组纯逻辑测试全部通过**；`build`/`smoke`/`e2e:sqlite` 未执行 |
+| 2026-11-06（MSSQL + Agent 接入） | `typecheck` + **21 组纯逻辑测试全部通过**；`check:mssql` / `check:mssql-agent` 在 SQL Server 2016 SP2 上通过；`build`/`smoke`/`e2e:sqlite` 未执行 |
 
-> 旧文档中的「21 组」包含统计口径差异；`package.json` 当前实际是 20 个 `test:*` 脚本。
+> 旧文档中的「21 组」包含统计口径差异；`package.json` 当前实际是 21 个 `test:*` 脚本（另有 1 个需真实 MSSQL 的 `check:mssql`）。
+
+### 7.4 2026-11-06 后续调整
+
+> 逐条明细见 `doc/WORKLOG.md`；UI 逐项状态见 `doc/UI_TODO.md`。
+
+| 主题 | 关键内容 |
+|---|---|
+| MSSQL 命名实例 | SQL Browser UDP 1434 真机打通；`check:mssql` / `check:mssql-agent` 支持 `DBCRAFT_MSSQL_INSTANCE` |
+| 密码存储审计 | 确认 safeStorage/DPAPI 加密、渲染层不可见、加密不可用时不落明文；记录与 PRD 回退方案的差异 |
+| 剩余工作盘点 | 对照 PRD 标记 M1/M2/M3 的 P0 缺口与工程化缺口 |
+| Agent UI 调整 | 弹窗 → 主区域页签 → **左侧树展开作业 + 详情页签**（按用户反馈覆盖 PRD 列表页签） |
+| 文档制度 | 新增 `doc/WORKLOG.md`（追加式操作日志）与 `doc/UI_TODO.md`（UI 调整清单） |
 
 ---
 
@@ -711,6 +772,7 @@ password / passwd / secret / token / authorization / apiKey / api_key / cookie
 
 - 连接：`connection:list/save/delete/remove-all/open/import`
 - 查询：`QueryRequest.params / maxRows / timeoutMs`
+- MSSQL Agent：`agent:list/detail/action/script`
 - 元数据：`schema:table`、`schema:describe`
 - 表格编辑：`table:apply`
 - DDL：`ddl:get/execute`（含 `sqliteForeignKeysOff`）
@@ -744,6 +806,9 @@ npm run test:sql-script
 npm run test:xlsx
 npm run test:sqlite-rebuild
 npm run test:checks
+npm run test:mssql
+npm run check:mssql   # 需 .env.local 与可连的 SQL Server
+npm run check:mssql-agent   # 需 SQL Server Agent 服务（会建删测试作业）
 
 npm run build
 npm run smoke

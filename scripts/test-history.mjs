@@ -14,6 +14,7 @@ import {
   deleteHistory,
   ensureHistoryFts,
   listHistory,
+  rebuildHistoryFts,
   recordHistory,
 } from '../src/main/storage/history-store.ts';
 
@@ -199,6 +200,17 @@ deleteHistory(ftsDb, ftsId);
 assert(
   listHistory(ftsDb, { query: 'orders' }).length === 0,
   'FTS delete sync failed',
+);
+// 索引被清空（损坏/重建场景）时，rebuildHistoryFts 能恢复搜索。
+ftsDb.exec("INSERT INTO history_fts(history_fts) VALUES ('delete-all')");
+assert(
+  listHistory(ftsDb, { query: 'custom' }).length === 0,
+  'wiped FTS index should lose matches',
+);
+assert(rebuildHistoryFts(ftsDb), 'FTS rebuild failed');
+assert(
+  listHistory(ftsDb, { query: 'custom' }).length === 1,
+  'FTS rebuild did not restore matches',
 );
 ftsDb.close();
 

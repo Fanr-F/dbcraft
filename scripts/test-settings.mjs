@@ -55,6 +55,20 @@ assert(
   'invalid timeout should fall back',
 );
 assert(
+  normalizeAppSettings({ resultRowLimit: 500, connectTimeoutMs: 5000 }).connectTimeoutMs ===
+    5000,
+  'connect timeout rejected',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500, connectTimeoutMs: 1234 }).connectTimeoutMs ===
+    8000,
+  'invalid connect timeout should fall back',
+);
+assert(
+  normalizeAppSettings(null).connectTimeoutMs === DEFAULT_APP_SETTINGS.connectTimeoutMs,
+  'missing connect timeout should default',
+);
+assert(
   normalizeAppSettings({ resultRowLimit: 500, historyEnabled: false }).historyEnabled === false,
   'history disable rejected',
 );

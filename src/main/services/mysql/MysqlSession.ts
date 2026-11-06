@@ -2,17 +2,23 @@ import mysql from 'mysql2/promise';
 import type { Connection as CoreConnection } from 'mysql2';
 import type { ConnectionOptions, FieldPacket, ResultSetHeader } from 'mysql2/promise';
 import type {
+  DatabaseInfo,
   DatabaseType,
   DdlObjectKind,
   MysqlFamilyConnectionInput,
   QueryCell,
   QueryColumn,
   QueryResult,
+  SchemaGetOptions,
   SchemaObject,
   SslMode,
   TableColumnMeta,
+  TableConstraintInfo,
   TableDetail,
+  TableExtras,
+  TableIndexInfo,
   TableMeta,
+  TableTriggerInfo,
 } from '../../../shared/ipc-contract';
 import { quoteIdent } from '../../../shared/dialect/identifiers';
 import { parseTimeoutMs } from '../../../shared/timeouts';
@@ -91,7 +97,10 @@ export class MysqlSession implements DatabaseSession {
     this.note = note;
   }
 
-  static async create(config: MysqlFamilyConnectionInput): Promise<MysqlSession> {
+  static async create(
+    config: MysqlFamilyConnectionInput,
+    options: { connectTimeoutMs?: number } = {},
+  ): Promise<MysqlSession> {
     const label = config.type === 'percona' ? 'Percona' : 'MySQL';
     const baseOptions: ConnectionOptions = {
       host: config.host,
@@ -99,7 +108,8 @@ export class MysqlSession implements DatabaseSession {
       user: config.username,
       password: config.password,
       database: config.database || undefined,
-      connectTimeout: parseTimeoutMs(process.env['DBCRAFT_CONNECT_TIMEOUT_MS'], 8000),
+      connectTimeout:
+        options.connectTimeoutMs ?? parseTimeoutMs(process.env['DBCRAFT_CONNECT_TIMEOUT_MS'], 8000),
       dateStrings: true,
       supportBigNumbers: true,
       bigNumberStrings: true,
@@ -221,19 +231,121 @@ export class MysqlSession implements DatabaseSession {
     });
   }
 
-  async schema(): Promise<SchemaObject[]> {
+  async databases(): Promise<DatabaseInfo[]> {
+    const [currentRows] = await this.connection.query({
+      sql: 'SELECT DATABASE()',
+      rowsAsArray: true,
+    });
+    const current = String((currentRows as unknown[][])[0]?.[0] ?? '');
+    const [rows] = await this.connection.query({
+      sql: 'SHOW DATABASES',
+      rowsAsArray: true,
+    });
+    return (rows as unknown[][]).map((row) => {
+      const name = String(row[0] ?? '');
+      return { name, current: name === current };
+    });
+  }
+
+  async useDatabase(database: string): Promise<void> {
+    const name = database.trim();
+    if (!name) throw new Error('数据库名不能为空。');
+    await this.connection.query({ sql: `USE ${quoteIdent(this.dialect, name)}` });
+  }
+
+  private async databaseOrDefault(preferred?: string): Promise<string> {
+    const name = preferred?.trim();
+    if (name) return name;
+    const [rows] = await this.connection.query({
+      sql: 'SELECT DATABASE()',
+      rowsAsArray: true,
+    });
+    return String((rows as unknown[][])[0]?.[0] ?? '');
+  }
+
+  async schema(options: SchemaGetOptions = {}): Promise<SchemaObject[]> {
+    const database = await this.databaseOrDefault(options.database);
+    if (!database) return [];
+
     const [rows] = await this.connection.query({
       sql: `SELECT TABLE_NAME AS name, TABLE_TYPE AS type
             FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
+            WHERE TABLE_SCHEMA = ?
             ORDER BY TABLE_TYPE, TABLE_NAME`,
+      values: [database],
       rowsAsArray: true,
     });
-
-    return (rows as unknown[][]).map((row) => ({
+    const objects: SchemaObject[] = (rows as unknown[][]).map((row) => ({
       name: String(row[0] ?? ''),
       type: row[1] === 'VIEW' ? 'view' : 'table',
     }));
+
+    const [procedures] = await this.connection.query({
+      sql: `SELECT ROUTINE_NAME
+            FROM information_schema.ROUTINES
+            WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE'
+            ORDER BY ROUTINE_NAME`,
+      values: [database],
+      rowsAsArray: true,
+    });
+    for (const row of procedures as unknown[][]) {
+      objects.push({ name: String(row[0] ?? ''), type: 'procedure' });
+    }
+    return objects;
+  }
+
+  async tableExtras(database: string, table: string): Promise<TableExtras> {
+    const db = database.trim();
+    if (!db) throw new Error('数据库名不能为空。');
+
+    const [constraintRows] = await this.connection.query({
+      sql: `SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE
+            FROM information_schema.TABLE_CONSTRAINTS
+            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+            ORDER BY CONSTRAINT_TYPE, CONSTRAINT_NAME`,
+      values: [db, table],
+      rowsAsArray: true,
+    });
+    const constraints: TableConstraintInfo[] = (constraintRows as unknown[][]).map((row) => ({
+      name: String(row[0] ?? ''),
+      kind: String(row[1] ?? ''),
+    }));
+
+    const [triggerRows] = await this.connection.query({
+      sql: `SELECT TRIGGER_NAME
+            FROM information_schema.TRIGGERS
+            WHERE TRIGGER_SCHEMA = ? AND EVENT_OBJECT_TABLE = ?
+            ORDER BY TRIGGER_NAME`,
+      values: [db, table],
+      rowsAsArray: true,
+    });
+    const triggers: TableTriggerInfo[] = (triggerRows as unknown[][]).map((row) => ({
+      name: String(row[0] ?? ''),
+      disabled: false,
+    }));
+
+    const [indexRows] = await this.connection.query({
+      sql: `SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+            ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+      values: [db, table],
+      rowsAsArray: true,
+    });
+    const indexMap = new Map<string, TableIndexInfo>();
+    for (const row of indexRows as unknown[][]) {
+      const name = String(row[0] ?? '');
+      if (!name) continue;
+      const group = indexMap.get(name) ?? {
+        name,
+        unique: Number(row[1] ?? 1) === 0,
+        columns: [],
+      };
+      group.columns.push(String(row[2] ?? ''));
+      indexMap.set(name, group);
+    }
+
+    return { constraints, triggers, indexes: [...indexMap.values()] };
   }
 
   async getDdl(name: string, kind: DdlObjectKind): Promise<string> {

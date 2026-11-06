@@ -37,6 +37,12 @@ const mssqlSchema = common.extend({
   ...serverFields,
   encrypt: z.boolean(),
   trustServerCertificate: z.boolean(),
+  instanceName: z
+    .string()
+    .trim()
+    .max(64)
+    .regex(/^[A-Za-z0-9_$#-]*$/, '实例名只能包含字母、数字、下划线、$、# 和连字符')
+    .optional(),
 });
 
 export const connectionInputSchema: z.ZodType<ConnectionInput> = z.discriminatedUnion('type', [
@@ -88,6 +94,22 @@ export const historyListSchema = z.object({
 export const schemaGetSchema = z.object({
   sessionId: z.string().min(1).max(128),
   includeSystemObjects: z.boolean().optional().default(false),
+  database: z.string().min(1).max(256).optional(),
+});
+
+export const schemaDatabasesSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+});
+
+export const schemaUseDatabaseSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  database: z.string().min(1).max(256),
+});
+
+export const schemaTableExtrasSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  database: z.string().min(1).max(256),
+  table: z.string().min(1).max(256),
 });
 
 export const ddlGetSchema = z.object({
@@ -134,12 +156,41 @@ export const tableApplySchema = z.object({
   database: z.string().max(128).optional(),
 });
 
-export const ddlExecuteSchema = z.object({
-  sessionId: z.string().min(1).max(128),
+export const ddlExecuteSchema = z.object({  sessionId: z.string().min(1).max(128),
   statements: z.array(z.string().max(100_000)).min(1).max(50),
   options: z
-    .object({ sqliteForeignKeysOff: z.boolean().optional() })
+    .object({
+      sqliteForeignKeysOff: z.boolean().optional(),
+      connectionId: z.string().max(128).optional(),
+      connectionName: z.string().max(120).optional(),
+      database: z.string().max(128).optional(),
+    })
     .optional(),
+});
+
+export const agentListSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  search: z.string().max(200).optional().default(''),
+});
+
+export const agentDetailSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  jobName: z.string().trim().min(1).max(256),
+  historyLimit: z.union([z.literal(100), z.literal(500)]).optional(),
+});
+
+export const agentActionSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  jobName: z.string().trim().min(1).max(256),
+  action: z.enum(['start', 'stop', 'enable', 'disable']),
+  connectionId: z.string().max(128).optional(),
+  connectionName: z.string().max(120).optional(),
+  database: z.string().max(128).optional(),
+});
+
+export const agentScriptSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  jobName: z.string().trim().min(1).max(256),
 });
 
 export const exportSaveSchema = z.object({
@@ -166,6 +217,7 @@ export const settingsSaveSchema = z.object({
   editorFontSize: z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(16)]),
   historyRetention: z.union([z.literal(1000), z.literal(5000), z.literal(10000), z.literal(50000)]),
   queryTimeoutMs: z.union([z.literal(0), z.literal(10000), z.literal(30000), z.literal(60000), z.literal(120000)]),
+  connectTimeoutMs: z.union([z.literal(3000), z.literal(5000), z.literal(8000), z.literal(10000), z.literal(30000)]),
   historyEnabled: z.boolean(),
 });
 

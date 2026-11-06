@@ -8,6 +8,10 @@ export interface QueryTab {
   title: string;
   sql: string;
   connectionId: string | null;
+  /** 主区域页签类型；缺省为 SQL 编辑器页。作业列表在左侧对象树中展开。 */
+  kind?: 'agent-detail';
+  /** 作业详情页对应的作业名。 */
+  agentJob?: string;
   /** 最近一次编辑尚未写入草稿；关闭标签时提示。 */
   dirty?: boolean;
   /** 从磁盘打开的 SQL 文件；保存时直接覆盖。 */
@@ -16,6 +20,8 @@ export interface QueryTab {
   table?: {
     name: string;
     kind?: 'table' | 'view';
+    /** 表所属数据库；多库连接切换标签后仍能回到正确库。 */
+    database?: string;
     page: number;
     pageSize: number;
     sort?: {

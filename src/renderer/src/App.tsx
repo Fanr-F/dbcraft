@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AppInfo,
   AppSettings,
+  AgentJobSummary,
   ConnectionInput,
+  DatabaseInfo,
   DatabaseType,
   DdlObjectKind,
   DdlStatementResult,
@@ -13,12 +15,13 @@ import type {
   TableColumnMeta,
   TableDetail,
   TableEdit,
+  TableExtras,
   TableMeta,
 } from '@shared/ipc-contract';
 import { DEFAULT_APP_SETTINGS } from '@shared/settings';
 import { SQL_KEYWORD_LIST } from './utils/sql-highlight';
 import { formatSql } from './utils/sql-format';
-import { buildTablePageQuery, buildTablePreviewSql } from '@shared/dialect/identifiers';
+import { buildTablePageQuery, buildTablePreviewSql, quoteIdent } from '@shared/dialect/identifiers';
 import { inspectDangerousSql, type DangerMatch } from '@shared/dialect/safety';
 import { explainErrorText, explainQueryError } from '@shared/errors';
 import { serializeConnections } from '@shared/connection-export';
@@ -28,6 +31,7 @@ import { TableDesigner } from './components/TableDesigner';
 import { TableActionDialog, type TableActionMode } from './components/TableActionDialog';
 import { TableStructureDialog } from './components/TableStructureDialog';
 import { AddColumnDialog } from './components/AddColumnDialog';
+import { AgentTabPanel } from './components/AgentTabPanel';
 import { AlterColumnDialog } from './components/AlterColumnDialog';
 import { CellViewerDialog } from './components/CellViewerDialog';
 import { CreateViewDialog } from './components/CreateViewDialog';
@@ -119,13 +123,16 @@ function loadDraftTabs(): { tabs: QueryTab[]; activeTabId: string } | null {
   }
 }
 
-/** 标签只持久化 SQL 与绑定关系；表数据页的分页上下文不跨会话恢复。 */
+/** 标签只持久化 SQL 与绑定关系；表数据页与 Agent 页签不跨会话恢复。 */
 function persistDraftTabs(tabs: QueryTab[], activeTabId: string): boolean {
   try {
+    const sqlTabs = tabs.filter((tab) => !tab.kind);
     const payload: DraftPayload = {
       version: DRAFT_VERSION,
-      activeTabId,
-      tabs: tabs.slice(0, MAX_DRAFT_TABS).map((tab) => ({
+      activeTabId: sqlTabs.some((tab) => tab.id === activeTabId)
+        ? activeTabId
+        : (sqlTabs[0]?.id ?? activeTabId),
+      tabs: sqlTabs.slice(0, MAX_DRAFT_TABS).map((tab) => ({
         id: tab.id,
         title: tab.title,
         sql: tab.sql,
@@ -231,6 +238,11 @@ function createId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 表子对象缓存键：数据库名 + 表名，避免跨库同名表串数据。 */
+function tableExtrasKey(database: string, table: string): string {
+  return `${database}\u0000${table}`;
+}
+
 function formatErrorMeta(error: QueryError): string | null {
   const parts: string[] = [];
   if (error.code) parts.push(error.code);
@@ -251,6 +263,16 @@ export default function App() {
   const [sessions, setSessions] = useState<Record<string, SessionRuntime>>({});
   const [schemas, setSchemas] = useState<Record<string, SchemaObject[]>>({});
   const [schemaLoadingId, setSchemaLoadingId] = useState<string | null>(null);
+  const [databasesByTab, setDatabasesByTab] = useState<Record<string, DatabaseInfo[]>>({});
+  const [dbObjectsByTab, setDbObjectsByTab] = useState<
+    Record<string, Record<string, SchemaObject[]>>
+  >({});
+  const [currentDatabaseByTab, setCurrentDatabaseByTab] = useState<Record<string, string>>({});
+  const [dbLoadingByTab, setDbLoadingByTab] = useState<Record<string, string | null>>({});
+  const [tableExtrasByTab, setTableExtrasByTab] = useState<
+    Record<string, Record<string, TableExtras>>
+  >({});
+  const [tableExtrasLoadingKey, setTableExtrasLoadingKey] = useState<string | null>(null);
   const [showSystemObjects, setShowSystemObjects] = useState<Record<string, boolean>>({});
   const [runs, setRuns] = useState<Record<string, RunState>>({});
   const [runningTabs, setRunningTabs] = useState<Record<string, boolean>>({});
@@ -300,6 +322,11 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scriptOpen, setScriptOpen] = useState(false);
+  const [agentRefreshKey, setAgentRefreshKey] = useState(0);
+  const [agentJobsByTab, setAgentJobsByTab] = useState<
+    Record<string, { jobs: AgentJobSummary[]; error: string | null }>
+  >({});
+  const [agentJobsLoadingTab, setAgentJobsLoadingTab] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const tabCounter = useRef(
@@ -423,6 +450,9 @@ export default function App() {
     connections.find((connection) => connection.id === activeTab.connectionId) ?? null;
   const activeRuntime = sessions[activeTab.id] ?? null;
   const activeSchema = schemas[activeTab.id] ?? [];
+  const activeAgentJobs = agentJobsByTab[activeTab.id] ?? null;
+  const activeAgentJob =
+    activeTab.kind === 'agent-detail' ? (activeTab.agentJob ?? null) : null;
   const activeRun = runs[activeTab.id] ?? EMPTY_RUN;
   const completionItems = useMemo(
     () => [...SQL_KEYWORD_LIST, ...activeSchema.map((object) => object.name)],
@@ -474,24 +504,161 @@ export default function App() {
     noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
   };
 
-  const loadSchema = async (sessionId: string, includeSystemObjects: boolean) => {
+  const loadDatabaseObjects = async (
+    tabId: string,
+    database: string,
+    options: { activate?: boolean; force?: boolean; includeSystemObjects?: boolean } = {},
+  ) => {
     const api = window.dbcraft;
     if (!api) return;
+    const cached = dbObjectsByTab[tabId]?.[database];
+    if (cached && !options.force) {
+      if (options.activate) {
+        setCurrentDatabaseByTab((current) => ({ ...current, [tabId]: database }));
+        setSchemas((current) => ({ ...current, [tabId]: cached }));
+      }
+      return;
+    }
 
-    setSchemaLoadingId(sessionId);
+    setSchemaLoadingId(tabId);
+    setDbLoadingByTab((current) => ({ ...current, [tabId]: database }));
     try {
-      const result = await api.schema.get(sessionId, { includeSystemObjects });
+      const result = await api.schema.get(tabId, {
+        includeSystemObjects:
+          options.includeSystemObjects ?? (showSystemObjects[tabId] ?? false),
+        database,
+      });
       if (!result.ok) {
-        setSchemas((current) => ({ ...current, [sessionId]: [] }));
         showNotice('error', result.message);
         return;
       }
-      setSchemas((current) => ({ ...current, [sessionId]: result.objects }));
+      setDbObjectsByTab((current) => ({
+        ...current,
+        [tabId]: { ...(current[tabId] ?? {}), [database]: result.objects },
+      }));
+      if (options.activate || currentDatabaseByTab[tabId] === database) {
+        setSchemas((current) => ({ ...current, [tabId]: result.objects }));
+      }
+      if (options.activate) {
+        setCurrentDatabaseByTab((current) => ({ ...current, [tabId]: database }));
+      }
     } catch (error) {
-      setSchemas((current) => ({ ...current, [sessionId]: [] }));
       showNotice('error', error instanceof Error ? error.message : '加载对象树失败。');
     } finally {
-      setSchemaLoadingId((current) => (current === sessionId ? null : current));
+      setDbLoadingByTab((current) =>
+        current[tabId] === database ? { ...current, [tabId]: null } : current,
+      );
+      setSchemaLoadingId((current) => (current === tabId ? null : current));
+    }
+  };
+
+  const loadDatabases = async (tabId: string, includeSystemObjects?: boolean) => {
+    const api = window.dbcraft;
+    if (!api) return;
+    const include = includeSystemObjects ?? (showSystemObjects[tabId] ?? false);
+    setSchemaLoadingId(tabId);
+    try {
+      const result = await api.schema.databases(tabId);
+      if (!result.ok) {
+        setDatabasesByTab((current) => ({ ...current, [tabId]: [] }));
+        setSchemas((current) => ({ ...current, [tabId]: [] }));
+        showNotice('error', result.message);
+        return;
+      }
+      setDatabasesByTab((current) => ({ ...current, [tabId]: result.databases }));
+      const current =
+        result.databases.find((database) => database.current)?.name ??
+        result.databases[0]?.name ??
+        '';
+      if (!current) {
+        setSchemas((currentSchemas) => ({ ...currentSchemas, [tabId]: [] }));
+        return;
+      }
+      setCurrentDatabaseByTab((currentDb) => ({ ...currentDb, [tabId]: current }));
+      await loadDatabaseObjects(tabId, current, {
+        activate: true,
+        force: true,
+        includeSystemObjects: include,
+      });
+    } catch (error) {
+      setSchemas((current) => ({ ...current, [tabId]: [] }));
+      showNotice('error', error instanceof Error ? error.message : '加载对象树失败。');
+    } finally {
+      setSchemaLoadingId((current) => (current === tabId ? null : current));
+    }
+  };
+
+  /** 兼容旧调用：刷新某个标签的数据库列表和当前库对象。 */
+  const loadSchema = async (sessionId: string, includeSystemObjects: boolean) => {
+    await loadDatabases(sessionId, includeSystemObjects);
+  };
+
+  const switchDatabase = async (tabId: string, database: string): Promise<boolean> => {
+    const api = window.dbcraft;
+    if (!api) return false;
+    try {
+      const result = await api.schema.useDatabase(tabId, database);
+      if (!result.ok) {
+        showNotice('error', result.message);
+        return false;
+      }
+      setCurrentDatabaseByTab((current) => ({ ...current, [tabId]: database }));
+      setDatabasesByTab((current) => ({
+        ...current,
+        [tabId]: (current[tabId] ?? []).map((item) => ({
+          ...item,
+          current: item.name === database,
+        })),
+      }));
+      await loadDatabaseObjects(tabId, database, { activate: true });
+      return true;
+    } catch (error) {
+      showNotice('error', error instanceof Error ? error.message : '切换数据库失败。');
+      return false;
+    }
+  };
+
+  /** 确保标签会话已切到目标数据库；用于跨库表格/DDL 操作。 */
+  const ensureDatabase = async (tabId: string, database?: string): Promise<boolean> => {
+    if (!database) return true;
+    if (currentDatabaseByTab[tabId] === database) return true;
+    return switchDatabase(tabId, database);
+  };
+
+  /** 在目标数据库中执行一个 UI 动作（切换失败则不动）。 */
+  const withDatabase = async (
+    database: string | undefined,
+    action: () => void | Promise<void>,
+  ) => {
+    if (database && activeConnection && activeConnection.input.type !== 'sqlite') {
+      const ok = await ensureDatabase(activeTab.id, database);
+      if (!ok) return;
+    }
+    await action();
+  };
+
+  const loadTableExtras = async (database: string, table: string) => {
+    const api = window.dbcraft;
+    if (!api) return;
+    const tabId = activeTab.id;
+    const key = tableExtrasKey(database, table);
+    if (tableExtrasByTab[tabId]?.[key]) return;
+
+    setTableExtrasLoadingKey(key);
+    try {
+      const result = await api.schema.tableExtras(tabId, database, table);
+      if (!result.ok) {
+        showNotice('error', result.message);
+        return;
+      }
+      setTableExtrasByTab((current) => ({
+        ...current,
+        [tabId]: { ...(current[tabId] ?? {}), [key]: result.extras },
+      }));
+    } catch (error) {
+      showNotice('error', error instanceof Error ? error.message : '加载表子对象失败。');
+    } finally {
+      setTableExtrasLoadingKey((current) => (current === key ? null : current));
     }
   };
 
@@ -499,6 +666,11 @@ export default function App() {
   const loadTableMeta = async (tab: QueryTab) => {
     const api = window.dbcraft;
     if (!api || !tab.table) return;
+
+    if (tab.table.database) {
+      const switched = await ensureDatabase(tab.id, tab.table.database);
+      if (!switched) return;
+    }
 
     try {
       const result = await api.schema.table(
@@ -531,12 +703,46 @@ export default function App() {
       delete next[tabId];
       return next;
     });
+    setDatabasesByTab((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
+    setDbObjectsByTab((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
+    setCurrentDatabaseByTab((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
+    setDbLoadingByTab((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
+    setTableExtrasByTab((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
+    setAgentJobsByTab((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
 
     if (!api) return;
     await api.session.close(tabId).catch(() => undefined);
   };
 
-  const openTabSession = async (tab: QueryTab, connectionId: string): Promise<boolean> => {
+  const openTabSession = async (
+    tab: QueryTab,
+    connectionId: string,
+    database?: string,
+  ): Promise<boolean> => {
     const api = window.dbcraft;
     if (!api) {
       setSessions((current) => ({
@@ -569,10 +775,14 @@ export default function App() {
           if (!target) return current;
           return [target, ...current.filter((item) => item.id !== connectionId)];
         });
-        void loadSchema(tab.id, showSystemObjects[tab.id] ?? false);
-        if (tab.table) {
-          void loadTableMeta(tab);
+        if (database) {
+          const used = await api.schema.useDatabase(tab.id, database);
+          if (!used.ok) {
+            showNotice('error', used.message);
+            return false;
+          }
         }
+        await loadSchema(tab.id, showSystemObjects[tab.id] ?? false);
         return true;
       }
 
@@ -596,6 +806,11 @@ export default function App() {
   const rebindActiveTab = (connectionId: string) => {
     const connection = connections.find((item) => item.id === connectionId);
     if (!connection) return;
+
+    if (activeTab.kind) {
+      showNotice('error', 'Agent 页签与创建时的连接绑定，请新建查询后再切换连接。');
+      return;
+    }
 
     if (countPendingEdits(pendingTableEdits[activeTab.id]) > 0) {
       showNotice('error', '有未提交的表格修改，请先提交或回滚。');
@@ -652,15 +867,15 @@ export default function App() {
       return;
     }
 
-    if (connection.input.type === 'mssql') {
-      showNotice('error', 'MSSQL 驱动将在后续里程碑接入。');
-      return;
-    }
-
     const api = window.dbcraft;
     if (!api) {
       showNotice('error', '未检测到 Electron IPC 桥接。');
       return;
+    }
+
+    if (tab.table?.database && connection.input.type !== 'sqlite') {
+      const switched = await ensureDatabase(tab.id, tab.table.database);
+      if (!switched) return;
     }
 
     const sql = (overrideSql ?? tab.sql).trim();
@@ -709,7 +924,10 @@ export default function App() {
         connectionId: connection.id,
         connectionName: connection.input.name,
         dialect: connection.input.type,
-        database: connection.input.type === 'sqlite' ? '' : connection.input.database,
+        database:
+          tab.table?.database ??
+          currentDatabaseByTab[tab.id] ??
+          (connection.input.type === 'sqlite' ? '' : connection.input.database),
         source: 'editor',
       });
 
@@ -912,6 +1130,11 @@ export default function App() {
       return;
     }
 
+    if (tab.table.database && connection && connection.input.type !== 'sqlite') {
+      const switched = await ensureDatabase(tab.id, tab.table.database);
+      if (!switched) return;
+    }
+
     setCommittingTabs((current) => ({ ...current, [tab.id]: true }));
     try {
       const result = await api.table.apply({
@@ -923,7 +1146,9 @@ export default function App() {
         connectionId: connection?.id,
         connectionName: connection?.input.name,
         database:
-          connection && connection.input.type !== 'sqlite' ? connection.input.database : '',
+          tab.table.database ??
+          currentDatabaseByTab[tab.id] ??
+          (connection && connection.input.type !== 'sqlite' ? connection.input.database : ''),
       });
 
       if (!result.ok) {
@@ -1116,18 +1341,27 @@ export default function App() {
     setActiveTabId(tab.id);
 
     if (connection) {
-      void openTabSession(tab, connection.id);
+      const database =
+        connection.id === activeTab.connectionId
+          ? currentDatabaseByTab[activeTab.id]
+          : undefined;
+      void openTabSession(
+        tab,
+        connection.id,
+        connection.input.type === 'sqlite' ? undefined : database,
+      );
     }
   };
 
   const closeTab = (id: string) => {
-    if (tabs.length <= 1) return;
+    const closing = tabs.find((tab) => tab.id === id);
+    if (!closing) return;
+    if (tabs.length <= 1 && !closing.kind) return;
     if (countPendingEdits(pendingTableEdits[id]) > 0) {
       if (!window.confirm('该标签有未提交的表格修改，关闭会丢弃。继续吗？')) {
         return;
       }
     }
-    const closing = tabs.find((tab) => tab.id === id);
     if (closing?.dirty) {
       if (
         !window.confirm(
@@ -1142,6 +1376,28 @@ export default function App() {
     if (index < 0) return;
 
     const next = tabs.filter((tab) => tab.id !== id);
+    if (next.length === 0) {
+      // 关闭最后一个 Agent 页签后保持一个可用的查询标签，避免主区域空白。
+      const number = tabCounter.current;
+      tabCounter.current += 1;
+      const reopenedConnection =
+        connections.find((connection) => connection.id === closing.connectionId) ?? null;
+      const tab: QueryTab = {
+        id: `query-${number}`,
+        title: `查询 ${number}`,
+        sql: reopenedConnection ? DEFAULT_SQL[reopenedConnection.input.type] : 'SELECT 1;',
+        connectionId: reopenedConnection?.id ?? null,
+      };
+      setTabs([tab]);
+      setActiveTabId(tab.id);
+      persistDraftTabs([tab], tab.id);
+      void closeTabSession(id);
+      if (reopenedConnection) {
+        void openTabSession(tab, reopenedConnection.id);
+      }
+      return;
+    }
+
     const fallback =
       activeTabId === id ? (next[Math.max(0, index - 1)] ?? next[0]).id : activeTabId;
     setTabs(next);
@@ -1227,20 +1483,24 @@ export default function App() {
     void openTabSession(activeTab, connection.id);
   };
 
-  const openTable = (name: string) => {
+  const openTable = async (name: string, database?: string) => {
     const type = activeConnection?.input.type ?? 'sqlite';
+    if (database && type !== 'sqlite') {
+      const ok = await ensureDatabase(activeTab.id, database);
+      if (!ok) return;
+    }
     updateSql(buildTablePreviewSql(type, name));
     showNotice('info', `已填入 ${name} 查询，按 Ctrl+Enter 执行。`);
   };
 
-  const openTableData = (name: string, kind: 'table' | 'view' = 'table') => {
+  const openTableData = async (
+    name: string,
+    kind: 'table' | 'view' = 'table',
+    database?: string,
+  ) => {
     const connection = activeConnection;
     if (!connection) {
       showNotice('error', '请先选择连接。');
-      return;
-    }
-    if (connection.input.type === 'mssql') {
-      showNotice('error', 'MSSQL 驱动将在后续里程碑接入。');
       return;
     }
 
@@ -1250,10 +1510,17 @@ export default function App() {
     const query = buildTablePageQuery(connection.input.type, name, pageSize, 0);
     const tab: QueryTab = {
       id: `query-${number}`,
-      title: `表 · ${name}`,
+      title: `表 · ${database ? `${database}.` : ''}${name}`,
       sql: query.sql,
       connectionId: connection.id,
-      table: { name, kind, page: 0, pageSize, params: query.params },
+      table: {
+        name,
+        kind,
+        ...(database ? { database } : {}),
+        page: 0,
+        pageSize,
+        params: query.params,
+      },
     };
 
     setTabs((current) => [...current, tab]);
@@ -1264,7 +1531,30 @@ export default function App() {
       return next;
     });
 
-    void runQuery(query.sql, tab, query.params, { internal: true });
+    const ready = await openTabSession(
+      tab,
+      connection.id,
+      connection.input.type === 'sqlite' ? undefined : database,
+    );
+    if (!ready) return;
+    await loadTableMeta(tab);
+    await runQuery(query.sql, tab, query.params, { internal: true });
+  };
+
+  const openProcedure = async (name: string, database?: string) => {
+    const connection = activeConnection;
+    if (!connection) return;
+    if (database && connection.input.type !== 'sqlite') {
+      const ok = await ensureDatabase(activeTab.id, database);
+      if (!ok) return;
+    }
+    const type = connection.input.type;
+    const sql =
+      type === 'mssql'
+        ? `EXEC ${quoteIdent(type, name)};`
+        : `CALL ${quoteIdent(type, name)}();`;
+    updateSql(sql);
+    showNotice('info', `已填入存储过程 ${name} 的调用语句，请核对参数后执行。`);
   };
 
   const changeTablePage = async (page: number) => {
@@ -1640,7 +1930,7 @@ export default function App() {
       return;
     }
     if (connection.input.type === 'mssql') {
-      showNotice('error', 'MSSQL 驱动将在后续里程碑接入。');
+      showNotice('error', 'MSSQL 的 UI 改列尚未实现，请使用 SQL 编辑器执行 ALTER。');
       return;
     }
 
@@ -1683,10 +1973,6 @@ export default function App() {
     const connection = connections.find((item) => item.id === activeTab.connectionId);
     if (!connection) {
       showNotice('error', '当前标签没有绑定连接，请先选择连接。');
-      return;
-    }
-    if (connection.input.type === 'mssql') {
-      showNotice('error', 'MSSQL 驱动将在后续里程碑接入。');
       return;
     }
 
@@ -1748,7 +2034,14 @@ export default function App() {
     setTabs((current) => [...current, tab]);
     setActiveTabId(tab.id);
     if (connectionId) {
-      void openTabSession(tab, connectionId);
+      const connection = connections.find((item) => item.id === connectionId);
+      void openTabSession(
+        tab,
+        connectionId,
+        connection && connection.input.type !== 'sqlite'
+          ? currentDatabaseByTab[activeTab.id]
+          : undefined,
+      );
     }
     showNotice('info', `已打开 ${name} 的 DDL。`);
   };
@@ -1794,7 +2087,11 @@ export default function App() {
     }
     if (!ready) return;
 
-    const schema = await api.schema.get(activeTab.id, { includeSystemObjects: false });
+    const database = currentDatabaseByTab[activeTab.id];
+    const schema = await api.schema.get(activeTab.id, {
+      includeSystemObjects: false,
+      ...(database ? { database } : {}),
+    });
     if (!schema.ok) {
       showNotice('error', schema.message);
       return;
@@ -1809,6 +2106,8 @@ export default function App() {
     let failed = 0;
 
     for (const object of schema.objects) {
+      // 库级 DDL 目前只覆盖表和视图；存储过程留给后续。
+      if (object.type === 'procedure') continue;
       const result = await api.ddl.get(activeTab.id, object.name, object.type);
       if (result.ok) {
         parts.push(
@@ -1833,13 +2132,121 @@ export default function App() {
 
     setTabs((current) => [...current, tab]);
     setActiveTabId(tab.id);
-    void openTabSession(tab, connection.id);
+    void openTabSession(
+      tab,
+      connection.id,
+      connection.input.type === 'sqlite'
+        ? undefined
+        : currentDatabaseByTab[activeTab.id],
+    );
     showNotice(
       failed > 0 ? 'error' : 'info',
       failed > 0
         ? `已生成库级 DDL，${failed} 个对象生成失败。`
         : `已生成 ${schema.objects.length} 个对象的 DDL。`,
     );
+  };
+
+  const loadAgentJobs = async () => {
+    const connection = activeConnection;
+    if (!connection || connection.input.type !== 'mssql') return;
+    const sessionId = activeTab.id;
+    if (agentJobsLoadingTab === sessionId) return;
+
+    setAgentJobsLoadingTab(sessionId);
+    try {
+      let ready = sessions[sessionId]?.status === 'ready';
+      if (!ready) {
+        ready = await openTabSession(activeTab, connection.id);
+      }
+      if (!ready) {
+        setAgentJobsByTab((current) => ({
+          ...current,
+          [sessionId]: { jobs: [], error: '会话未就绪，请先重连。' },
+        }));
+        return;
+      }
+
+      const api = window.dbcraft;
+      if (!api) throw new Error('未检测到 Electron IPC 桥接。');
+      const result = await api.agent.list(sessionId, '');
+      setAgentJobsByTab((current) => ({
+        ...current,
+        [sessionId]: result.ok
+          ? { jobs: result.jobs, error: null }
+          : { jobs: [], error: result.message },
+      }));
+    } catch (cause) {
+      setAgentJobsByTab((current) => ({
+        ...current,
+        [sessionId]: {
+          jobs: [],
+          error: cause instanceof Error ? cause.message : String(cause),
+        },
+      }));
+    } finally {
+      setAgentJobsLoadingTab((current) => (current === sessionId ? null : current));
+    }
+  };
+
+  const onAgentChanged = () => {
+    setAgentRefreshKey((value) => value + 1);
+    setAgentJobsByTab({});
+    void loadAgentJobs();
+  };
+
+  const openAgentJobDetail = (jobName: string) => {
+    const connection = activeConnection;
+    if (!connection || connection.input.type !== 'mssql') return;
+
+    const existing = tabs.find(
+      (tab) =>
+        tab.kind === 'agent-detail' &&
+        tab.connectionId === connection.id &&
+        tab.agentJob === jobName,
+    );
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
+
+    const tab: QueryTab = {
+      id: createId('agent-job'),
+      title: `作业 · ${jobName}`,
+      sql: '',
+      connectionId: connection.id,
+      kind: 'agent-detail',
+      agentJob: jobName,
+    };
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+    setRuns((current) => {
+      const next = { ...current };
+      delete next[tab.id];
+      return next;
+    });
+    void openTabSession(tab, connection.id);
+  };
+
+  const openAgentScript = (script: string, title: string) => {
+    const connection = activeConnection;
+    const tab: QueryTab = {
+      id: createId('agent'),
+      title: `Agent · ${title}`,
+      sql: script,
+      connectionId: connection?.id ?? null,
+    };
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+    setRuns((current) => {
+      const next = { ...current };
+      delete next[tab.id];
+      return next;
+    });
+    if (connection) {
+      void openTabSession(tab, connection.id);
+    }
+    showNotice('info', `已在编辑器中打开「${title}」的脚本，请核对后执行。`);
   };
 
   const executeDdlSql = async (sql: string): Promise<{ ok: boolean; message: string }> => {
@@ -1859,7 +2266,13 @@ export default function App() {
     }
     if (!ready) return { ok: false, message: '会话未就绪，请检查连接。' };
 
-    const result = await api.ddl.execute(activeTab.id, [sql]);
+    const result = await api.ddl.execute(activeTab.id, [sql], {
+      connectionId: connection.id,
+      connectionName: connection.input.name,
+      database:
+        currentDatabaseByTab[activeTab.id] ??
+        (connection.input.type === 'sqlite' ? '' : connection.input.database),
+    });
     if (!result.ok) {
       return { ok: false, message: result.message };
     }
@@ -1905,7 +2318,14 @@ export default function App() {
     }
     if (!ready) return { ok: false, message: '会话未就绪，请检查连接。' };
 
-    const result = await api.ddl.execute(activeTab.id, statements, options);
+    const result = await api.ddl.execute(activeTab.id, statements, {
+      ...options,
+      connectionId: connection.id,
+      connectionName: connection.input.name,
+      database:
+        currentDatabaseByTab[activeTab.id] ??
+        (connection.input.type === 'sqlite' ? '' : connection.input.database),
+    });
     if (!result.ok) {
       return { ok: false, message: result.message, results: result.results };
     }
@@ -2030,7 +2450,10 @@ export default function App() {
       connectionId: connection.id,
       connectionName: connection.input.name,
       dialect: connection.input.type,
-      database: connection.input.type === 'sqlite' ? '' : connection.input.database,
+      database:
+        activeTab.table?.database ??
+        currentDatabaseByTab[activeTab.id] ??
+        (connection.input.type === 'sqlite' ? '' : connection.input.database),
       source: 'editor',
     });
 
@@ -2055,6 +2478,22 @@ export default function App() {
       value: row[focus.columnIndex] ?? null,
       rowIndex: focus.rowIndex,
     });
+  };
+
+  const copyFocusedCell = async () => {
+    const focus = focusedCells[activeTab.id];
+    if (!focus) return;
+    const row = runs[activeTab.id]?.rows[focus.rowIndex];
+    if (!row) return;
+    const value = row[focus.columnIndex];
+    // NULL 复制为空，避免把字符串 'NULL' 误粘进表格。
+    const text = value === null || value === undefined ? '' : String(value);
+    try {
+      await navigator.clipboard.writeText(text);
+      showNotice('info', '已复制单元格内容。');
+    } catch {
+      showNotice('error', '复制失败，请用「查看单元格」手动复制。');
+    }
   };
 
   const saveExportXlsx = async (
@@ -2225,6 +2664,12 @@ export default function App() {
           activeConnectionId={activeTab.connectionId}
           activeConnection={activeConnection}
           schemaObjects={activeSchema}
+          databases={databasesByTab[activeTab.id] ?? []}
+          objectsByDatabase={dbObjectsByTab[activeTab.id] ?? {}}
+          currentDatabase={currentDatabaseByTab[activeTab.id] ?? null}
+          databaseLoading={dbLoadingByTab[activeTab.id] ?? null}
+          tableExtras={tableExtrasByTab[activeTab.id] ?? {}}
+          tableExtrasLoadingKey={tableExtrasLoadingKey}
           schemaLoading={schemaLoadingId === activeTab.id}
           showSystemObjects={showSystemObjects[activeTab.id] ?? false}
           systemObjectsSupported={activeConnection?.input.type === 'sqlite'}
@@ -2233,8 +2678,11 @@ export default function App() {
           onNewConnection={openCreateDialog}
           onRefreshSchema={refreshSchema}
           onToggleSystemObjects={toggleSystemObjects}
-          onOpenTable={openTable}
-          onOpenTableData={openTableData}
+          onSelectDatabase={(database) => void switchDatabase(activeTab.id, database)}
+          onLoadTableExtras={(database, table) => void loadTableExtras(database, table)}
+          onOpenTable={(name, database) => void openTable(name, database)}
+          onOpenTableData={(name, kind, database) => void openTableData(name, kind, database)}
+          onOpenProcedure={(name, database) => void openProcedure(name, database)}
           onDeleteConnection={deleteSavedConnection}
           onEditConnection={openEditDialog}
           onDuplicateConnection={duplicateConnection}
@@ -2243,18 +2691,42 @@ export default function App() {
           onRenameGroup={renameGroup}
           onDeleteGroup={deleteGroup}
           onMoveConnection={moveConnectionToGroup}
-          onViewDdl={viewDdl}
-          onCopyDdl={copyDdl}
-          onRenameTable={(name) => setTableAction({ mode: 'rename', name })}
-          onDropTable={(name) => setTableAction({ mode: 'drop-table', name })}
-          onDropView={(name) => setTableAction({ mode: 'drop-view', name })}
-          onAddColumn={(name) => setAddColumnTarget(name)}
-          onRenameColumn={(name) => void openAlterColumn(name, 'rename')}
-          onModifyColumn={(name) => void openAlterColumn(name, 'modify')}
-          onShowStructure={(name) => void openTableStructure(name)}
-          onCreateIndex={(name) => setIndexAction({ mode: 'create', table: name })}
-          onDropIndex={(name) => setIndexAction({ mode: 'drop', table: name })}
-          onDropColumn={(name) => setDropColumnTarget(name)}
+          onViewDdl={(name, kind, database) =>
+            void withDatabase(database, () => viewDdl(name, kind))
+          }
+          onCopyDdl={(name, kind, database) =>
+            void withDatabase(database, () => copyDdl(name, kind))
+          }
+          onRenameTable={(name, database) =>
+            void withDatabase(database, () => setTableAction({ mode: 'rename', name }))
+          }
+          onDropTable={(name, database) =>
+            void withDatabase(database, () => setTableAction({ mode: 'drop-table', name }))
+          }
+          onDropView={(name, database) =>
+            void withDatabase(database, () => setTableAction({ mode: 'drop-view', name }))
+          }
+          onAddColumn={(name, database) =>
+            void withDatabase(database, () => setAddColumnTarget(name))
+          }
+          onRenameColumn={(name, database) =>
+            void withDatabase(database, () => openAlterColumn(name, 'rename'))
+          }
+          onModifyColumn={(name, database) =>
+            void withDatabase(database, () => openAlterColumn(name, 'modify'))
+          }
+          onShowStructure={(name, database) =>
+            void withDatabase(database, () => openTableStructure(name))
+          }
+          onCreateIndex={(name, database) =>
+            void withDatabase(database, () => setIndexAction({ mode: 'create', table: name }))
+          }
+          onDropIndex={(name, database) =>
+            void withDatabase(database, () => setIndexAction({ mode: 'drop', table: name }))
+          }
+          onDropColumn={(name, database) =>
+            void withDatabase(database, () => setDropColumnTarget(name))
+          }
           onNewTable={() => setTableDesignerOpen(true)}
           onNewView={() => setCreateViewOpen(true)}
           onRunScript={() => setScriptOpen(true)}
@@ -2262,6 +2734,13 @@ export default function App() {
           onExportConnection={(id) => void exportConnectionConfig(id)}
           onExportAllConnections={() => void exportConnectionConfig()}
           onImportConnections={() => void importConnectionConfig()}
+          agentAvailable={activeConnection?.input.type === 'mssql'}
+          agentJobs={activeAgentJobs?.jobs ?? null}
+          agentJobsLoading={agentJobsLoadingTab === activeTab.id}
+          agentJobsError={activeAgentJobs?.error ?? null}
+          activeAgentJob={activeAgentJob}
+          onLoadAgentJobs={() => void loadAgentJobs()}
+          onOpenAgentJob={openAgentJobDetail}
         />
 
         <Workspace
@@ -2303,6 +2782,7 @@ export default function App() {
             }))
           }
           onViewCell={viewFocusedCell}
+          onCopyCell={() => void copyFocusedCell()}
           onTablePageChange={(page) => void changeTablePage(page)}
           onTablePageSizeChange={(size) => void changeTablePageSize(size)}
           onTableSortChange={(column, direction) => void changeTableSort(column, direction)}
@@ -2317,6 +2797,27 @@ export default function App() {
           onUndo={undoTableEdit}
           onCommitEdits={() => void commitTableEdits()}
           onRollbackEdits={() => void rollbackTableEdits()}
+          agentContent={
+            activeTab.kind === 'agent-detail' ? (
+              <AgentTabPanel
+                mode="detail"
+                jobName={activeTab.agentJob}
+                sessionId={activeTab.id}
+                connectionId={activeTab.connectionId ?? ''}
+                connectionName={activeConnection?.input.name ?? ''}
+                database={
+                  activeConnection && activeConnection.input.type !== 'sqlite'
+                    ? activeConnection.input.database
+                    : ''
+                }
+                ready={activeRuntime?.status === 'ready'}
+                refreshKey={agentRefreshKey}
+                onOpenJob={openAgentJobDetail}
+                onOpenScript={openAgentScript}
+                onChanged={onAgentChanged}
+              />
+            ) : null
+          }
         />
       </div>
 

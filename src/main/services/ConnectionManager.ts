@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import type {
   ConnectionInput,
   ConnectionTestResult,
+  DatabaseListResult,
   DdlExecuteOptions,
   DdlExecuteResult,
   DdlGetResult,
@@ -12,19 +13,22 @@ import type {
   QueryResponse,
   SchemaGetOptions,
   SchemaGetResult,
+  SchemaUseDatabaseResult,
   SessionOpenResult,
   TableApplyRequest,
   TableApplyResult,
   TableDetailResult,
+  TableExtrasResult,
   TableMetaResult,
 } from '../../shared/ipc-contract';
 import { buildTableEditStatements } from '../../shared/dialect/dml';
 import type { DatabaseSession } from './DatabaseSession';
 import { MariaSession } from './mariadb/MariaSession';
+import { MssqlSession } from './mssql/MssqlSession';
 import { MysqlSession } from './mysql/MysqlSession';
 import { SqliteSession } from './sqlite/SqliteSession';
 import { createLogger } from '../logging/logger';
-import { getConnectionInput, recordQueryHistory, touchConnection } from '../storage/metadata';
+import { getConnectionInput, getAppSettings, recordQueryHistory, touchConnection } from '../storage/metadata';
 import { parseTimeoutMs } from '../../shared/timeouts';
 
 const sessions = new Map<string, DatabaseSession>();
@@ -44,9 +48,23 @@ function resolveQueryTimeoutMs(): number {
   return parseTimeoutMs(process.env['DBCRAFT_QUERY_TIMEOUT_MS'], 30_000);
 }
 
+/**
+ * 连接/测试连接超时：环境变量优先（便于调试与 E2E），否则用设置面板的值。
+ * 设置读取失败时回退 8 秒，不阻塞连接。
+ */
+function resolveConnectTimeoutMs(): number {
+  const raw = process.env['DBCRAFT_CONNECT_TIMEOUT_MS'];
+  if (raw !== undefined && raw.trim() !== '') {
+    return parseTimeoutMs(raw, 8_000);
+  }
+  const settings = getAppSettings();
+  return settings.ok ? settings.settings.connectTimeoutMs : 8_000;
+}
+
 interface DriverError extends Error {
   code?: string | number;
   errno?: number;
+  number?: number;
   sqlState?: string;
   sqlMessage?: string;
   fatal?: boolean;
@@ -71,12 +89,19 @@ function errorDetails(error: unknown): QueryError {
         : driver.code === undefined
           ? null
           : String(driver.code);
+    // MSSQL/tedious 把 SQL Server 错误码放在 number 上；统一映射到 errno 供 UI 展示。
+    const errno =
+      typeof driver.errno === 'number'
+        ? driver.errno
+        : typeof driver.number === 'number'
+          ? driver.number
+          : null;
 
     return {
       message: driver.sqlMessage ?? driver.message,
-      code,
+      code: code ?? (errno === null ? null : String(errno)),
       sqlState: typeof driver.sqlState === 'string' ? driver.sqlState : null,
-      errno: typeof driver.errno === 'number' ? driver.errno : null,
+      errno,
       retryable: Boolean(driver.fatal) || (code ? RETRYABLE_CODES.has(code) : false),
     };
   }
@@ -102,17 +127,22 @@ function testSqliteFile(filePath: string): string {
   }
 }
 
-function createSession(input: ConnectionInput): Promise<DatabaseSession> {
+function createSession(
+  input: ConnectionInput,
+  connectTimeoutMs: number,
+): Promise<DatabaseSession> {
   switch (input.type) {
     case 'sqlite':
       return SqliteSession.create(input.filePath);
     case 'mysql':
     case 'percona':
-      return MysqlSession.create(input);
+      return MysqlSession.create(input, { connectTimeoutMs });
     case 'mariadb':
-      return MariaSession.create(input);
+      return MariaSession.create(input, { connectTimeoutMs });
+    case 'mssql':
+      return MssqlSession.create(input, { connectTimeoutMs });
     default:
-      return Promise.reject(new Error('MSSQL 驱动将在后续里程碑接入。'));
+      return Promise.reject(new Error('不支持的连接类型。'));
   }
 }
 
@@ -144,18 +174,9 @@ export async function testConnection(input: ConnectionInput): Promise<Connection
     }
   }
 
-  if (input.type === 'mssql') {
-    return {
-      status: 'not-implemented',
-      ok: false,
-      message: 'MSSQL 驱动将在后续里程碑接入。',
-      elapsedMs: Date.now() - startedAt,
-    };
-  }
-
   let session: DatabaseSession | null = null;
   try {
-    session = await createSession(input);
+    session = await createSession(input, resolveConnectTimeoutMs());
     return {
       status: 'ok',
       ok: true,
@@ -188,19 +209,11 @@ async function openSession(
 ): Promise<SessionOpenResult> {
   const startedAt = Date.now();
 
-  // 先关闭同 id 的旧会话，避免 MSSQL 提前返回时泄漏。
+  // 先关闭同 id 的旧会话，避免重连失败时留下悬空会话。
   await closeSession(sessionId);
 
-  if (input.type === 'mssql') {
-    return {
-      ok: false,
-      message: 'MSSQL 驱动将在后续里程碑接入。',
-      elapsedMs: Date.now() - startedAt,
-    };
-  }
-
   try {
-    const session = await createSession(input);
+    const session = await createSession(input, resolveConnectTimeoutMs());
     sessions.set(sessionId, session);
 
     log.info('会话已打开', {
@@ -488,6 +501,34 @@ function canceledResponse(sessionId: string, session: DatabaseSession): QueryRes
   };
 }
 
+/**
+ * UI 预览后执行的 DDL 也写入查询历史（PRD 4.4.1：source = ddl-preview）。
+ * 一次执行合并为一条记录；失败时保留错误摘要，便于历史面板复现。
+ */
+function recordDdlHistory(
+  session: DatabaseSession,
+  statements: string[],
+  options: DdlExecuteOptions,
+  failed: boolean,
+  failureMessage: string,
+  startedAt: number,
+): void {
+  recordHistoryAsync({
+    sqlText: statements.join(';\n'),
+    connectionId: options.connectionId ?? '',
+    connectionName: options.connectionName ?? '',
+    databaseName: options.database ?? '',
+    dialect: session.dialect,
+    status: failed ? 'failed' : 'success',
+    errorMessage: failed ? failureMessage.slice(0, 500) : null,
+    durationMs: Date.now() - startedAt,
+    affectedRows: null,
+    returnedRows: null,
+    source: 'ddl-preview',
+    executedAt: new Date().toISOString(),
+  });
+}
+
 export async function cancelQuery(requestId: string): Promise<boolean> {
   const entry = runningQueries.get(requestId);
   if (!entry || entry.canceled) return false;
@@ -525,6 +566,73 @@ export async function getSchema(
   } catch (error) {
     const details = errorDetails(error);
     log.warn('加载对象树失败', { sessionId, code: details.code, errno: details.errno });
+    return { ok: false, message: details.message };
+  }
+}
+
+export async function listDatabases(sessionId: string): Promise<DatabaseListResult> {
+  const session = sessions.get(sessionId);
+  if (!session) return { ok: false, message: '会话未打开，请重新连接。' };
+  if (!session.alive) {
+    sessions.delete(sessionId);
+    return { ok: false, message: '会话已失效，请重新连接。' };
+  }
+  try {
+    return { ok: true, databases: await session.databases() };
+  } catch (error) {
+    const details = errorDetails(error);
+    log.warn('加载数据库列表失败', { sessionId, code: details.code, errno: details.errno });
+    return { ok: false, message: details.message };
+  }
+}
+
+export async function useDatabase(
+  sessionId: string,
+  database: string,
+): Promise<SchemaUseDatabaseResult> {
+  const session = sessions.get(sessionId);
+  if (!session) return { ok: false, message: '会话未打开，请重新连接。' };
+  if (!session.alive) {
+    sessions.delete(sessionId);
+    return { ok: false, message: '会话已失效，请重新连接。' };
+  }
+  try {
+    await session.useDatabase(database);
+    return { ok: true, database };
+  } catch (error) {
+    const details = errorDetails(error);
+    log.warn('切换数据库失败', {
+      sessionId,
+      database,
+      code: details.code,
+      errno: details.errno,
+    });
+    return { ok: false, message: details.message };
+  }
+}
+
+export async function getTableExtras(
+  sessionId: string,
+  database: string,
+  table: string,
+): Promise<TableExtrasResult> {
+  const session = sessions.get(sessionId);
+  if (!session) return { ok: false, message: '会话未打开，请重新连接。' };
+  if (!session.alive) {
+    sessions.delete(sessionId);
+    return { ok: false, message: '会话已失效，请重新连接。' };
+  }
+  try {
+    return { ok: true, extras: await session.tableExtras(database, table) };
+  } catch (error) {
+    const details = errorDetails(error);
+    log.warn('加载表子对象失败', {
+      sessionId,
+      database,
+      table,
+      code: details.code,
+      errno: details.errno,
+    });
     return { ok: false, message: details.message };
   }
 }
@@ -653,9 +761,11 @@ export async function executeDdl(
       if (disableForeignKeys) {
         await session.query('PRAGMA foreign_keys = ON').catch(() => undefined);
       }
+      const message = `事务结束失败：${details.message}`;
+      recordDdlHistory(session, statements, options, true, message, startedAt);
       return {
         ok: false,
-        message: `事务结束失败：${details.message}`,
+        message,
         results,
         elapsedMs: Date.now() - startedAt,
       };
@@ -673,9 +783,12 @@ export async function executeDdl(
     dialect: session.dialect,
   });
 
+  const failureText = failureMessage || 'DDL 执行失败。';
+  recordDdlHistory(session, statements, options, failed, failureText, startedAt);
+
   const elapsedMs = Date.now() - startedAt;
   if (failed) {
-    return { ok: false, message: failureMessage || 'DDL 执行失败。', results, elapsedMs };
+    return { ok: false, message: failureText, results, elapsedMs };
   }
   return { ok: true, results, elapsedMs };
 }
@@ -840,6 +953,11 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
   });
 
   return { ok: true, applied, elapsedMs };
+}
+
+export function getMssqlSession(sessionId: string): MssqlSession | null {
+  const session = sessions.get(sessionId);
+  return session instanceof MssqlSession ? session : null;
 }
 
 export async function closeSession(sessionId: string): Promise<void> {

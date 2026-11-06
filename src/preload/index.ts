@@ -33,6 +33,12 @@ const api: DBCraftApi = {
   schema: {
     get: (sessionId: string, options) =>
       ipcRenderer.invoke(IPC_CHANNELS.schemaGet, { sessionId, ...options }),
+    databases: (sessionId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.schemaDatabases, { sessionId }),
+    useDatabase: (sessionId: string, database: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.schemaUseDatabase, { sessionId, database }),
+    tableExtras: (sessionId: string, database: string, table: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.schemaTableExtras, { sessionId, database, table }),
     table: (sessionId: string, name: string, kind) =>
       ipcRenderer.invoke(IPC_CHANNELS.schemaTable, { sessionId, name, kind }),
     describe: (sessionId: string, name: string) =>
@@ -40,6 +46,21 @@ const api: DBCraftApi = {
   },
   table: {
     apply: (request) => ipcRenderer.invoke(IPC_CHANNELS.tableApply, request),
+  },
+  agent: {
+    list: (sessionId: string, search = '') =>
+      ipcRenderer.invoke(IPC_CHANNELS.agentList, { sessionId, search }),
+    detail: (sessionId: string, jobName: string, historyLimit?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.agentDetail, { sessionId, jobName, historyLimit }),
+    action: (sessionId, jobName, action, context = {}) =>
+      ipcRenderer.invoke(IPC_CHANNELS.agentAction, {
+        sessionId,
+        jobName,
+        action,
+        ...context,
+      }),
+    script: (sessionId: string, jobName: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.agentScript, { sessionId, jobName }),
   },
   ddl: {
     get: (sessionId: string, name: string, kind) =>

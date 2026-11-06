@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AppSettings, LocalStats } from '@shared/ipc-contract';
 import {
+  CONNECT_TIMEOUT_OPTIONS,
   EDITOR_FONT_SIZE_OPTIONS,
   HISTORY_RETENTION_OPTIONS,
   QUERY_TIMEOUT_OPTIONS,
@@ -27,6 +28,7 @@ export function SettingsDialog({
   const [editorFontSize, setEditorFontSize] = useState(settings.editorFontSize);
   const [historyRetention, setHistoryRetention] = useState(settings.historyRetention);
   const [queryTimeoutMs, setQueryTimeoutMs] = useState(settings.queryTimeoutMs);
+  const [connectTimeoutMs, setConnectTimeoutMs] = useState(settings.connectTimeoutMs);
   const [historyEnabled, setHistoryEnabled] = useState(settings.historyEnabled);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +142,7 @@ export function SettingsDialog({
     setEditorFontSize(DEFAULT_APP_SETTINGS.editorFontSize);
     setHistoryRetention(DEFAULT_APP_SETTINGS.historyRetention);
     setQueryTimeoutMs(DEFAULT_APP_SETTINGS.queryTimeoutMs);
+    setConnectTimeoutMs(DEFAULT_APP_SETTINGS.connectTimeoutMs);
     setHistoryEnabled(DEFAULT_APP_SETTINGS.historyEnabled);
     setDiagnosticsMessage('已恢复默认值，点击「保存」后生效。');
   };
@@ -154,6 +157,7 @@ export function SettingsDialog({
         editorFontSize,
         historyRetention,
         queryTimeoutMs,
+        connectTimeoutMs,
         historyEnabled,
       });
       if (result.ok) {
@@ -281,6 +285,24 @@ export function SettingsDialog({
             该设置覆盖 `DBCRAFT_QUERY_TIMEOUT_MS` 环境变量。
           </p>
 
+          <label className="field">
+            <span>连接/测试超时</span>
+            <select
+              value={connectTimeoutMs}
+              onChange={(event) => setConnectTimeoutMs(Number(event.target.value))}
+            >
+              {CONNECT_TIMEOUT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option / 1000} 秒
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="form-note">
+            建立连接与测试连接时的等待上限，超时返回可读错误；修改在下次连接时生效。
+            该设置被 `DBCRAFT_CONNECT_TIMEOUT_MS` 环境变量覆盖。
+          </p>
+
           <div className="field">
             <span>快捷键</span>
             <div className="shortcut-grid">
@@ -372,6 +394,7 @@ export function SettingsDialog({
                 editorFontSize === settings.editorFontSize &&
                 historyRetention === settings.historyRetention &&
                 queryTimeoutMs === settings.queryTimeoutMs &&
+                connectTimeoutMs === settings.connectTimeoutMs &&
                 historyEnabled === settings.historyEnabled)
             }
             onClick={() => void save()}
