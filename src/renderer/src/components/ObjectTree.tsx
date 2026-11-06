@@ -156,10 +156,6 @@ export function ObjectTree({
         {isTable && extrasOpen && (
           <div className="tree-branch">
             {extrasLoading && <div className="tree-empty tree-child-3">正在加载表子对象…</div>}
-            {extras?.constraints.length === 0 &&
-              extras?.triggers.length === 0 &&
-              extras?.indexes.length === 0 &&
-              !extrasLoading && <div className="tree-empty tree-child-3">没有约束/触发器/索引</div>}
             {folders.map((folder) => {
               if (!extras) return null;
               const openFolder = open(folder.key, true);
@@ -232,13 +228,7 @@ export function ObjectTree({
     const views = filtered.filter((object) => object.type === 'view');
     const procedures = filtered.filter((object) => object.type === 'procedure');
 
-    const folder = (
-      key: string,
-      label: string,
-      count: number,
-      items: SchemaObject[],
-      emptyText: string,
-    ) => {
+    const folder = (key: string, label: string, count: number, items: SchemaObject[]) => {
       const folderKey = `${key}:${database}`;
       const openFolder = open(folderKey, true);
       return (
@@ -258,28 +248,17 @@ export function ObjectTree({
             <span>{label}</span>
             <span className="tree-count">{count}</span>
           </button>
-          {openFolder &&
-            (items.length === 0 ? (
-              <div className="tree-empty tree-child">{emptyText}</div>
-            ) : (
-              items.map((item) => renderTableRow(item, database))
-            ))}
+          {openFolder && items.map((item) => renderTableRow(item, database))}
         </div>
       );
     };
 
     return (
       <>
-        {folder(`tables`, '表', tables.length, tables, normalizedQuery ? '无匹配表' : '无表')}
-        {folder(`views`, '视图', views.length, views, normalizedQuery ? '无匹配视图' : '无视图')}
+        {folder(`tables`, '表', tables.length, tables)}
+        {folder(`views`, '视图', views.length, views)}
         {dialect !== 'sqlite' &&
-          folder(
-            `procedures`,
-            '存储过程',
-            procedures.length,
-            procedures,
-            normalizedQuery ? '无匹配存储过程' : '无存储过程',
-          )}
+          folder(`procedures`, '存储过程', procedures.length, procedures)}
       </>
     );
   };

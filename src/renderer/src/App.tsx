@@ -52,6 +52,7 @@ import type {
   RunState,
   SavedConnection,
   SessionRuntime,
+  SessionStatus,
 } from './types';
 
 const INITIAL_SQL = `SELECT name, type, sql
@@ -454,6 +455,24 @@ export default function App() {
   const activeAgentJob =
     activeTab.kind === 'agent-detail' ? (activeTab.agentJob ?? null) : null;
   const activeRun = runs[activeTab.id] ?? EMPTY_RUN;
+  /** 保存连接对应的运行状态：同一保存连接可能被多个标签使用。 */
+  const connectionStates = useMemo(() => {
+    const states: Record<string, SessionStatus> = {};
+    for (const tab of tabs) {
+      const runtime = sessions[tab.id];
+      if (!runtime || runtime.status === 'idle' || !tab.connectionId) continue;
+      const connectionId = tab.connectionId;
+      const current = states[connectionId];
+      if (runtime.status === 'ready' || current === undefined) {
+        states[connectionId] = runtime.status;
+      } else if (runtime.status === 'opening' && current !== 'ready') {
+        states[connectionId] = 'opening';
+      } else if (runtime.status === 'error' && current !== 'ready' && current !== 'opening') {
+        states[connectionId] = 'error';
+      }
+    }
+    return states;
+  }, [tabs, sessions]);
   const completionItems = useMemo(
     () => [...SQL_KEYWORD_LIST, ...activeSchema.map((object) => object.name)],
     [activeSchema],
@@ -1456,6 +1475,8 @@ export default function App() {
     const tabId = activeTab.id;
     setShowSystemObjects((current) => ({ ...current, [tabId]: next }));
     if (sessions[tabId]?.status === 'ready') {
+      // 其他库的对象可能是在旧开关下缓存的，切换后必须重新拉取。
+      setDbObjectsByTab((current) => ({ ...current, [tabId]: {} }));
       void loadSchema(tabId, next);
     }
   };
@@ -2663,6 +2684,7 @@ export default function App() {
           connections={connections}
           activeConnectionId={activeTab.connectionId}
           activeConnection={activeConnection}
+          connectionStates={connectionStates}
           schemaObjects={activeSchema}
           databases={databasesByTab[activeTab.id] ?? []}
           objectsByDatabase={dbObjectsByTab[activeTab.id] ?? {}}
@@ -2672,7 +2694,9 @@ export default function App() {
           tableExtrasLoadingKey={tableExtrasLoadingKey}
           schemaLoading={schemaLoadingId === activeTab.id}
           showSystemObjects={showSystemObjects[activeTab.id] ?? false}
-          systemObjectsSupported={activeConnection?.input.type === 'sqlite'}
+          systemObjectsSupported={
+            activeConnection?.input.type === 'sqlite' || activeConnection?.input.type === 'mssql'
+          }
           sessionReadOnly={activeRuntime?.readonly === true}
           onSelectConnection={rebindActiveTab}
           onNewConnection={openCreateDialog}

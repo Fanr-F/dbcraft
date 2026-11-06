@@ -376,6 +376,45 @@ button:disabled {
   flex: 1;
 }
 
+.connection-expand {
+  display: flex;
+  width: 18px;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 3px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.connection-expand:hover {
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.connection-objects {
+  margin: 0 0 6px 12px;
+  padding-left: 2px;
+  border-left: 1px solid var(--border);
+}
+
+.connection-object-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px 0 22px;
+}
+
+.sidebar-tree-scroll {
+  min-height: 0;
+  flex: 1;
+  padding: 6px;
+  overflow: auto;
+}
+
 .connection-delete {
   display: flex;
   width: 22px;
@@ -491,6 +530,31 @@ button:disabled {
 
 .db-mssql {
   background: #22d3ee;
+}
+
+.connection-state {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: var(--faint);
+}
+
+.connection-state.is-ready {
+  background: var(--ok, #4ade80);
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.15);
+}
+
+.connection-state.is-opening {
+  background: var(--warn, #fbbf24);
+}
+
+.connection-state.is-error {
+  background: var(--danger, #f87171);
+}
+
+.connection-state.is-closed {
+  background: var(--faint);
 }
 
 .env-badge {

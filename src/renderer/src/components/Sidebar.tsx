@@ -9,7 +9,7 @@ import type {
   TableExtras,
 } from '@shared/ipc-contract';
 import { agentRunStatusLabel } from '@shared/agent';
-import type { SavedConnection } from '../types';
+import type { SavedConnection, SessionStatus } from '../types';
 import { buildGroupTree, countGroup, type GroupNode } from '../utils/groups';
 import { ContextMenu } from './ContextMenu';
 import { Icon } from './Icon';
@@ -19,6 +19,7 @@ interface SidebarProps {
   connections: SavedConnection[];
   activeConnectionId: string | null;
   activeConnection: SavedConnection | null;
+  connectionStates: Record<string, SessionStatus>;
   schemaObjects: SchemaObject[];
   databases: DatabaseInfo[];
   objectsByDatabase: Record<string, SchemaObject[]>;
@@ -102,6 +103,7 @@ export function Sidebar({
   connections,
   activeConnectionId,
   activeConnection,
+  connectionStates,
   schemaObjects,
   databases,
   objectsByDatabase,
@@ -158,6 +160,7 @@ export function Sidebar({
   onOpenAgentJob,
 }: SidebarProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [expandedConnections, setExpandedConnections] = useState<Record<string, boolean>>({});
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     tables: true,
     views: true,
@@ -179,8 +182,7 @@ export function Sidebar({
     // onLoadAgentJobs 每次渲染都是新函数；仅依赖影响加载条件的状态。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentAvailable, expandedSections.jobs, agentJobs, agentJobsLoading, activeConnectionId]);
-  const [connectionQuery, setConnectionQuery] = useState('');
-  const [objectQuery, setObjectQuery] = useState('');
+  const [treeQuery, setTreeQuery] = useState('');
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null);
   const [menu, setMenu] = useState<{
     x: number;
@@ -201,14 +203,26 @@ export function Sidebar({
     database?: string;
   } | null>(null);
 
-  const normalizedConnectionQuery = connectionQuery.trim().toLowerCase();
-  const filteredConnections = normalizedConnectionQuery
-    ? connections.filter((connection) => searchText(connection).includes(normalizedConnectionQuery))
+  const normalizedQuery = treeQuery.trim().toLowerCase();
+  const matchesName = (name: string) => name.toLowerCase().includes(normalizedQuery);
+  const activeObjectMatches =
+    normalizedQuery.length > 0 &&
+    (databases.some((database) => matchesName(database.name)) ||
+      [...Object.values(objectsByDatabase).flat(), ...schemaObjects].some((object) =>
+        matchesName(object.name),
+      ) ||
+      (agentJobs ?? []).some((job) => matchesName(job.name)));
+
+  const filteredConnections = normalizedQuery
+    ? connections.filter(
+        (connection) =>
+          searchText(connection).includes(normalizedQuery) ||
+          (connection.id === activeConnectionId && activeObjectMatches),
+      )
     : connections;
 
-  const normalizedObjectQuery = objectQuery.trim().toLowerCase();
   const filteredJobs = (agentJobs ?? []).filter(
-    (job) => normalizedObjectQuery.length === 0 || job.name.toLowerCase().includes(normalizedObjectQuery),
+    (job) => normalizedQuery.length === 0 || matchesName(job.name),
   );
 
   const tree = useMemo(() => buildGroupTree(filteredConnections), [filteredConnections]);
@@ -236,68 +250,314 @@ export function Sidebar({
     onRenameGroup(current.path, parent ? `${parent}/${value}` : value);
   };
 
-  const renderConnection = (connection: SavedConnection) => (
-    <div
-      className="connection-row"
-      key={connection.id}
-      draggable
-      onDragStart={(event) => {
-        event.dataTransfer.setData('text/plain', connection.id);
-        event.dataTransfer.effectAllowed = 'move';
-      }}
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const draggedId = event.dataTransfer.getData('text/plain');
-        if (draggedId && draggedId !== connection.id) {
-          onMoveConnection(draggedId, connection.input.group);
-        }
-      }}
-    >
+  const isConnectionExpanded = (connection: SavedConnection) =>
+    expandedConnections[connection.id] ?? connection.id === activeConnectionId;
+
+  const expandConnection = (connection: SavedConnection) => {
+    setExpandedConnections((current) => ({ ...current, [connection.id]: true }));
+    onSelectConnection(connection.id);
+  };
+
+  const renderAgentSection = () => (
+    <div className="agent-tree">
       <button
         type="button"
-        className={`connection-item ${connection.id === activeConnectionId ? 'is-active' : ''}`}
-        title="右键查看更多操作"
-        onClick={() => onSelectConnection(connection.id)}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          setMenu({ x: event.clientX, y: event.clientY, connection });
-        }}
+        className="tree-row tree-item"
+        aria-expanded={expandedSections.agent}
+        title="SQL Server Agent 作业（监控 + 启停/启用/禁用）"
+        onClick={() => toggleSection('agent')}
       >
-        <span className={`db-dot db-${connection.input.type}`} />
-        <span className="connection-meta">
-          <span className="connection-name">{connection.input.name}</span>
-          <span className="connection-sub">
-            {DATABASE_TYPE_LABELS[connection.input.type]} · {summarize(connection.input)}
-          </span>
-        </span>
-        <span className={`env-badge env-${connection.input.env}`}>
-          {ENVIRONMENT_LABELS[connection.input.env]}
-        </span>
+        <Icon
+          name="chevron"
+          size={12}
+          className={expandedSections.agent ? 'chevron' : 'chevron collapsed'}
+        />
+        <Icon name="play" size={14} />
+        <span>SQL Server Agent</span>
       </button>
-      <button
-        type="button"
-        className="connection-delete"
-        title={`删除连接「${connection.input.name}」`}
-        aria-label={`删除连接 ${connection.input.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onDeleteConnection(connection.id);
-        }}
-      >
-        <Icon name="close" size={12} />
-      </button>
+
+      {expandedSections.agent && (
+        <>
+          <button
+            type="button"
+            className="tree-row tree-item tree-child"
+            aria-expanded={expandedSections.jobs}
+            title="展开/收起作业列表"
+            onClick={() => toggleSection('jobs')}
+          >
+            <Icon
+              name="chevron"
+              size={12}
+              className={expandedSections.jobs ? 'chevron' : 'chevron collapsed'}
+            />
+            <Icon name="folder" size={14} />
+            <span>作业</span>
+            <span className="tree-count">
+              {agentJobsLoading ? '…' : agentJobs ? filteredJobs.length : ''}
+            </span>
+          </button>
+
+          {expandedSections.jobs &&
+            (agentJobsLoading ? (
+              <div className="tree-empty tree-child-2">正在加载作业…</div>
+            ) : agentJobsError ? (
+              <div
+                className="tree-empty tree-child-2 tree-error-text"
+                title={agentJobsError}
+              >
+                {agentJobsError}
+              </div>
+            ) : !agentJobs ? (
+              <div className="tree-empty tree-child-2">展开后加载作业</div>
+            ) : filteredJobs.length === 0 ? null : (
+              filteredJobs.map((job) => (
+                <button
+                  key={job.jobId}
+                  type="button"
+                  className={`tree-row tree-item tree-child-2 agent-job ${
+                    activeAgentJob === job.name || selectedAgentJob === job.name
+                      ? 'is-active'
+                      : ''
+                  }`}
+                  title={`${job.enabled ? '已启用' : '已禁用'} · 上次：${
+                    job.lastRunAt ?? '从未运行'
+                  } · ${agentRunStatusLabel(job.lastRunStatus)}${
+                    job.multiServer ? ' · 多服务器' : ''
+                  }；单击选中，双击打开详情`}
+                  onClick={() => setSelectedAgentJob(job.name)}
+                  onDoubleClick={() => onOpenAgentJob(job.name)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') onOpenAgentJob(job.name);
+                  }}
+                >
+                  <span className={`agent-job-dot ${job.enabled ? 'is-on' : 'is-off'}`} />
+                  <span>{job.name}</span>
+                  {job.multiServer && <span className="agent-job-tag">MSX</span>}
+                  {!job.enabled && <span className="agent-job-tag">禁用</span>}
+                </button>
+              ))
+            ))}
+        </>
+      )}
     </div>
   );
 
+  const renderConnection = (connection: SavedConnection) => {
+    const active = connection.id === activeConnectionId;
+    const expanded = isConnectionExpanded(connection);
+    const state = connectionStates[connection.id] ?? 'closed';
+    const stateLabel =
+      state === 'ready'
+        ? '已连接'
+        : state === 'opening'
+          ? '连接中'
+          : state === 'error'
+            ? '连接失败'
+            : '未连接';
+
+    return (
+      <div className="connection-branch" key={connection.id}>
+        <div
+          className="connection-row"
+          draggable
+          onDragStart={(event) => {
+            event.dataTransfer.setData('text/plain', connection.id);
+            event.dataTransfer.effectAllowed = 'move';
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const draggedId = event.dataTransfer.getData('text/plain');
+            if (draggedId && draggedId !== connection.id) {
+              onMoveConnection(draggedId, connection.input.group);
+            }
+          }}
+        >
+          <button
+            type="button"
+            className="connection-expand"
+            aria-label={`${expanded ? '收起' : '展开'} ${connection.input.name} 的对象`}
+            aria-expanded={expanded}
+            title={expanded ? '收起对象' : '展开对象'}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (expanded) {
+                setExpandedConnections((current) => ({ ...current, [connection.id]: false }));
+              } else {
+                expandConnection(connection);
+              }
+            }}
+          >
+            <Icon
+              name="chevron"
+              size={11}
+              className={expanded ? 'chevron' : 'chevron collapsed'}
+            />
+          </button>
+          <button
+            type="button"
+            className={`connection-item ${active ? 'is-active' : ''}`}
+            title="右键查看更多操作"
+            onClick={() => expandConnection(connection)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setMenu({ x: event.clientX, y: event.clientY, connection });
+            }}
+          >
+            <span className={`db-dot db-${connection.input.type}`} />
+            <span className="connection-meta">
+              <span className="connection-name">{connection.input.name}</span>
+              <span className="connection-sub">
+                {DATABASE_TYPE_LABELS[connection.input.type]} · {summarize(connection.input)}
+              </span>
+            </span>
+            <span
+              className={`connection-state is-${state}`}
+              title={stateLabel}
+              aria-label={stateLabel}
+            />
+            <span className={`env-badge env-${connection.input.env}`}>
+              {ENVIRONMENT_LABELS[connection.input.env]}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="connection-delete"
+            title={`删除连接「${connection.input.name}」`}
+            aria-label={`删除连接 ${connection.input.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDeleteConnection(connection.id);
+            }}
+          >
+            <Icon name="close" size={12} />
+          </button>
+        </div>
+
+        {active && expanded && (
+          <div className="connection-objects">
+            <div className="connection-object-actions">
+              <button
+                type="button"
+                className="icon-btn"
+                title={
+                  activeConnection?.input.type === 'mssql'
+                    ? 'MSSQL 驱动尚未接入'
+                    : sessionReadOnly
+                      ? '当前为只读会话，无法建表'
+                      : '新建表'
+                }
+                onClick={onNewTable}
+                disabled={
+                  !activeConnection ||
+                  activeConnection.input.type === 'mssql' ||
+                  sessionReadOnly
+                }
+              >
+                <Icon name="plus" size={14} />
+              </button>
+              <button
+                type="button"
+                className="icon-btn"
+                title={
+                  activeConnection?.input.type === 'mssql'
+                    ? 'MSSQL 驱动尚未接入'
+                    : sessionReadOnly
+                      ? '当前为只读会话，无法建视图'
+                      : '新建视图'
+                }
+                onClick={onNewView}
+                disabled={
+                  !activeConnection ||
+                  activeConnection.input.type === 'mssql' ||
+                  sessionReadOnly
+                }
+              >
+                <Icon name="view" size={14} />
+              </button>
+              <button
+                type="button"
+                className="icon-btn"
+                title="执行 SQL 脚本（多语句）"
+                onClick={onRunScript}
+                disabled={
+                  !activeConnection ||
+                  activeConnection.input.type === 'mssql' ||
+                  sessionReadOnly
+                }
+              >
+                <Icon name="script" size={14} />
+              </button>
+              <button
+                type="button"
+                className="icon-btn"
+                title="刷新对象"
+                onClick={onRefreshSchema}
+                disabled={!activeConnection || schemaLoading}
+              >
+                <Icon name="refresh" size={14} />
+              </button>
+            </div>
+
+            <label
+              className={`tree-row tree-toggle ${systemObjectsSupported ? '' : 'is-disabled'}`}
+              title={
+                systemObjectsSupported
+                  ? '显示或隐藏数据库系统对象（如 sqlite_*、sys.*、master/msdb 系统表）'
+                  : '当前连接类型没有可显示的系统对象'
+              }
+            >
+              <input
+                type="checkbox"
+                checked={showSystemObjects}
+                disabled={!systemObjectsSupported || schemaLoading}
+                onChange={(event) => onToggleSystemObjects(event.target.checked)}
+              />
+              <span>显示系统对象</span>
+            </label>
+
+            <ObjectTree
+              dialect={activeConnection?.input.type ?? connection.input.type}
+              query={treeQuery}
+              databases={databases}
+              currentDatabase={currentDatabase}
+              objectsByDatabase={objectsByDatabase}
+              schemaObjects={schemaObjects}
+              loadingDatabase={databaseLoading}
+              loading={schemaLoading}
+              tableExtras={tableExtras}
+              tableExtrasLoadingKey={tableExtrasLoadingKey}
+              onSelectDatabase={onSelectDatabase}
+              onLoadTableExtras={onLoadTableExtras}
+              onOpenTable={onOpenTable}
+              onOpenTableData={onOpenTableData}
+              onOpenProcedure={onOpenProcedure}
+              onTableContextMenu={(event, name, kind, database) => {
+                setObjectMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  name,
+                  kind,
+                  ...(database ? { database } : {}),
+                });
+              }}
+            />
+
+            {agentAvailable && renderAgentSection()}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderGroupHeader = (node: GroupNode, depth: number, editable: boolean) => {
     const collapsed =
-      normalizedConnectionQuery.length === 0 && Boolean(collapsedGroups[node.path]);
+      normalizedQuery.length === 0 && Boolean(collapsedGroups[node.path]);
 
     return (
       <div
@@ -369,7 +629,7 @@ export function Sidebar({
 
   const renderGroupNode = (node: GroupNode, depth: number) => {
     const collapsed =
-      normalizedConnectionQuery.length === 0 && Boolean(collapsedGroups[node.path]);
+      normalizedQuery.length === 0 && Boolean(collapsedGroups[node.path]);
 
     return (
       <div className="connection-group" key={node.path}>
@@ -393,30 +653,30 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="connection-list">
-        {connections.length === 0 ? (
-          <div className="sidebar-empty">
-            <Icon name="plug" size={20} />
-            <p>还没有连接</p>
-            <button type="button" className="btn btn-ghost" onClick={onNewConnection}>
-              新建第一个连接
-            </button>
+      {connections.length === 0 ? (
+        <div className="sidebar-empty">
+          <Icon name="plug" size={20} />
+          <p>还没有连接</p>
+          <button type="button" className="btn btn-ghost" onClick={onNewConnection}>
+            新建第一个连接
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="sidebar-search">
+            <Icon name="search" size={13} />
+            <input
+              value={treeQuery}
+              placeholder="搜索连接 / 表 / 视图 / 作业…"
+              aria-label="搜索连接和对象"
+              onChange={(event) => setTreeQuery(event.target.value)}
+            />
           </div>
-        ) : (
-          <>
-            <div className="sidebar-search">
-              <Icon name="search" size={13} />
-              <input
-                value={connectionQuery}
-                placeholder="搜索连接…"
-                aria-label="搜索连接"
-                onChange={(event) => setConnectionQuery(event.target.value)}
-              />
-            </div>
 
+          <div className="sidebar-tree-scroll">
             {filteredConnections.length === 0 ? (
               <div className="sidebar-empty compact">
-                <p>没有匹配的连接</p>
+                <p>没有匹配的连接或对象</p>
               </div>
             ) : hasGroups ? (
               <>
@@ -426,9 +686,7 @@ export function Sidebar({
                       className="connection-group-head is-ungrouped"
                       role="button"
                       tabIndex={0}
-                      aria-expanded={
-                        !(normalizedConnectionQuery.length === 0 && collapsedGroups[''])
-                      }
+                      aria-expanded={!(normalizedQuery.length === 0 && collapsedGroups[''])}
                       onClick={() => toggleGroup('')}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
@@ -451,7 +709,7 @@ export function Sidebar({
                         name="chevron"
                         size={12}
                         className={
-                          normalizedConnectionQuery.length === 0 && collapsedGroups['']
+                          normalizedQuery.length === 0 && collapsedGroups['']
                             ? 'chevron collapsed'
                             : 'chevron'
                         }
@@ -459,7 +717,7 @@ export function Sidebar({
                       <span>未分组</span>
                       <span className="tree-count">{tree.connections.length}</span>
                     </div>
-                    {!(normalizedConnectionQuery.length === 0 && collapsedGroups['']) &&
+                    {!(normalizedQuery.length === 0 && collapsedGroups['']) &&
                       tree.connections.map(renderConnection)}
                   </div>
                 )}
@@ -468,234 +726,9 @@ export function Sidebar({
             ) : (
               filteredConnections.map(renderConnection)
             )}
-          </>
-        )}
-      </div>
-
-      <div className="sidebar-section">
-        <div className="sidebar-heading">
-          <span>对象</span>
-          <div className="heading-actions">
-            <button
-              type="button"
-              className="icon-btn"
-              title={
-                activeConnection?.input.type === 'mssql'
-                  ? 'MSSQL 驱动尚未接入'
-                  : sessionReadOnly
-                    ? '当前为只读会话，无法建表'
-                    : '新建表'
-              }
-              onClick={onNewTable}
-              disabled={
-                !activeConnection ||
-                activeConnection.input.type === 'mssql' ||
-                sessionReadOnly
-              }
-            >
-              <Icon name="plus" size={14} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              title={
-                activeConnection?.input.type === 'mssql'
-                  ? 'MSSQL 驱动尚未接入'
-                  : sessionReadOnly
-                    ? '当前为只读会话，无法建视图'
-                    : '新建视图'
-              }
-              onClick={onNewView}
-              disabled={
-                !activeConnection ||
-                activeConnection.input.type === 'mssql' ||
-                sessionReadOnly
-              }
-            >
-              <Icon name="view" size={14} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              title="执行 SQL 脚本（多语句）"
-              onClick={onRunScript}
-              disabled={
-                !activeConnection ||
-                activeConnection.input.type === 'mssql' ||
-                sessionReadOnly
-              }
-            >
-              <Icon name="script" size={14} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              title="刷新对象"
-              onClick={onRefreshSchema}
-              disabled={!activeConnection || schemaLoading}
-            >
-              <Icon name="refresh" size={14} />
-            </button>
           </div>
-        </div>
-
-        {activeConnection ? (
-          <div className="object-tree">
-            <div className="tree-row tree-root">
-              <Icon name="database" size={15} />
-              <span>{summarize(activeConnection.input)}</span>
-            </div>
-
-            <div className="sidebar-search object-search">
-              <Icon name="search" size={13} />
-              <input
-                value={objectQuery}
-                placeholder="搜索表/视图/作业…"
-                aria-label="搜索对象"
-                onChange={(event) => setObjectQuery(event.target.value)}
-              />
-            </div>
-
-            <label
-              className={`tree-row tree-toggle ${systemObjectsSupported ? '' : 'is-disabled'}`}
-              title={
-                systemObjectsSupported
-                  ? '显示或隐藏数据库系统对象（如 sqlite_*）'
-                  : '当前连接类型没有可显示的系统对象'
-              }
-            >
-              <input
-                type="checkbox"
-                checked={showSystemObjects}
-                disabled={!systemObjectsSupported || schemaLoading}
-                onChange={(event) => onToggleSystemObjects(event.target.checked)}
-              />
-              <span>显示系统对象</span>
-            </label>
-
-            {agentAvailable && (
-              <div className="agent-tree">
-                <button
-                  type="button"
-                  className="tree-row tree-item"
-                  aria-expanded={expandedSections.agent}
-                  title="SQL Server Agent 作业（监控 + 启停/启用/禁用）"
-                  onClick={() => toggleSection('agent')}
-                >
-                  <Icon
-                    name="chevron"
-                    size={12}
-                    className={expandedSections.agent ? 'chevron' : 'chevron collapsed'}
-                  />
-                  <Icon name="play" size={14} />
-                  <span>SQL Server Agent</span>
-                </button>
-
-                {expandedSections.agent && (
-                  <>
-                    <button
-                      type="button"
-                      className="tree-row tree-item tree-child"
-                      aria-expanded={expandedSections.jobs}
-                      title="展开/收起作业列表"
-                      onClick={() => toggleSection('jobs')}
-                    >
-                      <Icon
-                        name="chevron"
-                        size={12}
-                        className={expandedSections.jobs ? 'chevron' : 'chevron collapsed'}
-                      />
-                      <Icon name="folder" size={14} />
-                      <span>作业</span>
-                      <span className="tree-count">
-                        {agentJobsLoading ? '…' : agentJobs ? filteredJobs.length : ''}
-                      </span>
-                    </button>
-
-                    {expandedSections.jobs &&
-                      (agentJobsLoading ? (
-                        <div className="tree-empty tree-child-2">正在加载作业…</div>
-                      ) : agentJobsError ? (
-                        <div
-                          className="tree-empty tree-child-2 tree-error-text"
-                          title={agentJobsError}
-                        >
-                          {agentJobsError}
-                        </div>
-                      ) : !agentJobs ? (
-                        <div className="tree-empty tree-child-2">展开后加载作业</div>
-                      ) : filteredJobs.length === 0 ? (
-                        <div className="tree-empty tree-child-2">
-                          {normalizedObjectQuery ? '无匹配作业' : '没有作业'}
-                        </div>
-                      ) : (
-                        filteredJobs.map((job) => (
-                          <button
-                            key={job.jobId}
-                            type="button"
-                            className={`tree-row tree-item tree-child-2 agent-job ${
-                              activeAgentJob === job.name || selectedAgentJob === job.name
-                                ? 'is-active'
-                                : ''
-                            }`}
-                            title={`${job.enabled ? '已启用' : '已禁用'} · 上次：${
-                              job.lastRunAt ?? '从未运行'
-                            } · ${agentRunStatusLabel(job.lastRunStatus)}${
-                              job.multiServer ? ' · 多服务器' : ''
-                            }；单击选中，双击打开详情`}
-                            onClick={() => setSelectedAgentJob(job.name)}
-                            onDoubleClick={() => onOpenAgentJob(job.name)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') onOpenAgentJob(job.name);
-                            }}
-                          >
-                            <span
-                              className={`agent-job-dot ${job.enabled ? 'is-on' : 'is-off'}`}
-                            />
-                            <span>{job.name}</span>
-                            {job.multiServer && <span className="agent-job-tag">MSX</span>}
-                            {!job.enabled && <span className="agent-job-tag">禁用</span>}
-                          </button>
-                        ))
-                      ))}
-                  </>
-                )}
-              </div>
-            )}
-
-            <ObjectTree
-              dialect={activeConnection.input.type}
-              query={objectQuery}
-              databases={databases}
-              currentDatabase={currentDatabase}
-              objectsByDatabase={objectsByDatabase}
-              schemaObjects={schemaObjects}
-              loadingDatabase={databaseLoading}
-              loading={schemaLoading}
-              tableExtras={tableExtras}
-              tableExtrasLoadingKey={tableExtrasLoadingKey}
-              onSelectDatabase={onSelectDatabase}
-              onLoadTableExtras={onLoadTableExtras}
-              onOpenTable={onOpenTable}
-              onOpenTableData={onOpenTableData}
-              onOpenProcedure={onOpenProcedure}
-              onTableContextMenu={(event, name, kind, database) => {
-                setObjectMenu({
-                  x: event.clientX,
-                  y: event.clientY,
-                  name,
-                  kind,
-                  ...(database ? { database } : {}),
-                });
-              }}
-            />
-          </div>
-        ) : (
-          <div className="sidebar-empty compact">
-            <p>选择或新建连接后显示对象树</p>
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
       <div className="sidebar-footer">
         <span className="muted">M1 · SQLite / MySQL 系 / MSSQL</span>
