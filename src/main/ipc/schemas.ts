@@ -24,6 +24,12 @@ const mysqlFamilySchema = common.extend({
   type: z.enum(['mysql', 'percona', 'mariadb']),
   ...serverFields,
   sslMode: z.enum(['disable', 'prefer', 'require', 'verify-ca', 'verify-full']),
+  charset: z
+    .string()
+    .trim()
+    .max(32)
+    .regex(/^[A-Za-z0-9_-]*$/, '字符集只能包含字母、数字、下划线和连字符')
+    .optional(),
 });
 
 const mssqlSchema = common.extend({
@@ -39,19 +45,137 @@ export const connectionInputSchema: z.ZodType<ConnectionInput> = z.discriminated
   mssqlSchema,
 ]);
 
-export const sessionOpenSchema = z.object({
+export const connectionSaveSchema = z.object({
+  id: z.string().min(1).max(128).optional(),
+  input: connectionInputSchema,
+});
+
+export const connectionOpenSchema = z.object({
   sessionId: z.string().min(1).max(128),
-  config: connectionInputSchema,
+  connectionId: z.string().min(1).max(128),
 });
 
 export const queryExecuteSchema = z.object({
   requestId: z.string().min(1).max(128),
   sessionId: z.string().min(1).max(128),
   sql: z.string().trim().min(1).max(1_000_000),
+  params: z
+    .array(z.union([z.string().max(100_000), z.number().finite(), z.boolean(), z.null()]))
+    .max(10_000)
+    .optional(),
+  maxRows: z.number().int().min(1).max(10_000).optional(),
+  timeoutMs: z.number().int().min(0).max(600_000).optional(),
+  connectionId: z.string().max(128).optional(),
+  connectionName: z.string().max(120).optional(),
+  dialect: z.enum(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']).optional(),
+  database: z.string().max(128).optional(),
+  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control']).optional(),
 });
 
-export const logWriteSchema = z.object({
-  level: z.enum(['error', 'warn', 'info', 'debug']),
+export const historyListSchema = z.object({
+  query: z.string().max(1000).optional().default(''),
+  dialect: z.enum(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']).optional(),
+  status: z.enum(['success', 'failed', 'cancelled']).optional(),
+  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control']).optional(),
+  connectionId: z.string().max(128).optional(),
+  databaseName: z.string().max(128).optional(),
+  since: z.string().datetime({ offset: true }).optional(),
+  sortBy: z.enum(['time', 'duration']).optional(),
+  sortDir: z.enum(['asc', 'desc']).optional(),
+  limit: z.number().int().min(1).max(1000).optional().default(200),
+});
+
+export const schemaGetSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  includeSystemObjects: z.boolean().optional().default(false),
+});
+
+export const ddlGetSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  name: z.string().min(1).max(256),
+  kind: z.enum(['table', 'view']),
+});
+
+export const schemaTableSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  name: z.string().min(1).max(256),
+  kind: z.enum(['table', 'view']),
+});
+
+export const schemaDescribeSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  name: z.string().min(1).max(256),
+});
+
+const tableCellSchema = z.union([
+  z.string().max(100_000),
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+]);
+
+const tableValueMap = z.record(z.string().min(1).max(256), tableCellSchema);
+
+const tableEditSchema = z.object({
+  kind: z.enum(['update', 'insert', 'delete']),
+  keys: tableValueMap.optional(),
+  values: tableValueMap.optional(),
+  original: tableValueMap.optional(),
+});
+
+export const tableApplySchema = z.object({
+  requestId: z.string().min(1).max(128),
+  sessionId: z.string().min(1).max(128),
+  table: z.string().min(1).max(256),
+  edits: z.array(tableEditSchema).min(1).max(1000),
+  allowNoPrimaryKeyInsert: z.boolean().optional(),
+  connectionId: z.string().max(128).optional(),
+  connectionName: z.string().max(120).optional(),
+  database: z.string().max(128).optional(),
+});
+
+export const ddlExecuteSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  statements: z.array(z.string().max(100_000)).min(1).max(50),
+  options: z
+    .object({ sqliteForeignKeysOff: z.boolean().optional() })
+    .optional(),
+});
+
+export const exportSaveSchema = z.object({
+  suggestedName: z.string().trim().min(1).max(120),
+  content: z.string().max(50_000_000),
+});
+
+const xlsxCellSchema = z.union([
+  z.string().max(100_000),
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+]);
+
+export const exportXlsxSchema = z.object({
+  suggestedName: z.string().trim().min(1).max(120),
+  columns: z.array(z.string().max(1000)).max(500),
+  rows: z.array(z.array(xlsxCellSchema).max(500)).max(100_000),
+});
+
+export const settingsSaveSchema = z.object({
+  resultRowLimit: z.union([z.literal(100), z.literal(500), z.literal(1000), z.literal(2000), z.literal(5000)]),
+  theme: z.enum(['dark', 'light']),
+  editorFontSize: z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(16)]),
+  historyRetention: z.union([z.literal(1000), z.literal(5000), z.literal(10000), z.literal(50000)]),
+  queryTimeoutMs: z.union([z.literal(0), z.literal(10000), z.literal(30000), z.literal(60000), z.literal(120000)]),
+  historyEnabled: z.boolean(),
+});
+
+export const fileSaveSqlSchema = z.object({
+  content: z.string().max(5_000_000),
+  path: z.string().max(4096).optional(),
+  suggestedName: z.string().trim().min(1).max(200),
+});
+
+export const logWriteSchema = z.object({  level: z.enum(['error', 'warn', 'info', 'debug']),
   scope: z.string().trim().min(1).max(64),
   message: z.string().min(1).max(2000),
   meta: z.string().max(4000).optional(),

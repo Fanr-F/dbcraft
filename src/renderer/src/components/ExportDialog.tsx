@@ -1,0 +1,241 @@
+import { useState } from 'react';
+import type { DatabaseType, ExportFormat, QueryCell, QueryColumn } from '@shared/ipc-contract';
+import { toCsv, toJson, toSqlInsert } from '@shared/export/formats';
+import { Icon } from './Icon';
+
+interface ExportDialogProps {
+  dialect: DatabaseType;
+  columns: QueryColumn[];
+  rows: QueryCell[][];
+  onClose: () => void;
+  onSave: (
+    content: string,
+    suggestedName: string,
+  ) => Promise<{ ok: boolean; message?: string }>;
+  onSaveXlsx: (
+    columns: QueryColumn[],
+    rows: QueryCell[][],
+    suggestedName: string,
+  ) => Promise<{ ok: boolean; message?: string }>;
+  onLoadAll?: () => Promise<{
+    ok: boolean;
+    message?: string;
+    columns?: QueryColumn[];
+    rows?: QueryCell[][];
+    truncated?: boolean;
+  }>;
+}
+
+const FORMAT_LABELS: Record<ExportFormat, string> = {
+  csv: 'CSV（Excel 兼容）',
+  json: 'JSON',
+  sql: 'SQL Insert',
+  xlsx: 'Excel（.xlsx）',
+};
+
+const EXTENSIONS: Record<ExportFormat, string> = {
+  csv: 'csv',
+  json: 'json',
+  sql: 'sql',
+  xlsx: 'xlsx',
+};
+
+function safeFileName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'result';
+}
+
+export function ExportDialog({
+  dialect,
+  columns,
+  rows,
+  onClose,
+  onSave,
+  onSaveXlsx,
+  onLoadAll,
+}: ExportDialogProps) {
+  const [format, setFormat] = useState<ExportFormat>('csv');
+  const [tableName, setTableName] = useState('export_data');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [exportColumns, setExportColumns] = useState(columns);
+  const [exportRows, setExportRows] = useState(rows);
+  const [loadMessage, setLoadMessage] = useState<string | null>(null);
+  const [loadingAll, setLoadingAll] = useState(false);
+
+  const loadAll = async () => {
+    if (!onLoadAll || loadingAll) return;
+    setLoadingAll(true);
+    setError(null);
+    try {
+      const result = await onLoadAll();
+      if (!result.ok) {
+        setError(result.message ?? '加载全部失败。');
+        return;
+      }
+      if (result.columns) setExportColumns(result.columns);
+      if (result.rows) setExportRows(result.rows);
+      setLoadMessage(
+        result.truncated
+          ? `已加载前 ${result.rows?.length ?? 0} 行（超过上限，仍为截断结果）。`
+          : `已加载 ${result.rows?.length ?? 0} 行。`,
+      );
+    } finally {
+      setLoadingAll(false);
+    }
+  };
+
+  const run = async () => {
+    if (busy) return;
+
+    if (format === 'xlsx') {
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await onSaveXlsx(exportColumns, exportRows, 'result.xlsx');
+        if (result.ok) {
+          onClose();
+        } else {
+          setError(result.message ?? '导出失败。');
+        }
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    let content: string;
+    if (format === 'csv') {
+      content = toCsv(exportColumns, exportRows);
+    } else if (format === 'json') {
+      content = toJson(exportColumns, exportRows);
+    } else {
+      const table = tableName.trim();
+      if (!table) {
+        setError('SQL Insert 需要填写目标表名。');
+        return;
+      }
+      content = toSqlInsert(dialect, table, exportColumns, exportRows);
+    }
+
+    if (!content) {
+      setError('没有可导出的内容。');
+      return;
+    }
+
+    const baseName = format === 'sql' ? safeFileName(tableName) : 'result';
+    const suggestedName = `${baseName}.${EXTENSIONS[format]}`;
+
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await onSave(content, suggestedName);
+      if (result.ok) {
+        onClose();
+      } else {
+        setError(result.message ?? '导出失败。');
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={() => !busy && onClose()}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-dialog-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="modal-header">
+          <div>
+            <h2 id="export-dialog-title">导出结果</h2>
+            <p>
+              将 {exportRows.length} 行 × {exportColumns.length} 列导出为文件；数据以数据库返回值为准。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="关闭"
+            onClick={() => !busy && onClose()}
+          >
+            <Icon name="close" />
+          </button>
+        </header>
+
+        <div className="modal-body">
+          <div className="field">
+            <span>格式</span>
+            <div className="export-formats">
+              {(Object.keys(FORMAT_LABELS) as ExportFormat[]).map((value) => (
+                <label className="check" key={value}>
+                  <input
+                    type="radio"
+                    name="export-format"
+                    checked={format === value}
+                    onChange={() => setFormat(value)}
+                  />
+                  {FORMAT_LABELS[value]}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {format === 'sql' && (
+            <label className="field">
+              <span>目标表名</span>
+              <input
+                value={tableName}
+                placeholder="例如：orders"
+                onChange={(event) => setTableName(event.target.value)}
+              />
+            </label>
+          )}
+
+          <p className="form-note">
+            CSV 使用 UTF-8 BOM + CRLF，NULL 为空字段；JSON 区分 null 与空串；
+            SQL Insert 按 {dialect} 方言转义标识符与字符串；Excel 生成单工作表 .xlsx，
+            数字保持数值、NULL 留空。导出只包含已加载的 {exportRows.length} 行。
+          </p>
+
+          {onLoadAll && (
+            <div className="export-load-all">
+              <button
+                type="button"
+                className="btn"
+                disabled={loadingAll || busy}
+                onClick={() => void loadAll()}
+              >
+                {loadingAll ? '加载中…' : '加载全部（最多 10000 行）'}
+              </button>
+              {loadMessage && <span className="pane-hint">{loadMessage}</span>}
+            </div>
+          )}
+
+          {error && <div className="form-error">{error}</div>}
+        </div>
+
+        <footer className="modal-footer">
+          <button type="button" className="btn" disabled={busy} onClick={onClose}>
+            取消
+          </button>
+          <span className="spacer" />
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || exportRows.length === 0}
+            onClick={() => void run()}
+          >
+            {busy ? '导出中…' : '导出'}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}

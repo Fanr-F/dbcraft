@@ -14,10 +14,16 @@ const api: DBCraftApi = {
   },
   connection: {
     test: (input: ConnectionInput) => ipcRenderer.invoke(IPC_CHANNELS.connectionTest, input),
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.connectionList),
+    save: (input: ConnectionInput, id?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.connectionSave, { input, id }),
+    remove: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.connectionDelete, id),
+    removeAll: () => ipcRenderer.invoke(IPC_CHANNELS.connectionRemoveAll),
+    open: (sessionId: string, connectionId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.connectionOpen, { sessionId, connectionId }),
+    import: () => ipcRenderer.invoke(IPC_CHANNELS.connectionImport),
   },
   session: {
-    open: (sessionId: string, input: ConnectionInput) =>
-      ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, { sessionId, config: input }),
     close: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.sessionClose, sessionId),
   },
   query: {
@@ -25,7 +31,49 @@ const api: DBCraftApi = {
     cancel: (requestId: string) => ipcRenderer.invoke(IPC_CHANNELS.queryCancel, requestId),
   },
   schema: {
-    get: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.schemaGet, sessionId),
+    get: (sessionId: string, options) =>
+      ipcRenderer.invoke(IPC_CHANNELS.schemaGet, { sessionId, ...options }),
+    table: (sessionId: string, name: string, kind) =>
+      ipcRenderer.invoke(IPC_CHANNELS.schemaTable, { sessionId, name, kind }),
+    describe: (sessionId: string, name: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.schemaDescribe, { sessionId, name }),
+  },
+  table: {
+    apply: (request) => ipcRenderer.invoke(IPC_CHANNELS.tableApply, request),
+  },
+  ddl: {
+    get: (sessionId: string, name: string, kind) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ddlGet, { sessionId, name, kind }),
+    execute: (sessionId: string, statements: string[], options?) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ddlExecute, { sessionId, statements, options }),
+  },
+  export: {
+    save: (request) => ipcRenderer.invoke(IPC_CHANNELS.exportSave, request),
+    saveXlsx: (request) => ipcRenderer.invoke(IPC_CHANNELS.exportSaveXlsx, request),
+  },
+  history: {
+    list: (options = {}) => ipcRenderer.invoke(IPC_CHANNELS.historyList, options),
+    remove: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.historyDelete, id),
+    clear: () => ipcRenderer.invoke(IPC_CHANNELS.historyClear),
+    clearConnection: (connectionId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.historyClearConnection, connectionId),
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),
+    save: (settings) => ipcRenderer.invoke(IPC_CHANNELS.settingsSave, settings),
+  },
+  stats: {
+    get: () => ipcRenderer.invoke(IPC_CHANNELS.statsGet),
+  },
+  diagnostics: {
+    exportLogs: () => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsExportLogs),
+    openLogDir: () => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsOpenLogDir),
+    backupDatabase: () => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsBackupDatabase),
+    restoreDatabase: () => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsRestoreDatabase),
+  },
+  file: {
+    openSql: () => ipcRenderer.invoke(IPC_CHANNELS.fileOpenSql),
+    saveSql: (request) => ipcRenderer.invoke(IPC_CHANNELS.fileSaveSql, request),
   },
   log: {
     write: (level, scope, message, meta) =>

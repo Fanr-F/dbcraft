@@ -7,6 +7,8 @@ interface ToolbarProps {
   activeConnectionId: string | null;
   onSelectConnection: (id: string) => void;
   onNewConnection: () => void;
+  onOpenHistory: () => void;
+  onOpenSettings: () => void;
 }
 
 export function Toolbar({
@@ -14,6 +16,8 @@ export function Toolbar({
   activeConnectionId,
   onSelectConnection,
   onNewConnection,
+  onOpenHistory,
+  onOpenSettings,
 }: ToolbarProps) {
   return (
     <header className="toolbar">
@@ -49,10 +53,10 @@ export function Toolbar({
       </div>
 
       <div className="toolbar-actions">
-        <button type="button" className="icon-btn" title="历史（M1 接入）" disabled>
+        <button type="button" className="icon-btn" title="查询历史" onClick={onOpenHistory}>
           <Icon name="history" />
         </button>
-        <button type="button" className="icon-btn" title="设置（M1 接入）" disabled>
+        <button type="button" className="icon-btn" title="设置" onClick={onOpenSettings}>
           <Icon name="settings" />
         </button>
       </div>

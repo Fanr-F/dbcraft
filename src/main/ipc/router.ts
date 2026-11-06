@@ -1,29 +1,93 @@
-import { app, dialog, ipcMain } from 'electron';
-import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron';
+import { app, dialog, ipcMain, shell } from 'electron';
+import type {
+  BrowserWindow,
+  IpcMainEvent,
+  IpcMainInvokeEvent,
+  OpenDialogOptions,
+} from 'electron';
+import { writeFile, readFile, readdir, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type ConnectionDeleteResult,
+  type ConnectionImportResult,
+  type ConnectionListResult,
+  type ConnectionRecord,
+  type ConnectionRemoveAllResult,
+  type ConnectionSaveResult,
   type ConnectionTestResult,
+  type DdlExecuteResult,
+  type DdlGetResult,
+  type DiagnosticsExportResult,
+  type DiagnosticsOpenResult,
+  type DiagnosticsRestoreResult,
+  type ExportSaveResult,
+  type HistoryListResult,
   type QueryResponse,
   type SchemaGetResult,
   type SessionOpenResult,
+  type SettingsGetResult,
+  type SettingsSaveResult,
+  type SqlFileOpenResult,
+  type SqlFileSaveResult,
+  type StatsGetResult,
+  type TableApplyResult,
+  type TableDetailResult,
+  type TableMetaResult,
 } from '../../shared/ipc-contract';
 import {
   connectionInputSchema,
+  connectionOpenSchema,
+  connectionSaveSchema,
+  ddlExecuteSchema,
+  ddlGetSchema,
+  exportSaveSchema,
+  exportXlsxSchema,
+  fileSaveSqlSchema,
   formatConnectionIssues,
+  historyListSchema,
   logWriteSchema,
   queryExecuteSchema,
-  sessionOpenSchema,
+  schemaDescribeSchema,
+  schemaGetSchema,
+  schemaTableSchema,
+  settingsSaveSchema,
+  tableApplySchema,
 } from './schemas';
 import {
+  applyTableEdits,
   cancelQuery,
+  closeAllSessions,
   closeSession,
   executeQuery,
+  executeDdl,
   getSchema,
-  openSession,
+  getTableDetail,
+  getTableMeta,
+  getDdl,
+  openSessionById,
   testConnection,
 } from '../services/ConnectionManager';
+import { parseConnectionExport } from '../../shared/connection-export';
+import {
+  listConnections,
+  removeAllConnections,
+  removeConnection,
+  saveConnection,
+  listQueryHistory,
+  removeQueryHistory,
+  clearQueryHistory,
+  clearConnectionQueryHistory,
+  getAppSettings,
+  getLocalStats,
+  saveAppSettings,
+  backupMetadataDatabase,
+  restoreMetadataDatabase,
+} from '../storage/metadata';
 import { createLogger } from '../logging/logger';
+import { resolveLogDirectory } from '../logging/logger';
+import { buildXlsx } from '../export/xlsx';
 
 let mainWindow: BrowserWindow | null = null;
 const log = createLogger('ipc');
@@ -68,6 +132,7 @@ export function registerIpcHandlers(): void {
       chrome: process.versions.chrome,
       node: process.versions.node,
       platform: process.platform,
+      userDataPath: app.getPath('userData'),
     };
   });
 
@@ -103,11 +168,46 @@ export function registerIpcHandlers(): void {
     },
   );
 
+  handle(IPC_CHANNELS.connectionList, (): ConnectionListResult => listConnections());
+
   handle(
-    IPC_CHANNELS.sessionOpen,
+    IPC_CHANNELS.connectionSave,
+    (_event, rawInput: unknown): ConnectionSaveResult => {
+      const parsed = connectionSaveSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          ok: false,
+          message: `连接配置不完整：${formatConnectionIssues(parsed.error)}`,
+        };
+      }
+
+      return saveConnection(parsed.data.input, parsed.data.id);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.connectionRemoveAll,
+    async (): Promise<ConnectionRemoveAllResult> => {
+      await closeAllSessions();
+      return removeAllConnections();
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.connectionDelete,
+    (_event, rawInput: unknown): ConnectionDeleteResult => {
+      if (typeof rawInput !== 'string' || rawInput.length === 0) {
+        return { ok: false, message: '连接 ID 无效。' };
+      }
+      return removeConnection(rawInput);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.connectionOpen,
     async (_event, rawInput: unknown): Promise<SessionOpenResult> => {
       const startedAt = Date.now();
-      const parsed = sessionOpenSchema.safeParse(rawInput);
+      const parsed = connectionOpenSchema.safeParse(rawInput);
 
       if (!parsed.success) {
         return {
@@ -117,9 +217,62 @@ export function registerIpcHandlers(): void {
         };
       }
 
-      return openSession(parsed.data.sessionId, parsed.data.config);
+      return openSessionById(parsed.data.sessionId, parsed.data.connectionId);
     },
   );
+
+  handle(IPC_CHANNELS.connectionImport, async (): Promise<ConnectionImportResult> => {
+    const options: OpenDialogOptions = {
+      title: '导入连接配置',
+      properties: ['openFile'],
+      filters: [{ name: 'DBCraft 连接配置', extensions: ['json'] }],
+    };
+
+    const picked = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    if (picked.canceled || !picked.filePaths[0]) {
+      return { ok: false, canceled: true, message: '已取消导入。' };
+    }
+
+    let text: string;
+    try {
+      text = await readFile(picked.filePaths[0], 'utf8');
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    if (text.length > 1_000_000) {
+      return { ok: false, message: '文件过大：连接配置上限 1 MB。' };
+    }
+
+    const parsed = parseConnectionExport(text);
+    if (!parsed.ok) {
+      return { ok: false, message: parsed.message };
+    }
+
+    const imported: ConnectionRecord[] = [];
+    let skipped = 0;
+    for (const input of parsed.inputs) {
+      const saved = saveConnection(input);
+      if (saved.ok) {
+        imported.push(saved.connection);
+      } else {
+        skipped += 1;
+      }
+    }
+
+    if (imported.length === 0) {
+      return { ok: false, message: '没有连接被导入。' };
+    }
+
+    log.info('连接配置已导入', { imported: imported.length, skipped });
+    return { ok: true, imported, skipped };
+  });
 
   handle(IPC_CHANNELS.sessionClose, async (_event, rawInput: unknown): Promise<void> => {
     if (typeof rawInput === 'string' && rawInput.length > 0) {
@@ -159,10 +312,460 @@ export function registerIpcHandlers(): void {
   handle(
     IPC_CHANNELS.schemaGet,
     async (_event, rawInput: unknown): Promise<SchemaGetResult> => {
-      if (typeof rawInput !== 'string' || rawInput.length === 0) {
+      const parsed = schemaGetSchema.safeParse(rawInput);
+      if (!parsed.success) {
         return { ok: false, message: '会话参数无效。' };
       }
-      return getSchema(rawInput);
+
+      return getSchema(parsed.data.sessionId, {
+        includeSystemObjects: parsed.data.includeSystemObjects,
+      });
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.schemaTable,
+    async (_event, rawInput: unknown): Promise<TableMetaResult> => {
+      const parsed = schemaTableSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: '表元数据参数无效。' };
+      }
+
+      return getTableMeta(parsed.data.sessionId, parsed.data.name, parsed.data.kind);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.schemaDescribe,
+    async (_event, rawInput: unknown): Promise<TableDetailResult> => {
+      const parsed = schemaDescribeSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: '表结构参数无效。' };
+      }
+      return getTableDetail(parsed.data.sessionId, parsed.data.name);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.tableApply,
+    async (_event, rawInput: unknown): Promise<TableApplyResult> => {
+      const parsed = tableApplySchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          ok: false,
+          message: `表格编辑参数无效：${formatConnectionIssues(parsed.error)}`,
+          conflict: false,
+          applied: 0,
+          elapsedMs: 0,
+        };
+      }
+
+      return applyTableEdits(parsed.data);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.ddlGet,
+    async (_event, rawInput: unknown): Promise<DdlGetResult> => {
+      const parsed = ddlGetSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: 'DDL 参数无效。' };
+      }
+
+      return getDdl(parsed.data.sessionId, parsed.data.name, parsed.data.kind);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.ddlExecute,
+    async (_event, rawInput: unknown): Promise<DdlExecuteResult> => {
+      const parsed = ddlExecuteSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          ok: false,
+          message: `DDL 参数无效：${formatConnectionIssues(parsed.error)}`,
+          results: [],
+          elapsedMs: 0,
+        };
+      }
+
+      return executeDdl(
+        parsed.data.sessionId,
+        parsed.data.statements,
+        parsed.data.options,
+      );
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.exportSave,
+    async (_event, rawInput: unknown): Promise<ExportSaveResult> => {
+      const parsed = exportSaveSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: '导出参数无效。' };
+      }
+
+      const { suggestedName, content } = parsed.data;
+      const dot = suggestedName.lastIndexOf('.');
+      const extension = dot >= 0 ? suggestedName.slice(dot + 1).toLowerCase() : 'txt';
+
+      const options = {
+        title: '导出结果',
+        defaultPath: suggestedName,
+        filters: [{ name: '导出文件', extensions: [extension] }],
+      };
+
+      const result = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options);
+
+      if (result.canceled || !result.filePath) {
+        return { ok: false, canceled: true, message: '已取消导出。' };
+      }
+
+      let filePath = result.filePath;
+      if (!/\.\w+$/i.test(filePath)) {
+        filePath = `${filePath}.${extension}`;
+      }
+
+      try {
+        await writeFile(filePath, content, 'utf8');
+        log.info('结果已导出', { extension, bytes: content.length });
+        return { ok: true, path: filePath };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.exportSaveXlsx,
+    async (_event, rawInput: unknown): Promise<ExportSaveResult> => {
+      const parsed = exportXlsxSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: 'Excel 导出参数无效。' };
+      }
+
+      const { suggestedName, columns, rows } = parsed.data;
+      const options = {
+        title: '导出 Excel',
+        defaultPath: suggestedName,
+        filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
+      };
+      const picked = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options);
+
+      if (picked.canceled || !picked.filePath) {
+        return { ok: false, canceled: true, message: '已取消导出。' };
+      }
+
+      let filePath = picked.filePath;
+      if (!/\.\w+$/i.test(filePath)) {
+        filePath = `${filePath}.xlsx`;
+      }
+
+      try {
+        const workbook = buildXlsx({ columns, rows });
+        await writeFile(filePath, workbook);
+        log.info('Excel 已导出', { bytes: workbook.length, rows: rows.length });
+        return { ok: true, path: filePath };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.historyList,
+    (_event, rawInput: unknown): HistoryListResult => {
+      const parsed = historyListSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return { ok: false, message: '历史查询参数无效。' };
+      }
+      return listQueryHistory(parsed.data);
+    },
+  );
+
+  handle(IPC_CHANNELS.historyDelete, (_event, rawInput: unknown) => {
+    if (
+      typeof rawInput !== 'number' ||
+      !Number.isInteger(rawInput) ||
+      rawInput <= 0
+    ) {
+      return { ok: false, message: '记录 ID 无效。' };
+    }
+    return removeQueryHistory(rawInput);
+  });
+
+  handle(IPC_CHANNELS.historyClear, () => clearQueryHistory());
+
+  handle(IPC_CHANNELS.historyClearConnection, (_event, rawInput: unknown) => {
+    if (typeof rawInput !== 'string' || rawInput.length === 0) {
+      return { ok: false, message: '连接 ID 无效。' };
+    }
+    return clearConnectionQueryHistory(rawInput);
+  });
+
+  handle(IPC_CHANNELS.settingsGet, (): SettingsGetResult => getAppSettings());
+
+  handle(IPC_CHANNELS.statsGet, (): StatsGetResult => getLocalStats());
+
+  handle(
+    IPC_CHANNELS.settingsSave,
+    (_event, rawInput: unknown): SettingsSaveResult => {
+      const parsed = settingsSaveSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: '设置参数无效。' };
+      }
+      return saveAppSettings(parsed.data);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.diagnosticsExportLogs,
+    async (): Promise<DiagnosticsExportResult> => {
+      const directory = resolveLogDirectory();
+      let files: string[] = [];
+      try {
+        files = (await readdir(directory))
+          .filter((name) => name.startsWith('dbcraft.log'))
+          .sort();
+      } catch {
+        files = [];
+      }
+
+      if (files.length === 0) {
+        return {
+          ok: false,
+          message: `日志目录中没有可导出的文件：${directory}`,
+        };
+      }
+
+      const maxBytes = 10 * 1024 * 1024;
+      const parts: string[] = [
+        '# DBCraft 诊断日志',
+        `导出时间: ${new Date().toISOString()}`,
+        `应用版本: ${app.getVersion()} / Electron ${process.versions.electron}`,
+        `平台: ${process.platform} ${process.arch}`,
+        `日志目录: ${directory}`,
+        '',
+      ];
+      let total = 0;
+      for (const name of files) {
+        if (total >= maxBytes) {
+          parts.push('--- 日志总量超过 10 MB，后续文件未包含 ---');
+          break;
+        }
+        try {
+          const content = await readFile(join(directory, name), 'utf8');
+          const slice = content.slice(0, Math.max(0, maxBytes - total));
+          parts.push(`--- ${name} ---`, slice, '');
+          total += slice.length;
+        } catch (error) {
+          parts.push(
+            `--- ${name} 读取失败: ${error instanceof Error ? error.message : String(error)} ---`,
+          );
+        }
+      }
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const options = {
+        title: '导出诊断日志',
+        defaultPath: `dbcraft-diagnostics-${stamp}.log`,
+        filters: [{ name: '日志文件', extensions: ['log'] }],
+      };
+      const picked = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options);
+
+      if (picked.canceled || !picked.filePath) {
+        return { ok: false, canceled: true, message: '已取消导出。' };
+      }
+
+      let filePath = picked.filePath;
+      if (!/\.\w+$/i.test(filePath)) {
+        filePath = `${filePath}.log`;
+      }
+
+      try {
+        await writeFile(filePath, parts.join('\n'), 'utf8');
+        log.info('诊断日志已导出', { files: files.length, bytes: total });
+        return { ok: true, path: filePath };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.diagnosticsOpenLogDir,
+    async (): Promise<DiagnosticsOpenResult> => {
+      const directory = resolveLogDirectory();
+      try {
+        await mkdir(directory, { recursive: true });
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      const failure = await shell.openPath(directory);
+      return failure ? { ok: false, message: failure } : { ok: true };
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.fileOpenSql,
+    async (): Promise<SqlFileOpenResult> => {
+      const options: OpenDialogOptions = {
+        title: '打开 SQL 文件',
+        properties: ['openFile'],
+        filters: [
+          { name: 'SQL 文件', extensions: ['sql', 'txt'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      };
+      const picked = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+      if (picked.canceled || !picked.filePaths[0]) {
+        return { ok: false, canceled: true, message: '已取消打开。' };
+      }
+
+      try {
+        const content = await readFile(picked.filePaths[0], 'utf8');
+        if (content.length > 2_000_000) {
+          return { ok: false, message: 'SQL 文件过大：上限 2 MB。' };
+        }
+        return { ok: true, path: picked.filePaths[0], content };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.fileSaveSql,
+    async (_event, rawInput: unknown): Promise<SqlFileSaveResult> => {
+      const parsed = fileSaveSqlSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: '保存参数无效。' };
+      }
+      const { content, path, suggestedName } = parsed.data;
+
+      let filePath = path;
+      if (!filePath) {
+        const options = {
+          title: '保存 SQL 文件',
+          defaultPath: suggestedName,
+          filters: [{ name: 'SQL 文件', extensions: ['sql'] }],
+        };
+        const picked = mainWindow
+          ? await dialog.showSaveDialog(mainWindow, options)
+          : await dialog.showSaveDialog(options);
+        if (picked.canceled || !picked.filePath) {
+          return { ok: false, canceled: true, message: '已取消保存。' };
+        }
+        filePath = picked.filePath;
+      }
+
+      if (!/\.\w+$/i.test(filePath)) {
+        filePath = `${filePath}.sql`;
+      }
+
+      try {
+        await writeFile(filePath, content, 'utf8');
+        log.info('SQL 文件已保存', { bytes: content.length });
+        return { ok: true, path: filePath };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.diagnosticsBackupDatabase,
+    async (): Promise<DiagnosticsExportResult> => {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const options = {
+        title: '备份元数据库',
+        defaultPath: `dbcraft-backup-${stamp}.db`,
+        filters: [{ name: 'SQLite 数据库', extensions: ['db'] }],
+      };
+      const picked = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options);
+
+      if (picked.canceled || !picked.filePath) {
+        return { ok: false, canceled: true, message: '已取消备份。' };
+      }
+
+      let filePath = picked.filePath;
+      if (!/\.\w+$/i.test(filePath)) {
+        filePath = `${filePath}.db`;
+      }
+
+      try {
+        await backupMetadataDatabase(filePath);
+        return { ok: true, path: filePath };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.diagnosticsRestoreDatabase,
+    async (): Promise<DiagnosticsRestoreResult> => {
+      const options: OpenDialogOptions = {
+        title: '恢复元数据库备份',
+        properties: ['openFile'],
+        filters: [
+          { name: 'SQLite 数据库', extensions: ['db', 'sqlite', 'sqlite3'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      };
+      const picked = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+
+      if (picked.canceled || !picked.filePaths[0]) {
+        return { ok: false, canceled: true, message: '已取消恢复。' };
+      }
+
+      try {
+        // 先关闭用户数据库会话，避免恢复后仍持有旧连接配置。
+        await closeAllSessions();
+        const result = restoreMetadataDatabase(picked.filePaths[0]);
+        if (!result.ok) {
+          return { ok: false, message: result.message };
+        }
+        return { ok: true, preRestoreBackup: result.preRestoreBackup };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
     },
   );
 

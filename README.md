@@ -96,19 +96,18 @@ src/
 - DATETIME、DECIMAL、JSON、BIGINT 按数据库返回形态展示
 - 查询取消：MySQL/MariaDB 用 `KILL QUERY`，连接保留；SQLite 终止 Worker，需要重连
 - 每个 SQL 标签一个独立会话/物理连接；标签间查询与取消互不阻塞
-- 结果最多返回 2,000 行，超出标记截断
+- 结果默认最多返回 2,000 行（设置可调 100/500/1000/2000/5000），超出标记截断
 
 尚未接入：
 
-- MSSQL 真实驱动
-- 多语句执行
-- 事务状态跟踪（网格编辑前再补）
-- 查询历史、设置、导出、数据编辑、DDL、Agent
-- 10 万行性能验证、打包后 asar Worker 冒烟测试
+- MSSQL 真实驱动与 MOD-08 Agent
+- 列/别名补全、错误波浪线、多结果集
+- 真流式导出/进度/取消（当前导出前最多加载 1 万行）
+- 打包/安装包、性能基线与无障碍
 
 设计取舍：**保存连接只是配置**；每个 SQL 标签打开独立会话，一个会话对应一个物理连接。关闭标签即关闭会话；不做连接池。标签之间查询和取消互不阻塞。
 
-连接信息当前只保存在渲染进程内存中，密码不写盘。
+连接配置持久化在主进程元数据库 `<userData>/dbcraft-meta.db`；密码经 `safeStorage` 加密后落盘，只在主进程解密，不回传渲染层。
 
 ## 日志
 
@@ -117,15 +116,13 @@ src/
 - 开发/未打包写入项目根 `logs/dbcraft.log`（即当前工作目录下）；打包后写入 `<userData>/logs/dbcraft.log`；
   可用 `DBCRAFT_LOG_DIR` 覆盖。单文件 5 MB 轮转、保留 3 个历史文件；`logs/` 已加入 `.gitignore`。
 - 渲染进程日志经 `log:write` IPC 汇入同一文件，来源校验与长度校验在 IPC 层完成。
-- 日志不记录 SQL 文本、密码或连接串；敏感字段自动打码。详见 `doc/LOGGING.md`。
+- 日志不记录 SQL 文本、密码或连接串；敏感字段自动打码。详见 `doc/PROJECT_STATUS.md` §6「日志约定」。
 
 ## 文档
 
-- `doc/PRD.md`
-- `doc/TECH_DESIGN.md`
-- `doc/IMPLEMENTATION_STATUS.md`
-- `doc/LOGGING.md`
-- `doc/CHANGELOG.md`
+- `doc/PRD.md`：需求
+- `doc/TECH_DESIGN.md`：技术设计
+- `doc/PROJECT_STATUS.md`：实现现状、差距、缺陷、验收、DDL 方案、日志约定与变更里程碑
 
 ## 许可证
 

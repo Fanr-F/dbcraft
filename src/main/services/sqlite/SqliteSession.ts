@@ -1,7 +1,18 @@
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import type { QueryResult, SchemaObject } from '../../../shared/ipc-contract';
+import type {
+  DdlObjectKind,
+  QueryCell,
+  QueryResult,
+  SchemaGetOptions,
+  SchemaObject,
+  TableColumnMeta,
+  TableDetail,
+  TableMeta,
+} from '../../../shared/ipc-contract';
 import type { DatabaseSession } from '../DatabaseSession';
+import { quoteIdent } from '../../../shared/dialect/identifiers';
+import { extractCheckExpressions } from '../../../shared/dialect/checks';
 
 type Pending = {
   resolve: (value: unknown) => void;
@@ -10,7 +21,7 @@ type Pending = {
 
 type WorkerRequest =
   | { type: 'open'; filePath: string }
-  | { type: 'query'; sql: string }
+  | { type: 'query'; sql: string; params?: QueryCell[]; maxRows?: number }
   | { type: 'close' };
 
 type WorkerResponse =
@@ -18,8 +29,11 @@ type WorkerResponse =
   | { id: number; ok: false; error: { message: string; code: string | null } };
 
 export class SqliteSession implements DatabaseSession {
+  readonly dialect = 'sqlite' as const;
   readonly label = 'SQLite';
   readonly cancelDisconnects = true;
+  isReadOnly = false;
+  note?: string;
   serverVersion = 'unknown';
 
   get alive(): boolean {
@@ -64,21 +78,32 @@ export class SqliteSession implements DatabaseSession {
     );
     const worker = new Worker(workerPath, { name: 'sqlite-conn' });
     const session = new SqliteSession(worker);
-    const info = await session.request<{ version: string }>({ type: 'open', filePath });
+    const info = await session.request<{ version: string; readonly: boolean }>({
+      type: 'open',
+      filePath,
+    });
     session.serverVersion = info.version;
+    session.isReadOnly = info.readonly;
+    if (info.readonly) {
+      session.note = '只读模式：数据库文件被占用或不可写';
+    }
     return session;
   }
 
-  query(sql: string): Promise<QueryResult> {
-    return this.request<QueryResult>({ type: 'query', sql });
+  query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult> {
+    return this.request<QueryResult>({ type: 'query', sql, params, maxRows });
   }
 
-  async schema(): Promise<SchemaObject[]> {
+  async schema(options: SchemaGetOptions = {}): Promise<SchemaObject[]> {
+    const systemFilter = options.includeSystemObjects
+      ? ''
+      : "AND name NOT LIKE 'sqlite_%'";
+
     const result = await this.query(
       `SELECT name, type
        FROM sqlite_master
        WHERE type IN ('table', 'view')
-         AND name NOT LIKE 'sqlite_%'
+         ${systemFilter}
        ORDER BY type, name`,
     );
 
@@ -86,6 +111,138 @@ export class SqliteSession implements DatabaseSession {
       name: String(row[0] ?? ''),
       type: row[1] === 'view' ? 'view' : 'table',
     }));
+  }
+
+  async getDdl(name: string, kind: DdlObjectKind): Promise<string> {
+    const escaped = name.replace(/'/g, "''");
+    const type = kind === 'view' ? 'view' : 'table';
+    const result = await this.query(
+      `SELECT sql FROM sqlite_master WHERE name = '${escaped}' AND type = '${type}'`,
+    );
+
+    const ddl = result.rows[0]?.[0];
+    if (typeof ddl !== 'string' || ddl.trim().length === 0) {
+      throw new Error(`未找到${type === 'view' ? '视图' : '表'}「${name}」的 DDL。`);
+    }
+    return ddl;
+  }
+
+  async getTableMeta(name: string, kind: DdlObjectKind): Promise<TableMeta> {
+    const object = await this.query(
+      `SELECT name, type, sql FROM sqlite_master
+       WHERE name = ? AND type = ?`,
+      [name, kind === 'view' ? 'view' : 'table'],
+    );
+
+    if (object.rows.length === 0) {
+      throw new Error(`未找到${kind === 'view' ? '视图' : '表'}「${name}」。`);
+    }
+
+    const info = await this.query(`PRAGMA table_info(${quoteIdent('sqlite', name)})`);
+    const columns: TableColumnMeta[] = info.rows.map((row) => {
+      const declaredType = String(row[2] ?? '');
+      const primaryKey = Number(row[5] ?? 0) > 0;
+      return {
+        name: String(row[1] ?? ''),
+        declaredType,
+        notNull: Number(row[3] ?? 0) !== 0,
+        primaryKey,
+        // INTEGER PRIMARY KEY 是 rowid 别名；AUTOINCREMENT 只是额外的单调约束。
+        autoIncrement: primaryKey && /^integer$/i.test(declaredType.trim()),
+        defaultValue: row[4] === null || row[4] === undefined ? null : String(row[4]),
+        readOnly: primaryKey,
+      };
+    });
+
+    const primaryKey = columns.filter((column) => column.primaryKey).map((column) => column.name);
+    const isView = kind === 'view' || object.rows[0]?.[1] === 'view';
+    const editable = !isView && primaryKey.length > 0 && !this.isReadOnly;
+
+    let reason: string | undefined;
+    let reasonCode: TableMeta['reasonCode'];
+    if (isView) {
+      reason = '视图不可编辑';
+      reasonCode = 'view';
+    } else if (this.isReadOnly) {
+      reason = '当前会话为只读模式';
+      reasonCode = 'readonly-session';
+    } else if (primaryKey.length === 0) {
+      reason = '表没有主键，无法安全定位行';
+      reasonCode = 'no-primary-key';
+    }
+
+    return {
+      name,
+      kind: isView ? 'view' : 'table',
+      columns,
+      primaryKey,
+      editable,
+      ...(reasonCode ? { reasonCode } : {}),
+      ...(reason ? { reason } : {}),
+    };
+  }
+
+  async getTableDetail(name: string): Promise<TableDetail> {
+    const meta = await this.getTableMeta(name, 'table');
+    const quoted = quoteIdent('sqlite', name);
+
+    const indexes: TableDetail['indexes'] = [];
+    const indexList = await this.query(`PRAGMA index_list(${quoted})`);
+    for (const row of indexList.rows) {
+      const indexName = String(row[1] ?? '');
+      if (!indexName) continue;
+      const columns = await this.query(`PRAGMA index_info(${quoteIdent('sqlite', indexName)})`);
+      indexes.push({
+        name: indexName,
+        unique: Number(row[2] ?? 0) !== 0,
+        columns: columns.rows
+          .map((info) => String(info[2] ?? ''))
+          .filter((column) => column.length > 0),
+      });
+    }
+
+    const foreignKeys: TableDetail['foreignKeys'] = [];
+    const fkRows = await this.query(`PRAGMA foreign_key_list(${quoted})`);
+    const byId = new Map<
+      string,
+      {
+        columns: string[];
+        referencedTable: string;
+        referencedColumns: string[];
+        onDelete: string | null;
+        onUpdate: string | null;
+      }
+    >();
+    for (const row of fkRows.rows) {
+      const id = String(row[0] ?? '0');
+      const group = byId.get(id) ?? {
+        columns: [],
+        referencedTable: String(row[2] ?? ''),
+        referencedColumns: [],
+        onDelete: row[6] === null || row[6] === undefined ? null : String(row[6]),
+        onUpdate: row[5] === null || row[5] === undefined ? null : String(row[5]),
+      };
+      group.columns.push(String(row[3] ?? ''));
+      group.referencedColumns.push(String(row[4] ?? ''));
+      byId.set(id, group);
+    }
+    for (const [id, group] of byId) {
+      foreignKeys.push({ name: `fk_${id}`, ...group });
+    }
+
+    const ddlRow = await this.query(
+      `SELECT sql FROM sqlite_master WHERE name = ? AND type = 'table'`,
+      [name],
+    );
+    const ddl = typeof ddlRow.rows[0]?.[0] === 'string' ? String(ddlRow.rows[0][0]) : '';
+
+    return {
+      ...meta,
+      indexes,
+      foreignKeys,
+      checks: extractCheckExpressions(ddl),
+      comment: null,
+    };
   }
 
   async close(): Promise<void> {

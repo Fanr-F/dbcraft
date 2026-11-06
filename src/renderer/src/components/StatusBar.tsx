@@ -28,11 +28,18 @@ export function StatusBar({
 
   return (
     <footer className="statusbar">
-      <span className={`status-dot ${online ? 'is-online' : ''}`} />
+      <span
+        className={`status-dot ${online ? 'is-online' : ''}`}
+        title={sessionRuntime?.message ?? undefined}
+      />
       <span>{activeConnection ? activeConnection.input.name : '未连接'}</span>
 
       {sessionRuntime?.status === 'opening' && <span className="status-warn">打开会话…</span>}
-      {sessionRuntime?.status === 'error' && <span className="status-error">会话失败</span>}
+      {sessionRuntime?.status === 'error' && (
+        <span className="status-error" title={sessionRuntime.message}>
+          会话失败
+        </span>
+      )}
       {online && activeConnection && (
         <span className="status-strong">
           {DIALECT_LABELS[activeConnection.input.type]} {sessionRuntime.version ?? ''}

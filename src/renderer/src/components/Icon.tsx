@@ -6,6 +6,8 @@ export type IconName =
   | 'stop'
   | 'database'
   | 'table'
+  | 'view'
+  | 'script'
   | 'history'
   | 'settings'
   | 'close'
@@ -30,6 +32,18 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <rect x="4" y="5" width="16" height="14" rx="2" />
       <path d="M4 10h16M9 10v9" />
+    </>
+  ),
+  view: (
+    <>
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  script: (
+    <>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v5h5M9 12h6M9 16h6" />
     </>
   ),
   history: (

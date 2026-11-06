@@ -2,13 +2,21 @@ import mysql from 'mysql2/promise';
 import type { Connection as CoreConnection } from 'mysql2';
 import type { ConnectionOptions, FieldPacket, ResultSetHeader } from 'mysql2/promise';
 import type {
+  DatabaseType,
+  DdlObjectKind,
   MysqlFamilyConnectionInput,
   QueryCell,
   QueryColumn,
   QueryResult,
   SchemaObject,
   SslMode,
+  TableColumnMeta,
+  TableDetail,
+  TableMeta,
 } from '../../../shared/ipc-contract';
+import { quoteIdent } from '../../../shared/dialect/identifiers';
+import { parseTimeoutMs } from '../../../shared/timeouts';
+import { normalizeRowLimit } from '../../../shared/settings';
 import type { DatabaseSession } from '../DatabaseSession';
 import { encodeCell } from '../query-values';
 
@@ -61,10 +69,12 @@ function isTlsError(error: unknown): boolean {
 
 export class MysqlSession implements DatabaseSession {
   readonly label: string;
+  readonly dialect: DatabaseType;
   readonly serverVersion: string;
   readonly note?: string;
   readonly alive = true;
   readonly cancelDisconnects = false;
+  readonly isReadOnly = false;
 
   private constructor(
     private readonly connection: mysql.Connection,
@@ -72,10 +82,12 @@ export class MysqlSession implements DatabaseSession {
     private readonly threadId: number,
     label: string,
     version: string,
+    dialect: DatabaseType,
     note?: string,
   ) {
     this.label = label;
     this.serverVersion = version;
+    this.dialect = dialect;
     this.note = note;
   }
 
@@ -87,11 +99,12 @@ export class MysqlSession implements DatabaseSession {
       user: config.username,
       password: config.password,
       database: config.database || undefined,
-      connectTimeout: 8000,
+      connectTimeout: parseTimeoutMs(process.env['DBCRAFT_CONNECT_TIMEOUT_MS'], 8000),
       dateStrings: true,
       supportBigNumbers: true,
       bigNumberStrings: true,
       jsonStrings: true,
+      ...(config.charset ? { charset: config.charset } : {}),
     };
 
     const ssl = sslOption(config.sslMode);
@@ -121,6 +134,7 @@ export class MysqlSession implements DatabaseSession {
       connection.threadId,
       label,
       info?.version ?? 'unknown',
+      config.type,
       note,
     );
   }
@@ -129,11 +143,14 @@ export class MysqlSession implements DatabaseSession {
    * 使用流式结果，最多保留 MAX_ROWS 行；其余行继续消费但不入内存，
    * 避免 mysql2 的 query() 把整个结果集物化。
    */
-  async query(sql: string): Promise<QueryResult> {
+  async query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult> {
     const startedAt = Date.now();
+    const rowLimit = normalizeRowLimit(maxRows, MAX_ROWS);
     // promise 包装器的 Connection 仍持有底层回调式连接，流式接口只在底层提供。
     const core = (this.connection as unknown as { connection: CoreConnection }).connection;
-    const stream = core.query({ sql, rowsAsArray: true }).stream();
+    const stream = core
+      .query({ sql, values: params, rowsAsArray: true })
+      .stream();
 
     return new Promise<QueryResult>((resolve, reject) => {
       let columns: QueryColumn[] = [];
@@ -160,7 +177,7 @@ export class MysqlSession implements DatabaseSession {
         }
         if (!isSelect) return;
 
-        if (rows.length >= MAX_ROWS) {
+        if (rows.length >= rowLimit) {
           truncated = true;
           return;
         }
@@ -217,6 +234,183 @@ export class MysqlSession implements DatabaseSession {
       name: String(row[0] ?? ''),
       type: row[1] === 'VIEW' ? 'view' : 'table',
     }));
+  }
+
+  async getDdl(name: string, kind: DdlObjectKind): Promise<string> {
+    const target = quoteIdent(this.dialect, name);
+    const sql =
+      kind === 'view' ? `SHOW CREATE VIEW ${target}` : `SHOW CREATE TABLE ${target}`;
+    const [rows] = await this.connection.query({ sql, rowsAsArray: true });
+    const ddl = (rows as unknown[][])[0]?.[1];
+
+    if (typeof ddl !== 'string' || ddl.trim().length === 0) {
+      throw new Error(`未找到${kind === 'view' ? '视图' : '表'}「${name}」的 DDL。`);
+    }
+    return ddl;
+  }
+
+  async getTableMeta(name: string, kind: DdlObjectKind): Promise<TableMeta> {
+    const [tableRows] = await this.connection.query({
+      sql: `SELECT TABLE_TYPE FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      values: [name],
+      rowsAsArray: true,
+    });
+    const tableType = (tableRows as unknown[][])[0]?.[0];
+    if (!tableType) {
+      throw new Error(`未找到${kind === 'view' ? '视图' : '表'}「${name}」。`);
+    }
+
+    const [rows] = await this.connection.query({
+      sql: `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_KEY
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            ORDER BY ORDINAL_POSITION`,
+      values: [name],
+      rowsAsArray: true,
+    });
+
+    const columns: TableColumnMeta[] = (rows as unknown[][]).map((row) => {
+      const extra = String(row[4] ?? '');
+      const primaryKey = row[5] === 'PRI';
+      const generated = /VIRTUAL GENERATED|STORED GENERATED/i.test(extra);
+      return {
+        name: String(row[0] ?? ''),
+        declaredType: String(row[1] ?? ''),
+        notNull: row[2] === 'NO',
+        primaryKey,
+        autoIncrement: /auto_increment/i.test(extra),
+        defaultValue: row[3] === null || row[3] === undefined ? null : String(row[3]),
+        readOnly: primaryKey || generated,
+      };
+    });
+
+    const primaryKey = columns.filter((column) => column.primaryKey).map((column) => column.name);
+    const isView = String(tableType) === 'VIEW' || kind === 'view';
+    const editable = !isView && primaryKey.length > 0 && !this.isReadOnly;
+
+    let reason: string | undefined;
+    let reasonCode: TableMeta['reasonCode'];
+    if (isView) {
+      reason = '视图不可编辑';
+      reasonCode = 'view';
+    } else if (primaryKey.length === 0) {
+      reason = '表没有主键，无法安全定位行';
+      reasonCode = 'no-primary-key';
+    }
+
+    return {
+      name,
+      kind: isView ? 'view' : 'table',
+      columns,
+      primaryKey,
+      editable,
+      ...(reasonCode ? { reasonCode } : {}),
+      ...(reason ? { reason } : {}),
+    };
+  }
+
+  async getTableDetail(name: string): Promise<TableDetail> {
+    const meta = await this.getTableMeta(name, 'table');
+
+    const [indexRows] = await this.connection.query({
+      sql: `SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+      values: [name],
+      rowsAsArray: true,
+    });
+    const indexMap = new Map<string, { unique: boolean; columns: string[] }>();
+    for (const row of indexRows as unknown[][]) {
+      const indexName = String(row[0] ?? '');
+      if (!indexName) continue;
+      const group = indexMap.get(indexName) ?? {
+        unique: Number(row[1] ?? 1) === 0,
+        columns: [],
+      };
+      group.columns.push(String(row[2] ?? ''));
+      indexMap.set(indexName, group);
+    }
+
+    const [fkRows] = await this.connection.query({
+      sql: `SELECT k.CONSTRAINT_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME,
+                   k.REFERENCED_COLUMN_NAME, r.DELETE_RULE, r.UPDATE_RULE
+            FROM information_schema.KEY_COLUMN_USAGE k
+            LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS r
+              ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
+             AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+             AND r.TABLE_NAME = k.TABLE_NAME
+            WHERE k.TABLE_SCHEMA = DATABASE()
+              AND k.TABLE_NAME = ?
+              AND k.REFERENCED_TABLE_NAME IS NOT NULL
+            ORDER BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`,
+      values: [name],
+      rowsAsArray: true,
+    });
+    const fkMap = new Map<
+      string,
+      {
+        columns: string[];
+        referencedTable: string;
+        referencedColumns: string[];
+        onDelete: string | null;
+        onUpdate: string | null;
+      }
+    >();
+    for (const row of fkRows as unknown[][]) {
+      const constraint = String(row[0] ?? '');
+      const group = fkMap.get(constraint) ?? {
+        columns: [],
+        referencedTable: String(row[2] ?? ''),
+        referencedColumns: [],
+        onDelete: row[4] === null || row[4] === undefined ? null : String(row[4]),
+        onUpdate: row[5] === null || row[5] === undefined ? null : String(row[5]),
+      };
+      group.columns.push(String(row[1] ?? ''));
+      group.referencedColumns.push(String(row[3] ?? ''));
+      fkMap.set(constraint, group);
+    }
+
+    const [commentRows] = await this.connection.query({
+      sql: `SELECT TABLE_COMMENT FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      values: [name],
+      rowsAsArray: true,
+    });
+    const commentRaw = String((commentRows as unknown[][])[0]?.[0] ?? '').trim();
+
+    let checks: TableDetail['checks'] = [];
+    try {
+      const [checkRows] = await this.connection.query({
+        sql: `SELECT tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
+              FROM information_schema.TABLE_CONSTRAINTS tc
+              JOIN information_schema.CHECK_CONSTRAINTS cc
+                ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+               AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+              WHERE tc.TABLE_SCHEMA = DATABASE()
+                AND tc.TABLE_NAME = ?
+                AND tc.CONSTRAINT_TYPE = 'CHECK'
+              ORDER BY tc.CONSTRAINT_NAME`,
+        values: [name],
+        rowsAsArray: true,
+      });
+      checks = (checkRows as unknown[][]).map((row) => ({
+        name: String(row[0] ?? ''),
+        expression: String(row[1] ?? ''),
+      }));
+    } catch {
+      // MySQL 5.7 / 旧 MariaDB 没有 CHECK_CONSTRAINTS，保持空列表。
+      checks = [];
+    }
+
+    return {
+      ...meta,
+      indexes: [...indexMap].map(([indexName, group]) => ({ name: indexName, ...group })),
+      foreignKeys: [...fkMap].map(([name2, group]) => ({ name: name2, ...group })),
+      checks,
+      comment: commentRaw.length > 0 ? commentRaw : null,
+    };
   }
 
   async close(): Promise<void> {

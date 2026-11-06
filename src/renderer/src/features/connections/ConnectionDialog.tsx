@@ -13,6 +13,7 @@ import {
   type SslMode,
 } from '@shared/ipc-contract';
 import { Icon } from '../../components/Icon';
+import { explainErrorText } from '@shared/errors';
 
 interface FormState {
   type: DatabaseType;
@@ -26,6 +27,7 @@ interface FormState {
   password: string;
   database: string;
   sslMode: SslMode;
+  charset: string;
   encrypt: boolean;
   trustServerCertificate: boolean;
 }
@@ -42,13 +44,54 @@ const INITIAL_FORM: FormState = {
   password: '',
   database: '',
   sslMode: 'prefer',
+  charset: '',
   encrypt: true,
   trustServerCertificate: false,
 };
 
 interface ConnectionDialogProps {
+  initial?: ConnectionInput;
+  editingId?: string;
+  passwordStored?: boolean;
   onClose: () => void;
-  onSave: (input: ConnectionInput) => void;
+  onSave: (input: ConnectionInput, id?: string) => void;
+}
+
+function formFromInput(input: ConnectionInput): FormState {
+  const base: FormState = {
+    ...INITIAL_FORM,
+    type: input.type,
+    name: input.name,
+    group: input.group,
+    env: input.env,
+    password: '',
+  };
+
+  if (input.type === 'sqlite') {
+    return { ...base, filePath: input.filePath };
+  }
+
+  if (input.type === 'mssql') {
+    return {
+      ...base,
+      host: input.host,
+      port: input.port,
+      username: input.username,
+      database: input.database,
+      encrypt: input.encrypt,
+      trustServerCertificate: input.trustServerCertificate,
+    };
+  }
+
+  return {
+    ...base,
+    host: input.host,
+    port: input.port,
+    username: input.username,
+    database: input.database,
+    sslMode: input.sslMode,
+    charset: input.charset ?? '',
+  };
 }
 
 function buildInput(form: FormState): ConnectionInput {
@@ -85,6 +128,7 @@ function buildInput(form: FormState): ConnectionInput {
     password: form.password,
     database: form.database.trim(),
     sslMode: form.sslMode,
+    charset: form.charset.trim(),
   };
 }
 
@@ -98,11 +142,23 @@ function validate(form: FormState): string | null {
     return '端口必须是 1–65535 的整数';
   }
   if (!form.username.trim()) return '请填写用户名';
+  if (form.charset.trim() && !/^[A-Za-z0-9_-]+$/.test(form.charset.trim())) {
+    return '字符集只能包含字母、数字、下划线和连字符';
+  }
   return null;
 }
 
-export function ConnectionDialog({ onClose, onSave }: ConnectionDialogProps) {
-  const [form, setForm] = useState<FormState>(INITIAL_FORM);
+export function ConnectionDialog({
+  initial,
+  editingId,
+  passwordStored = false,
+  onClose,
+  onSave,
+}: ConnectionDialogProps) {
+  const editing = Boolean(editingId);
+  const [form, setForm] = useState<FormState>(() =>
+    initial ? formFromInput(initial) : INITIAL_FORM,
+  );
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
@@ -156,6 +212,12 @@ export function ConnectionDialog({ onClose, onSave }: ConnectionDialogProps) {
       return;
     }
 
+    // 编辑模式不会把已存密码取回渲染层；此时留空无法完成认证测试。
+    if (editing && passwordStored && form.type !== 'sqlite' && !form.password) {
+      setError('测试连接需要重新输入密码；保存时可以留空以保持原密码。');
+      return;
+    }
+
     setError(null);
     setTestResult(null);
     setTesting(true);
@@ -190,7 +252,7 @@ export function ConnectionDialog({ onClose, onSave }: ConnectionDialogProps) {
       setError(problem);
       return;
     }
-    onSave(buildInput(form));
+    onSave(buildInput(form), editingId);
   };
 
   return (
@@ -204,8 +266,12 @@ export function ConnectionDialog({ onClose, onSave }: ConnectionDialogProps) {
       >
         <header className="modal-header">
           <div>
-            <h2 id="connection-dialog-title">新建连接</h2>
-            <p>选择数据库类型，填写连接信息。</p>
+            <h2 id="connection-dialog-title">{editing ? '编辑连接' : '新建连接'}</h2>
+            <p>
+              {editing
+                ? '修改连接配置；密码留空表示保持原密码。'
+                : '选择数据库类型，填写连接信息。'}
+            </p>
           </div>
           <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
             <Icon name="close" />
@@ -310,7 +376,13 @@ export function ConnectionDialog({ onClose, onSave }: ConnectionDialogProps) {
                   <input
                     type="password"
                     value={form.password}
-                    placeholder={form.type === 'mariadb' ? 'ed25519 自动协商' : ''}
+                    placeholder={
+                      editing && passwordStored
+                        ? '留空表示保持原密码'
+                        : form.type === 'mariadb'
+                          ? 'ed25519 自动协商'
+                          : ''
+                    }
                     onChange={(event) => update('password', event.target.value)}
                   />
                 </label>
@@ -323,6 +395,25 @@ export function ConnectionDialog({ onClose, onSave }: ConnectionDialogProps) {
                     onChange={(event) => update('database', event.target.value)}
                   />
                 </label>
+
+                {form.type !== 'mssql' && (
+                  <label className="field">
+                    <span>字符集</span>
+                    <input
+                      list="connection-charsets"
+                      value={form.charset}
+                      placeholder="留空使用驱动默认，如 utf8mb4"
+                      onChange={(event) => update('charset', event.target.value)}
+                    />
+                  </label>
+                )}
+
+                <datalist id="connection-charsets">
+                  <option value="utf8mb4" />
+                  <option value="utf8" />
+                  <option value="latin1" />
+                  <option value="gbk" />
+                </datalist>
 
                 {form.type === 'mssql' ? (
                   <div className="field check-group">
@@ -375,8 +466,15 @@ export function ConnectionDialog({ onClose, onSave }: ConnectionDialogProps) {
             </div>
           )}
 
+          {testResult && !testResult.ok && explainErrorText(testResult.message) && (
+            <p className="form-note">
+              建议：{explainErrorText(testResult.message)}
+            </p>
+          )}
+
           <p className="form-note">
-            MSSQL 驱动尚未接入；SQLite / MySQL 系测试会真实连接数据库。连接信息仅保存在内存，密码不写盘。
+            连接配置保存在本地元数据库，密码经系统加密后落盘；导出的配置不包含密码。
+            MSSQL 驱动尚未接入；SQLite / MySQL 系测试会真实连接数据库。
           </p>
         </div>
 

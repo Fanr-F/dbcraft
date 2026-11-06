@@ -23,6 +23,8 @@ export interface MysqlFamilyConnectionInput extends ConnectionCommon {
   password: string;
   database: string;
   sslMode: SslMode;
+  /** 可选字符集（如 utf8mb4）；留空使用驱动默认值。 */
+  charset?: string;
 }
 
 export interface MssqlConnectionInput extends ConnectionCommon {
@@ -52,7 +54,36 @@ export interface SessionOpenResult {
   message: string;
   elapsedMs: number;
   serverVersion?: string;
+  /** SQLite 文件被占用/不可写时以只读方式打开。 */
+  readonly?: boolean;
 }
+
+/** 已持久化的连接；`input.password` 永远是空串，密码只在主进程内解密使用。 */
+export interface ConnectionRecord {
+  id: string;
+  input: ConnectionInput;
+  passwordStored: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ConnectionListResult =
+  | { ok: true; connections: ConnectionRecord[] }
+  | { ok: false; message: string };
+
+export type ConnectionSaveResult =
+  | { ok: true; connection: ConnectionRecord; warning?: string }
+  | { ok: false; message: string };
+
+export type ConnectionDeleteResult = { ok: true } | { ok: false; message: string };
+
+export type ConnectionRemoveAllResult =
+  | { ok: true; removed: number }
+  | { ok: false; message: string };
+
+export type ConnectionImportResult =
+  | { ok: true; imported: ConnectionRecord[]; skipped: number }
+  | { ok: false; canceled?: boolean; message: string };
 
 export type QueryCell = string | number | boolean | null;
 
@@ -91,6 +122,58 @@ export interface QueryRequest {
   requestId: string;
   sessionId: string;
   sql: string;
+  /** 与 SQL 中 `?` 占位符一一对应的参数（表数据页过滤等内部路径使用）。 */
+  params?: QueryCell[];
+  /** 本次查询最多保留的行数；省略时用驱动默认上限。 */
+  maxRows?: number;
+  /** 本次查询超时（毫秒），覆盖默认值；0 表示不自动取消。 */
+  timeoutMs?: number;
+  /** 历史记录用的连接快照；旧调用可省略。 */
+  connectionId?: string;
+  connectionName?: string;
+  dialect?: DatabaseType;
+  database?: string;
+  source?: QuerySource;
+}
+
+export type QuerySource = 'editor' | 'ddl-preview' | 'grid-edit' | 'agent-control';
+export type QueryStatus = 'success' | 'failed' | 'cancelled';
+
+export interface HistoryRecord {
+  id: number;
+  sqlText: string;
+  dialect: DatabaseType;
+  connectionId: string;
+  connectionName: string;
+  databaseName: string;
+  status: QueryStatus;
+  errorMessage: string | null;
+  durationMs: number;
+  affectedRows: number | null;
+  returnedRows: number | null;
+  source: QuerySource;
+  execCount: number;
+  lastExecutedAt: string;
+}
+
+export type HistoryListResult =
+  | { ok: true; records: HistoryRecord[] }
+  | { ok: false; message: string };
+
+export interface HistoryListOptions {
+  /** SQL 内容包含匹配；`%`/`_` 按字面量。 */
+  query?: string;
+  dialect?: DatabaseType;
+  status?: QueryStatus;
+  source?: QuerySource;
+  connectionId?: string;
+  /** 数据库名包含匹配。 */
+  databaseName?: string;
+  /** ISO 时间；只返回该时间之后执行的记录。 */
+  since?: string;
+  sortBy?: 'time' | 'duration';
+  sortDir?: 'asc' | 'desc';
+  limit?: number;
 }
 
 export interface SchemaObject {
@@ -102,6 +185,162 @@ export type SchemaGetResult =
   | { ok: true; objects: SchemaObject[] }
   | { ok: false; message: string };
 
+export type DdlObjectKind = 'table' | 'view';
+
+/** 表数据编辑所需的列信息（来自 information_schema / PRAGMA）。 */
+export interface TableColumnMeta {
+  name: string;
+  declaredType: string;
+  notNull: boolean;
+  primaryKey: boolean;
+  autoIncrement: boolean;
+  defaultValue: string | null;
+  /** 主键与生成列不允许在网格中直接编辑。 */
+  readOnly: boolean;
+}
+
+export interface TableMeta {
+  name: string;
+  kind: DdlObjectKind;
+  columns: TableColumnMeta[];
+  primaryKey: string[];
+  /** 视图、无主键表、只读会话均为 false。 */
+  editable: boolean;
+  /** editable 为 false 的机器可读原因，UI 据此决定是否提供高风险开关。 */
+  reasonCode?: 'view' | 'no-primary-key' | 'readonly-session';
+  /** editable 为 false 时给用户看的原因。 */
+  reason?: string;
+}
+
+export type TableMetaResult =
+  | { ok: true; meta: TableMeta }
+  | { ok: false; message: string };
+
+export interface TableIndexInfo {
+  name: string;
+  unique: boolean;
+  columns: string[];
+}
+
+export interface TableForeignKeyInfo {
+  name: string;
+  columns: string[];
+  referencedTable: string;
+  referencedColumns: string[];
+  onDelete: string | null;
+  onUpdate: string | null;
+}
+
+export interface TableCheckInfo {
+  name: string | null;
+  expression: string;
+}
+
+export interface TableDetail extends TableMeta {
+  indexes: TableIndexInfo[];
+  foreignKeys: TableForeignKeyInfo[];
+  checks: TableCheckInfo[];
+  /** MySQL 系表注释；SQLite 没有表注释，固定为 null。 */
+  comment: string | null;
+}
+
+export type TableDetailResult =
+  | { ok: true; detail: TableDetail }
+  | { ok: false; message: string };
+
+export type TableEditKind = 'update' | 'insert' | 'delete';
+
+export interface TableEdit {
+  kind: TableEditKind;
+  /** 主键列与原始值；update/delete 必需。 */
+  keys?: Record<string, QueryCell>;
+  /** update 的新值 / insert 的列值。 */
+  values?: Record<string, QueryCell>;
+  /** update 的乐观锁：被修改列的原始值。 */
+  original?: Record<string, QueryCell>;
+}
+
+export interface TableApplyRequest {
+  requestId: string;
+  sessionId: string;
+  table: string;
+  edits: TableEdit[];
+  /** 无主键表的高风险模式：仅允许 INSERT，由主进程再次校验。 */
+  allowNoPrimaryKeyInsert?: boolean;
+  connectionId?: string;
+  connectionName?: string;
+  database?: string;
+}
+
+export type TableApplyResult =
+  | { ok: true; applied: number; elapsedMs: number }
+  | {
+      ok: false;
+      message: string;
+      /** 乐观锁冲突（目标行已被修改或删除）。 */
+      conflict: boolean;
+      applied: number;
+      elapsedMs: number;
+    };
+
+export type DdlGetResult =
+  | { ok: true; dialect: DatabaseType; ddl: string }
+  | { ok: false; message: string };
+
+export interface DdlColumnDefinition {
+  name: string;
+  type: string;
+  primaryKey?: boolean;
+  autoIncrement?: boolean;
+  notNull?: boolean;
+  unique?: boolean;
+  /** 原样拼进 DEFAULT 后的 SQL 表达式（例如 `0`、`'x'`、`CURRENT_TIMESTAMP`）。 */
+  defaultValue?: string;
+}
+
+export interface DdlTableDefinition {
+  name: string;
+  columns: DdlColumnDefinition[];
+}
+
+export interface DdlStatementResult {
+  index: number;
+  ok: boolean;
+  message: string;
+  changes: number | null;
+}
+
+export type DdlExecuteResult =
+  | { ok: true; results: DdlStatementResult[]; elapsedMs: number }
+  | { ok: false; message: string; results: DdlStatementResult[]; elapsedMs: number };
+
+export interface DdlExecuteOptions {
+  /** SQLite 重建表时需要临时关闭外键；执行结束后恢复。 */
+  sqliteForeignKeysOff?: boolean;
+}
+
+export type ExportFormat = 'csv' | 'json' | 'sql' | 'xlsx';
+
+export interface ExportXlsxRequest {
+  suggestedName: string;
+  columns: string[];
+  rows: QueryCell[][];
+}
+
+export interface ExportSaveRequest {
+  suggestedName: string;
+  content: string;
+}
+
+export type ExportSaveResult =
+  | { ok: true; path: string }
+  | { ok: false; canceled?: boolean; message: string };
+
+export interface SchemaGetOptions {
+  /** 是否包含数据库系统对象（SQLite 的 sqlite_* 等）；默认 false。 */
+  includeSystemObjects?: boolean;
+}
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -109,7 +348,69 @@ export interface AppInfo {
   chrome: string;
   node: string;
   platform: string;
+  /** 元数据库与日志所在的用户数据目录。 */
+  userDataPath: string;
 }
+
+export interface AppSettings {
+  /** 单次查询最多保留的结果行数。 */
+  resultRowLimit: number;
+  theme: 'dark' | 'light';
+  /** SQL 编辑器字号。 */
+  editorFontSize: number;
+  /** 查询历史保留条数。 */
+  historyRetention: number;
+  /** 单次查询超时（毫秒）；0 表示不自动取消。 */
+  queryTimeoutMs: number;
+  /** 是否记录查询历史。 */
+  historyEnabled: boolean;
+}
+
+export type SettingsGetResult =
+  | { ok: true; settings: AppSettings }
+  | { ok: false; message: string };
+
+export type SettingsSaveResult =
+  | { ok: true; settings: AppSettings }
+  | { ok: false; message: string };
+
+export type DiagnosticsExportResult =
+  | { ok: true; path: string }
+  | { ok: false; canceled?: boolean; message: string };
+
+export type DiagnosticsOpenResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+export type DiagnosticsRestoreResult =
+  | { ok: true; preRestoreBackup: string }
+  | { ok: false; canceled?: boolean; message: string };
+
+export interface LocalStats {
+  connections: number;
+  history: number;
+  settings: number;
+  databaseBytes: number;
+}
+
+export type StatsGetResult =
+  | { ok: true; stats: LocalStats }
+  | { ok: false; message: string };
+
+export type SqlFileOpenResult =
+  | { ok: true; path: string; content: string }
+  | { ok: false; canceled?: boolean; message: string };
+
+export interface SqlFileSaveRequest {
+  content: string;
+  /** 已有文件路径时直接覆盖，不再弹保存对话框。 */
+  path?: string;
+  suggestedName: string;
+}
+
+export type SqlFileSaveResult =
+  | { ok: true; path: string }
+  | { ok: false; canceled?: boolean; message: string };
 
 export interface DBCraftApi {
   app: {
@@ -120,9 +421,14 @@ export interface DBCraftApi {
   };
   connection: {
     test: (input: ConnectionInput) => Promise<ConnectionTestResult>;
+    list: () => Promise<ConnectionListResult>;
+    save: (input: ConnectionInput, id?: string) => Promise<ConnectionSaveResult>;
+    remove: (id: string) => Promise<ConnectionDeleteResult>;
+    removeAll: () => Promise<ConnectionRemoveAllResult>;
+    open: (sessionId: string, connectionId: string) => Promise<SessionOpenResult>;
+    import: () => Promise<ConnectionImportResult>;
   };
   session: {
-    open: (sessionId: string, input: ConnectionInput) => Promise<SessionOpenResult>;
     close: (sessionId: string) => Promise<void>;
   };
   query: {
@@ -130,7 +436,47 @@ export interface DBCraftApi {
     cancel: (requestId: string) => Promise<boolean>;
   };
   schema: {
-    get: (sessionId: string) => Promise<SchemaGetResult>;
+    get: (sessionId: string, options?: SchemaGetOptions) => Promise<SchemaGetResult>;
+    table: (sessionId: string, name: string, kind: DdlObjectKind) => Promise<TableMetaResult>;
+    describe: (sessionId: string, name: string) => Promise<TableDetailResult>;
+  };
+  table: {
+    apply: (request: TableApplyRequest) => Promise<TableApplyResult>;
+  };
+  ddl: {
+    get: (sessionId: string, name: string, kind: DdlObjectKind) => Promise<DdlGetResult>;
+    execute: (
+      sessionId: string,
+      statements: string[],
+      options?: DdlExecuteOptions,
+    ) => Promise<DdlExecuteResult>;
+  };
+  export: {
+    save: (request: ExportSaveRequest) => Promise<ExportSaveResult>;
+    saveXlsx: (request: ExportXlsxRequest) => Promise<ExportSaveResult>;
+  };
+  history: {
+    list: (options?: HistoryListOptions) => Promise<HistoryListResult>;
+    remove: (id: number) => Promise<{ ok: boolean; message?: string }>;
+    clear: () => Promise<{ ok: boolean; message?: string }>;
+    clearConnection: (connectionId: string) => Promise<{ ok: boolean; message?: string }>;
+  };
+  settings: {
+    get: () => Promise<SettingsGetResult>;
+    save: (settings: AppSettings) => Promise<SettingsSaveResult>;
+  };
+  stats: {
+    get: () => Promise<StatsGetResult>;
+  };
+  diagnostics: {
+    exportLogs: () => Promise<DiagnosticsExportResult>;
+    openLogDir: () => Promise<DiagnosticsOpenResult>;
+    backupDatabase: () => Promise<DiagnosticsExportResult>;
+    restoreDatabase: () => Promise<DiagnosticsRestoreResult>;
+  };
+  file: {
+    openSql: () => Promise<SqlFileOpenResult>;
+    saveSql: (request: SqlFileSaveRequest) => Promise<SqlFileSaveResult>;
   };
   log: {
     write: (level: LogLevel, scope: string, message: string, meta?: string) => void;
@@ -141,11 +487,36 @@ export const IPC_CHANNELS = {
   appGetInfo: 'app:get-info',
   dialogSelectSqliteFile: 'dialog:select-sqlite-file',
   connectionTest: 'connection:test',
-  sessionOpen: 'session:open',
+  connectionList: 'connection:list',
+  connectionSave: 'connection:save',
+  connectionDelete: 'connection:delete',
+  connectionRemoveAll: 'connection:remove-all',
+  connectionOpen: 'connection:open',
+  connectionImport: 'connection:import',
   sessionClose: 'session:close',
   queryExecute: 'query:execute',
   queryCancel: 'query:cancel',
   schemaGet: 'schema:get',
+  schemaTable: 'schema:table',
+  schemaDescribe: 'schema:describe',
+  tableApply: 'table:apply',
+  ddlGet: 'ddl:get',
+  ddlExecute: 'ddl:execute',
+  exportSave: 'export:save',
+  exportSaveXlsx: 'export:save-xlsx',
+  historyList: 'history:list',
+  historyDelete: 'history:delete',
+  historyClear: 'history:clear',
+  historyClearConnection: 'history:clear-connection',
+  settingsGet: 'settings:get',
+  settingsSave: 'settings:save',
+  statsGet: 'stats:get',
+  diagnosticsExportLogs: 'diagnostics:export-logs',
+  diagnosticsOpenLogDir: 'diagnostics:open-log-dir',
+  diagnosticsBackupDatabase: 'diagnostics:backup-database',
+  diagnosticsRestoreDatabase: 'diagnostics:restore-database',
+  fileOpenSql: 'file:open-sql',
+  fileSaveSql: 'file:save-sql',
   logWrite: 'log:write',
 } as const;
 

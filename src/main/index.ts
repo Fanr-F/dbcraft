@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { app, BrowserWindow, Menu, session } from 'electron';
 import { registerIpcHandlers, bindMainWindow, releaseMainWindow } from './ipc/router';
 import { closeAllSessions } from './services/ConnectionManager';
+import { closeMetadataDatabase, openMetadataDatabase } from './storage/metadata';
 import { createLogger, resolveLogDirectory, resolveLogLevel } from './logging/logger';
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL']);
@@ -136,6 +137,7 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     registerIpcHandlers();
+    openMetadataDatabase();
     mainWindow = createWindow();
 
     log.info('应用启动', {
@@ -161,6 +163,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     log.info('应用退出：关闭会话');
     void closeAllSessions().finally(() => {
+      closeMetadataDatabase();
       log.debug('会话已关闭，退出应用');
       app.quit();
     });

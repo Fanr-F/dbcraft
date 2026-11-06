@@ -1,11 +1,12 @@
 import { parentPort } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import type { QueryCell, QueryColumn, QueryResult } from '../../shared/ipc-contract';
+import { normalizeRowLimit } from '../../shared/settings';
 import { encodeCell } from '../services/query-values';
 
 type WorkerRequest =
   | { id: number; type: 'open'; filePath: string }
-  | { id: number; type: 'query'; sql: string }
+  | { id: number; type: 'query'; sql: string; params?: QueryCell[]; maxRows?: number }
   | { id: number; type: 'close' };
 
 type WorkerFailure = {
@@ -25,7 +26,6 @@ if (!port) {
 const MAX_ROWS = 2000;
 
 let database: Database.Database | null = null;
-
 function errorInfo(error: unknown): WorkerFailure {
   if (error instanceof Error) {
     return {
@@ -36,31 +36,62 @@ function errorInfo(error: unknown): WorkerFailure {
   return { message: String(error), code: null };
 }
 
-function open(filePath: string): { version: string } {
+function isLockOrPermissionError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as Error & { code?: string }).code ?? '';
+  return (
+    /SQLITE_BUSY|SQLITE_CANTOPEN|SQLITE_READONLY|EACCES|EBUSY|permission denied|unable to open|database is locked/i.test(
+      `${code} ${error.message}`,
+    )
+  );
+}
+
+function open(filePath: string): { version: string; readonly: boolean } {
   if (database) {
     database.close();
     database = null;
   }
 
-  database = new Database(filePath, { fileMustExist: true });
+  let readonly = false;
+  try {
+    database = new Database(filePath, { fileMustExist: true });
+  } catch (error) {
+    if (!isLockOrPermissionError(error)) throw error;
+    database = new Database(filePath, { fileMustExist: true, readonly: true });
+    readonly = true;
+  }
+
+  if (!readonly) {
+    database.pragma('journal_mode = WAL');
+  }
+  database.pragma('busy_timeout = 5000');
+  database.pragma('foreign_keys = ON');
   // 整数默认以 BigInt 读出，避免超过 2^53 时被静默四舍五入。
   database.defaultSafeIntegers(true);
-  database.pragma('foreign_keys = ON');
-  database.pragma('busy_timeout = 5000');
 
   const row = database.prepare('select sqlite_version() as version').get() as
     | { version: string }
     | undefined;
 
-  return { version: row?.version ?? 'unknown' };
+  return { version: row?.version ?? 'unknown', readonly };
 }
 
-function execute(sql: string): QueryResult {
+/** better-sqlite3 不接受 boolean；布尔按 SQLite 约定转成 1/0。 */
+function bindParams(params?: QueryCell[]): Array<string | number | null> {
+  return (params ?? []).map((value) => {
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    return value ?? null;
+  });
+}
+
+function execute(sql: string, params?: QueryCell[], maxRows?: number): QueryResult {
   if (!database) {
     throw new Error('SQLite 连接尚未打开');
   }
 
+  const rowLimit = normalizeRowLimit(maxRows, MAX_ROWS);
   const startedAt = Date.now();
+  const bindings = bindParams(params);
   let statement: Database.Statement;
   try {
     statement = database.prepare(sql);
@@ -72,7 +103,7 @@ function execute(sql: string): QueryResult {
   }
 
   if (!statement.reader) {
-    const info = statement.run();
+    const info = statement.run(...bindings);
     return {
       columns: [],
       rows: [],
@@ -92,8 +123,8 @@ function execute(sql: string): QueryResult {
   const rows: QueryCell[][] = [];
   let truncated = false;
 
-  for (const row of statement.raw().iterate() as IterableIterator<unknown[]>) {
-    if (rows.length >= MAX_ROWS) {
+  for (const row of statement.raw().iterate(...bindings) as IterableIterator<unknown[]>) {
+    if (rows.length >= rowLimit) {
       truncated = true;
       break;
     }
@@ -127,7 +158,11 @@ port.on('message', (request: WorkerRequest) => {
         reply({ id: request.id, ok: true, value: open(request.filePath) });
         break;
       case 'query':
-        reply({ id: request.id, ok: true, value: execute(request.sql) });
+        reply({
+          id: request.id,
+          ok: true,
+          value: execute(request.sql, request.params, request.maxRows),
+        });
         break;
       case 'close':
         close();
