@@ -20,6 +20,7 @@ interface SidebarProps {
   activeConnectionId: string | null;
   activeConnection: SavedConnection | null;
   connectionStates: Record<string, SessionStatus>;
+  activeSessionStatus: SessionStatus;
   schemaObjects: SchemaObject[];
   databases: DatabaseInfo[];
   objectsByDatabase: Record<string, SchemaObject[]>;
@@ -104,6 +105,7 @@ export function Sidebar({
   activeConnectionId,
   activeConnection,
   connectionStates,
+  activeSessionStatus,
   schemaObjects,
   databases,
   objectsByDatabase,
@@ -439,7 +441,19 @@ export function Sidebar({
           </button>
         </div>
 
-        {active && expanded && (
+        {active && expanded && activeSessionStatus !== 'ready' && (
+          <div className="connection-objects">
+            <div className="tree-empty">
+              {activeSessionStatus === 'opening'
+                ? '正在连接…'
+                : activeSessionStatus === 'error'
+                  ? '连接失败'
+                  : '未连接'}
+            </div>
+          </div>
+        )}
+
+        {active && expanded && activeSessionStatus === 'ready' && (
           <div className="connection-objects">
             <div className="connection-object-actions">
               <button

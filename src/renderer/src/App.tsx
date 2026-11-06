@@ -2685,6 +2685,7 @@ export default function App() {
           activeConnectionId={activeTab.connectionId}
           activeConnection={activeConnection}
           connectionStates={connectionStates}
+          activeSessionStatus={activeRuntime?.status ?? 'idle'}
           schemaObjects={activeSchema}
           databases={databasesByTab[activeTab.id] ?? []}
           objectsByDatabase={dbObjectsByTab[activeTab.id] ?? {}}
