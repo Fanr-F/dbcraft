@@ -176,3 +176,24 @@
   - 每个表页签独立会话，打开时会先连默认库再 `USE` 目标库；切换数据库期间若同一会话有查询在跑，
     MSSQL 单请求限制仍可能报 `EINVALIDSTATE`（原有并发限制）。
   - 表下子对象每次展开才加载，未做缓存失效；右键菜单的后续 DDL 弹窗若期间切换库，执行目标可能变化。
+
+### W-20261106-11 修复执行 SQL 后结果表格空白（RevoGrid / Vite 开发模式）
+
+- **诉求**：执行 SQL 后工具栏显示行数，但结果区空白，看起来像“没有数据返回”。
+- **排查**：
+  - 主进程日志与历史记录确认查询已返回行（SQLite 100 行、MSSQL 100 行），问题在渲染层。
+  - 开发模式控制台报 `InvalidCharacterError: Failed to execute 'createElementNS' ... '[object Object]'`，
+    RevoGrid 渲染时拿到非字符串的 vnode tag，随后 `<!---->` 空壳。
+  - 同一份代码生产构建正常，定位为 Vite 依赖预打包与 RevoGrid（Stencil）懒加载入口不兼容；
+    不是数据库驱动或查询结果本身的问题。
+- **变更**：`electron.vite.config.ts` 的 renderer 增加
+  `optimizeDeps.exclude: ['@revolist/react-datagrid', '@revolist/revogrid']`，
+  让 Stencil 自己处理懒加载入口。`main.tsx` 曾临时移除 `StrictMode` 排查，已还原，未保留改动。
+- **涉及文件**：`electron.vite.config.ts`。
+- **验证**：
+  - 开发模式（`npm run dev`）执行 `SELECT name, type FROM sqlite_master LIMIT 5` 正常显示 2 列 5 行；
+    执行 `SELECT TOP (10) * FROM master..spt_values` 正常显示 6 列 10 行。
+  - 排查时用 CDP 观察 `<revo-grid>`：修复前 `innerHTML` 只有 `<!---->`，修复后包含完整表头/行节点。
+  - `npm run build`（含 `typecheck`）通过；生产构建行为未变。
+- **遗留/风险**：该故障仅出现在 Vite 开发模式；生产构建原本正常。升级 RevoGrid 后需再次回归
+  `npm run dev` 下的查询结果渲染。

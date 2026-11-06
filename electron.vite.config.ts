@@ -30,6 +30,11 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src'),
       },
     },
+    // Stencil 组件（RevoGrid）自带懒加载入口；交给 Vite 预打包会拆错运行时，
+    // 开发模式表现为 <revo-grid> 已挂载但内容为空。
+    optimizeDeps: {
+      exclude: ['@revolist/react-datagrid', '@revolist/revogrid'],
+    },
     plugins: [react()],
   },
 });

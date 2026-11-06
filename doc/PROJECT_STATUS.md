@@ -269,6 +269,7 @@ SQLite 重建表（含复合主键）、重命名/删除表、删除视图、索
 | 连接/测试超时无 UI | 设置面板新增「连接/测试超时」，环境变量仍优先；MySQL/MariaDB 建连时透传 |
 | FTS 索引损坏不自愈 | MATCH 异常时先重建索引并重试一次，仍失败才回退 LIKE |
 | E2E 取消断言过弱 | 增加同标签重连、失败提示等断言 |
+| RevoGrid 开发模式结果空白 | Vite 预打包会拆坏 RevoGrid/Stencil 懒加载入口，`optimizeDeps.exclude` 排除两包后，`npm run dev` 下 SQLite/MSSQL 结果正常渲染 |
 
 ### 3.3 风险说明
 
