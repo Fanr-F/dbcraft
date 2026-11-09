@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 对照文档 | `doc/PRD.md` v0.20、`doc/TECH_DESIGN.md` v0.11、`doc/REQUIREMENTS_AUDIT.md`、`doc/CONNECTION_TAB_MODEL.md` |
+| 对照文档 | `doc/PRD.md` v0.20、`doc/TECH_DESIGN.md` v0.11、`doc/CONNECTION_TAB_MODEL.md` |
 | 最近更新 | 2026-11-09 |
 | 代码基线 | 基线提交 `e4e1a10` 之后的工作区（40+ 轮改动尚未提交） |
 | 文档定位 | 记录「实现到哪、还差什么、怎么验收、有哪些约定与历史」；操作流水见 `doc/WORKLOG.md` |
@@ -56,7 +56,7 @@
 
 ### 1.3 需要确认的决策
 
-> 需求分层、隐藏需求清单与 PRD/实现差异见 `doc/REQUIREMENTS_AUDIT.md`；本节只保留需要落到状态文档的决策摘要。
+> 需求分层与隐藏需求结论已并入 `doc/PRD.md` §0 与 `doc/FEATURE_MATRIX.md`；本节只保留需要落到状态文档的决策摘要。
 
 | # | 问题 | 现状 | 建议 |
 |---|---|---|---|

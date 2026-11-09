@@ -4,7 +4,7 @@
 |---|---|
 | 文档目的 | 把当前代码里「没做完、没入口、文档没提但迟早要补」的内容收在一处，作为 v1.0 收口与排期依据 |
 | 代码基线 | `9233262` + 当前工作区未提交改动（2026-11-09，M1 开发中） |
-| 对照文档 | `doc/PRD.md` v0.20、`doc/REQUIREMENTS_AUDIT.md`（v0.17 基线）、`doc/PROJECT_STATUS.md`、`doc/UI_TODO.md`、`doc/CONNECTION_TAB_MODEL.md` |
+| 对照文档 | `doc/PRD.md` v0.20、`doc/PROJECT_STATUS.md`、`doc/UI_TODO.md`、`doc/CONNECTION_TAB_MODEL.md` |
 | 收录范围 | 功能缺口、行为一致性、数据安全、会话/存储韧性；纯技术选型、i18n、遥测不展开，发布门槛类只列项 |
 | 维护方式 | 完成一项就改状态并追加 `doc/WORKLOG.md`；本文不替代 PRD，也不替代 `PROJECT_STATUS` 的验收结论 |
 
@@ -23,7 +23,7 @@
 | 分组 | 数量 | 说明 |
 |---|---|---|
 | H 代码走查新发现 | 11 | 多数是「界面上有入口，实际走不通或会误伤」的问题 |
-| K 文档已列但未完成 | 10 | `PROJECT_STATUS` / `UI_TODO` / 审计文档已有记录，本文只汇总入口 |
+| K 文档已列但未完成 | 10 | `PROJECT_STATUS` / `UI_TODO` 已有记录，本文只汇总入口 |
 | R 架构/韧性 | 9 | 类型、存储、生命周期已具备，但缺健康检查、恢复或收尾 |
 
 **建议最先处理（按顺序）**：H-01 → H-03 → H-04 → H-02（需确认语义）→ H-05 → H-06（需拍板）→ H-07/H-08/H-09 → K-09。
@@ -37,7 +37,7 @@
 ### H-01 MSSQL「加载全部并导出」仍被旧 guard 挡住
 
 - **优先级/状态**：P1 / ❌
-- **文档覆盖**：未提；`REQUIREMENTS_AUDIT` 只写了导出格式可用。
+- **文档覆盖**：未提；历史审计只写了导出格式可用。
 - **证据**：`src/renderer/src/App.tsx` `loadAllForExport()`（约 3542-3613）在 3556-3558 直接返回 `MSSQL 驱动尚未接入。`；`ExportDialog.tsx:215` 仍提供「加载全部（最多 10000 行）」。
 - **现象**：MSSQL 结果页点「加载全部」必失败，但 MSSQL 查询、分页、取消、DDL 都已接入。
 - **影响**：MSSQL 用户只能导出当前页；与 README「MSSQL 均已接入真实查询」的观感冲突。
@@ -116,7 +116,7 @@
 
 ### H-09 已保存密码无法清除；编辑连接时测试必须先重输密码
 
-- **优先级/状态**：P1 / ❌（审计提过一句「保存密码开关/清除密码」，未排期）
+- **优先级/状态**：P1 / ❌（历史审计提过一句「保存密码开关/清除密码」，未排期）
 - **证据**：`src/main/storage/metadata.ts` `saveConnection()`（约 496-507）空密码保留旧 secret；`ConnectionDialog.tsx` 没有「保存密码/清除密码」控件；227-229 在「编辑 + 已有密码」时要求重新输入密码才能测试。
 - **现象**：无法在本机清除已保存密码；换账号只能删连接重建；测试按钮对已存密码用户不可用。
 - **影响**：凭据生命周期不完整；密码轮换/泄露处置困难。
@@ -152,13 +152,13 @@
 | ID | 缺口 | 来源 | 优先级 | 状态 |
 |---|---|---|---|---|
 | K-01 | DDL：唯一约束/索引变更进设计页签、CHECK/外键编辑、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | `PROJECT_STATUS` §4.7/§5.4、`UI_TODO` §5 | P1/P2 | ❌/⏸ |
-| K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid`；分页档位补 1000（`Workspace.tsx:704` 目前只有 50/200/500） | `REQUIREMENTS_AUDIT` §3.5、`UI_TODO` §4 | P1 | 🟡 |
-| K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出、CSV 选项、导出敏感数据提示 | `REQUIREMENTS_AUDIT` §3.6、`PROJECT_STATUS` §4.7 | P2 | ❌ |
-| K-04 | 编辑器：版本感知补全、类型提示、光标所在语句执行、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、最近文件/另存为/拖入、参数化执行 | `REQUIREMENTS_AUDIT` §3.2、`UI_TODO` §3 | P1/P2 | 🟡 |
-| K-05 | 历史：列表分页/加载更多（当前固定 200，`HistoryDialog.tsx:175`）、`.sql`/`.csv` 导出、复杂形式的敏感字段脱敏 | `REQUIREMENTS_AUDIT` §3.3 | P1/P2 | 🟡 |
-| K-06 | Agent：30 秒自动刷新、运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | `REQUIREMENTS_AUDIT` §3.8、`PROJECT_STATUS` §2.8 | P1/P2 | 🟡 |
-| K-07 | 设置：跟随系统主题、字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | `REQUIREMENTS_AUDIT` §3.7 | P2 | ❌ |
-| K-08 | 连接：SQLite 文件拖入、认证插件字段、独立「只读连接」标记、Percona 真实实例回归、全量错误码 | `REQUIREMENTS_AUDIT` §3.1 | P2 | 🟡 |
+| K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid`；分页档位补 1000（`Workspace.tsx:704` 目前只有 50/200/500） | `UI_TODO` §4、`PROJECT_STATUS` §2.5 | P1 | 🟡 |
+| K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出、CSV 选项、导出敏感数据提示 | `PROJECT_STATUS` §4.7 | P2 | ❌ |
+| K-04 | 编辑器：版本感知补全、类型提示、光标所在语句执行、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、最近文件/另存为/拖入、参数化执行 | `UI_TODO` §3、`PROJECT_STATUS` §2.2 | P1/P2 | 🟡 |
+| K-05 | 历史：列表分页/加载更多（当前固定 200，`HistoryDialog.tsx:175`）、`.sql`/`.csv` 导出、复杂形式的敏感字段脱敏 | `PROJECT_STATUS` §2.3 | P1/P2 | 🟡 |
+| K-06 | Agent：30 秒自动刷新、运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | `PROJECT_STATUS` §2.8 | P1/P2 | 🟡 |
+| K-07 | 设置：跟随系统主题、字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | `PROJECT_STATUS` §2.7 | P2 | ❌ |
+| K-08 | 连接：SQLite 文件拖入、认证插件字段、独立「只读连接」标记、Percona 真实实例回归、全量错误码 | `PROJECT_STATUS` §2.1 | P2 | 🟡 |
 | K-09 | DDL/刷新后表子对象缓存不失效：`executeDdlScript`（`App.tsx:3477-3487`）未清 `tableExtrasByTab`，`loadTableExtras`（`App.tsx:1054`）命中缓存直接返回；`refreshSchema`（`App.tsx:2453-2459`）同样没清 | `UI_TODO` §0.2（已列，未实现） | P1 | ❌ |
 | K-10 | 非功能：打包/签名/安装包、性能基线、无障碍、CI 门禁、崩溃率与冷启动指标 | `PROJECT_STATUS` §4.2/§4.7 | P2 | ❌ |
 
@@ -188,7 +188,6 @@
 | C-02 | 新建连接语义 | PRD v0.20 Q27：保存连接是配置，编辑/删除不影响已建 tab session；AGENTS 还写着「当前实现会静默重连绑定标签」 | 编辑连接已不重连（W-20261109-12）；但**新建**连接会改绑当前 tab（H-02） | 先确认 H-02 的产品语义；同步修正 AGENTS 的过期句子 |
 | C-03 | 服务器模型 | README 第 148 行仍写「当前实现仍是扁平保存连接」 | `servers` 表 + `server_id` + 左侧树按服务器分组已实现（W-20261109-13/14） | 更新 README 为「服务器实体与分组已实现；服务器级浏览/操作仍按 v1.x/明确不做」 |
 | C-04 | MSSQL 导出能力 | README/审计只说 MSSQL 已接入、导出格式可用 | 「加载全部」分支被旧 guard 挡住（H-01） | 修 H-01；文档补一句「导出全部依赖查询重跑，最多 1 万行」 |
-| C-05 | 审计文档时效 | `REQUIREMENTS_AUDIT` 基线是 PRD v0.16/v0.17 | 之后已落地 W-12～W-24（服务器、browse、事务、补全、多语句、不限制），审计未逐条回填 | 本文承接代码级缺口；审计只保留需求分层结论，避免两处都像「最新」 |
 
 ---
 

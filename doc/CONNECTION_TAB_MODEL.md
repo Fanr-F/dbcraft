@@ -289,7 +289,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 
 ## 8. 与现有文档的关系
 
-- 本文是 `doc/REQUIREMENTS_AUDIT.md` 的补充审计，不替代 PRD。
+- 本文补充 PRD §0.5 的模型审计，不替代 PRD。
 - PRD v0.20 已在 §0.5 增加「连接/服务器/标签模型」入口，并在 §8 记录 Q21～Q28 决策。
 - `PROJECT_STATUS.md` 的 MOD-01/MOD-02 现状需要按本文补充「服务器实体、标签管理、会话可见性、事务面板、库上下文」缺口。
 - `TECH_DESIGN.md` 的会话模型仍以「一标签一物理连接」为基础；服务器实体属于信息架构层，不改变当前会话模型；服务器浏览器 UI 放 v1.x。

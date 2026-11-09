@@ -163,7 +163,6 @@ src/
 - `doc/README.md`：doc 目录索引、权威边界与建议阅读顺序
 - `doc/PRD.md`：需求基线（只读；需求变更需单独评审）
 - `doc/FEATURE_MATRIX.md`：功能清单与实现状态（✅/🟡/❌/⏸ 总表）
-- `doc/REQUIREMENTS_AUDIT.md`：需求分层、隐藏需求、PRD 与实现的差异审计（需求收敛建议）
 - `doc/CONNECTION_TAB_MODEL.md`：连接 / 服务器 / 标签 / 会话模型审计与管理建议
 - `doc/TECH_DESIGN.md`：技术设计
 - `doc/PROJECT_STATUS.md`：实现现状、差距、缺陷、验收、DDL 方案、日志约定与变更里程碑

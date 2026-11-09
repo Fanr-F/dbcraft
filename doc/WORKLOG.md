@@ -959,3 +959,26 @@
   - 功能表是代码快照；`✅` 只代表主路径已实现，大量 UI 项仍需按 `UI_TODO.md` 真机点击验收；
   - 未做文档归档/移动，避免破坏引用；如后续要归档，先确认无引用再统一移到 `doc/archive/`；
   - `REQUIREMENTS_AUDIT` 仍是 v0.17 需求基线，后续需求取舍需回写 PRD 后再同步功能表。
+
+### W-20261109-27 清理过时需求审计文档
+
+- **诉求**：先提交当前工作，再清理 `doc/` 下多余文档；保留原始 `PRD.md`。
+- **变更**：
+  - 删除 `doc/REQUIREMENTS_AUDIT.md`：
+    - 基线停留在 PRD v0.16/v0.17，状态表已被 `FEATURE_MATRIX.md` 取代；
+    - 未完成明细已由 `UNFINISHED_ITEMS.md` 承接；
+    - 需求分层与决策已在 PRD §0 / §9、`CONNECTION_TAB_MODEL.md` 中。
+  - 更新引用：`README.md`、`doc/README.md`、`doc/PROJECT_STATUS.md`、`doc/UNFINISHED_ITEMS.md`、
+    `doc/CONNECTION_TAB_MODEL.md`。
+  - `doc/README.md` 记录删除原因与恢复方式（`git show 6d7f77e:doc/REQUIREMENTS_AUDIT.md`）。
+  - 其余文档保留：`PROJECT_STATUS.md`（测试/验收/日志约定/里程碑）、`UI_TODO.md`（人工验收）、
+    `TECH_DESIGN.md`（技术设计）、`CONNECTION_TAB_MODEL.md`（模型决策）、`WORKLOG.md`（历史）。
+- **涉及文件**：`doc/REQUIREMENTS_AUDIT.md`（删除）、`README.md`、`doc/README.md`、
+  `doc/PROJECT_STATUS.md`、`doc/UNFINISHED_ITEMS.md`、`doc/CONNECTION_TAB_MODEL.md`、`doc/WORKLOG.md`。
+- **验证**：
+  - 活跃文档中无 `REQUIREMENTS_AUDIT` 引用残留；
+  - `doc/PRD.md` SHA256 仍为 `13A50E21B49854A6BBCCAC781ABB561C94FE9B614F8570555B40E4D5CD7904DA`；
+  - 纯文档改动，未运行构建或测试。
+- **遗留/风险**：
+  - 只删除明确过时的一份；其余文档均有唯一内容，未做激进合并；
+  - 如后续要把 `UNFINISHED_ITEMS.md`/`UI_TODO.md` 合并进 `FEATURE_MATRIX.md`，需先确认并迁移验收/修法细节。

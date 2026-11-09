@@ -14,7 +14,6 @@
 | 文档 | 定位 | 更新方式 | 适合谁 |
 |---|---|---|---|
 | `PRD.md` | 需求基线（v0.20）：分层、v1.0 基线、模块细节、§9 v1.x、技术附录 | **只读**；需求变化需单独评审后改 PRD | 产品、研发、测试 |
-| `REQUIREMENTS_AUDIT.md` | 需求分层与隐藏需求审计（v0.17 基线）：哪些是用户明确要的、哪些是文档长出来的、哪些建议删/降级 | 需求取舍变化时更新；代码级状态不再逐条追 | 产品、研发负责人 |
 | `CONNECTION_TAB_MODEL.md` | 连接 / 服务器 / 标签 / 会话模型审计与 Q21～Q28 决策记录 | 模型决策变化时更新 | 研发 |
 | `FEATURE_MATRIX.md` | **功能总表**：按模块列出需要做的功能，标 `✅/🟡/❌/⏸` | 功能完成或新增需求时更新 | 所有人 |
 | `PROJECT_STATUS.md` | 实现现状、模块缺口、缺陷、测试与验收、DDL 方案、日志约定、里程碑 | 每次改动/验收后同步 | 研发、测试 |
@@ -71,10 +70,17 @@
 - `README.md`（根目录）文档索引加入本页与 `FEATURE_MATRIX.md`。
 - `UNFINISHED_ITEMS.md` 顶部加入功能总表链接，避免两份清单各说各话。
 - `WORKLOG.md` 追加 `W-20261109-26`。
-- **没有移动、重命名或删除任何现有文档**；**`PRD.md` 未被修改**（整理前后 SHA256 一致：
+- **`PRD.md` 未被修改**（整理前后 SHA256 一致：
   `13A50E21B49854A6BBCCAC781ABB561C94FE9B614F8570555B40E4D5CD7904DA`）。
 
-后续如果要归档过期文档，建议先确认没有引用，再统一移到 `doc/archive/`；本次不做，避免断链。
+### 4.1 2026-11-09 清理（W-20261109-27）
+
+- 删除 `REQUIREMENTS_AUDIT.md`：它的基线停留在 PRD v0.16/v0.17，状态表已被 `FEATURE_MATRIX.md` 取代，
+  缺口明细已由 `UNFINISHED_ITEMS.md` 承接；需求分层与决策已在 PRD §0 / §9 和 `CONNECTION_TAB_MODEL.md` 中。
+- 其余文档都有唯一内容，暂不删除：
+  `PROJECT_STATUS.md`（测试/验收/日志约定/里程碑）、`UI_TODO.md`（人工验收状态）、
+  `TECH_DESIGN.md`（技术设计）、`CONNECTION_TAB_MODEL.md`（模型决策）、`WORKLOG.md`（历史）。
+- 删除后已更新所有引用；Git 历史中的原文仍可通过 `git show 6d7f77e:doc/REQUIREMENTS_AUDIT.md` 取回。
 
 ---
 
