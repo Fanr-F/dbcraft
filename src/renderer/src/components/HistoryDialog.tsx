@@ -33,6 +33,8 @@ const SOURCE_LABELS: Record<HistoryRecord['source'], string> = {
   'ddl-preview': 'DDL',
   'grid-edit': '网格',
   'agent-control': 'Agent',
+  'table-page': '表数据',
+  export: '导出',
 };
 
 function formatTime(iso: string): string {

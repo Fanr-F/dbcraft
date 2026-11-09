@@ -158,7 +158,13 @@ export interface QueryRequest {
   source?: QuerySource;
 }
 
-export type QuerySource = 'editor' | 'ddl-preview' | 'grid-edit' | 'agent-control';
+export type QuerySource =
+  | 'editor'
+  | 'ddl-preview'
+  | 'grid-edit'
+  | 'agent-control'
+  | 'table-page'
+  | 'export';
 export type QueryStatus = 'success' | 'failed' | 'cancelled';
 
 /** 多语句执行中的单条语句结果；失败后脚本停止。 */

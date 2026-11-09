@@ -1126,15 +1126,12 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **修复**：关闭单个标签前先 `await cancelQueryForTab(id, true)`，再关闭 session；批量关闭也逐个取消；取消失败不阻塞关闭。
 - **验收**：MySQL `SLEEP(60)` 执行中关闭标签，查询很快结束，历史状态为 `cancelled`；其他标签不受影响。
 
-#### H-06 表数据翻页/排序/过滤/导出重查都会写进历史，且来源固定为 editor
+#### H-06 表数据翻页/排序/过滤/导出重查都会写进历史，且来源固定为 editor（已修复）
 
-- **优先级/状态**：P1 / ❓
-- **文档覆盖**：未提；`QuerySource` 里已有 `grid-edit`，但没有「表数据浏览」来源。
-- **证据**：`App.tsx` 三处请求固定 `source: 'editor'`（约 1557、1651、3604）；表数据翻页/排序/过滤走 `runQuery(..., { internal: true })`，`internal` 只控制危险语句检查和分句，不影响历史。
-- **现象**：每翻一页、换一次排序或过滤、导出前重查一次，都会新增历史记录，并显示来源「编辑器」。
-- **影响**：历史被表浏览淹没；按来源过滤失真；60 秒去重只能合并完全相同的 SQL（翻页 SQL 不同）。
-- **建议**：新增 `table-page` / `export` 来源，或约定 `internal` 查询不写历史（需产品拍板）；至少让 `source` 反映真实入口。
-- **验收**：连续翻 5 页后历史不新增，或新增记录标为「表数据」；编辑器执行仍记 `editor`；导出重查不产生重复历史。
+- **优先级/状态**：P1 / ✅（W-20261109-40）
+- **原问题**：表数据翻页/排序/过滤和导出重查都固定 `source: 'editor'`，历史被表浏览淹没且来源过滤失真。
+- **修复**：`QuerySource` 增加 `table-page` / `export`；`runQuery` 对带 `tab.table` 的内部查询自动标为 `table-page`，导出重查标为 `export`；历史弹窗与详情增加对应中文标签。
+- **验收**：表数据翻页/排序/过滤记录来源为「表数据」；导出重查为「导出」；编辑器执行仍为「编辑器」。
 
 #### H-07 标签自定义名称不持久化（已修复）
 
@@ -1480,6 +1477,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-37 H-01 MSSQL 加载全部导出**：诉求是去掉 MSSQL「加载全部」的旧 guard。变更：删除 `loadAllForExport` 中 `connection.input.type === 'mssql'` 直接返回「MSSQL 驱动尚未接入」的分支，统一走 `query.execute({ maxRows: 10000 })` 与现有截断提示。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL 实例上点导出。遗留：`e2e:mssql` 未补导出断言；超过 1 万行仍截断。
 - **W-20261109-38 H-05 关闭标签先取消查询**：诉求是关闭正在执行查询的标签时先取消服务端查询。变更：`cancelQueryForTab` 增加 `silent` 参数；`closeTab` 在关闭 session 前 `await` 取消；`closeTabsByIds` 批量关闭时逐个取消；取消失败不阻塞关闭。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用 MySQL `SLEEP` 做真机验证。遗留：主进程 `MysqlSession.close()` 仍是 `connection.end()`，取消依赖关闭前的 `query.cancel`；SQLite 取消仍会终止 Worker。
 - **W-20261109-39 H-11 清理死文件**：诉求是移除无引用 shim 与临时探针脚本。变更：确认 `AgentJobsDialog.tsx` 无引用后删除；当前工作区未发现 `scripts/tmp-probe-*.mjs`。涉及 `src/renderer/src/components/AgentJobsDialog.tsx`（删除）。验证：`npm run typecheck`、`npm run build` 通过。遗留：无。
+- **W-20261109-40 H-06 补齐历史来源**：诉求是让表数据浏览和导出重查在历史里显示真实来源，而不是一律「编辑器」。变更：`QuerySource` 增加 `table-page` / `export`，同步 zod、history-store、历史弹窗/详情标签；`runQuery` 对 `tab.table` 的内部查询自动用 `table-page`，导出重查用 `export`。涉及 `src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/storage/history-store.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/HistoryDialog.tsx`、`HistoryDetailDialog.tsx`。验证：`npm run typecheck`、`npm run test:history`、`npm run test:sql-mask`、`npm run build` 通过。遗留：内部表数据查询仍会写历史（只改来源，没有做「不记录」策略）；未做真机点击验收。
 
 ---
 

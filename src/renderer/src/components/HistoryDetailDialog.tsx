@@ -23,6 +23,8 @@ const SOURCE_LABELS: Record<HistoryRecord['source'], string> = {
   editor: '编辑器',
   'ddl-preview': 'DDL',
   'grid-edit': '网格',
+  'table-page': '表数据',
+  export: '导出',
   'agent-control': 'Agent',
 };
 

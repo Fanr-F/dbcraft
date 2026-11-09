@@ -81,7 +81,7 @@ export const queryExecuteSchema = z.object({
   connectionName: z.string().max(120).optional(),
   dialect: z.enum(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']).optional(),
   database: z.string().max(128).optional(),
-  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control']).optional(),
+  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control', 'table-page', 'export']).optional(),
 });
 
 export const queryExecuteScriptSchema = z.object({
@@ -94,14 +94,14 @@ export const queryExecuteScriptSchema = z.object({
   connectionName: z.string().max(120).optional(),
   dialect: z.enum(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']).optional(),
   database: z.string().max(128).optional(),
-  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control']).optional(),
+  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control', 'table-page', 'export']).optional(),
 });
 
 export const historyListSchema = z.object({
   query: z.string().max(1000).optional().default(''),
   dialect: z.enum(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']).optional(),
   status: z.enum(['success', 'failed', 'cancelled']).optional(),
-  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control']).optional(),
+  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control', 'table-page', 'export']).optional(),
   connectionId: z.string().max(128).optional(),
   databaseName: z.string().max(128).optional(),
   since: z.string().datetime({ offset: true }).optional(),

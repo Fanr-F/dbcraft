@@ -9,7 +9,14 @@ import type {
 
 const DIALECTS = new Set(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']);
 const STATUSES = new Set(['success', 'failed', 'cancelled']);
-const SOURCES = new Set(['editor', 'ddl-preview', 'grid-edit', 'agent-control']);
+const SOURCES = new Set([
+  'editor',
+  'ddl-preview',
+  'grid-edit',
+  'agent-control',
+  'table-page',
+  'export',
+]);
 
 type DB = Database.Database;
 

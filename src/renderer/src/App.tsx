@@ -13,6 +13,7 @@ import type {
   QueryColumn,
   QueryError,
   QueryScriptStatement,
+  QuerySource,
   SchemaObject,
   TableColumnMeta,
   TableDetail,
@@ -1454,7 +1455,7 @@ export default function App() {
     overrideSql?: string,
     targetTab?: QueryTab,
     overrideParams?: QueryCell[],
-    options?: { internal?: boolean; skipDanger?: boolean },
+    options?: { internal?: boolean; skipDanger?: boolean; source?: QuerySource },
   ) => {
     const tab = targetTab ?? activeTab;
     if (runningTabs[tab.id]) return;
@@ -1490,6 +1491,9 @@ export default function App() {
       showNotice('error', '有未提交的表格修改，请先提交或回滚。');
       return;
     }
+
+    const querySource: QuerySource =
+      options?.source ?? (tab.table ? 'table-page' : 'editor');
 
     const parsedScript = options?.internal
       ? null
@@ -1560,7 +1564,7 @@ export default function App() {
             tab.table?.database ??
             currentDatabaseByTab[tab.id] ??
             (connection.input.type === 'sqlite' ? '' : connection.input.database),
-          source: 'editor',
+          source: querySource,
         });
 
         if (!response.ok) {
@@ -1654,7 +1658,7 @@ export default function App() {
           tab.table?.database ??
           currentDatabaseByTab[tab.id] ??
           (connection.input.type === 'sqlite' ? '' : connection.input.database),
-        source: 'editor',
+        source: querySource,
       });
 
       if (response.ok) {
@@ -3591,7 +3595,7 @@ export default function App() {
         activeTab.table?.database ??
         currentDatabaseByTab[activeTab.id] ??
         (connection.input.type === 'sqlite' ? '' : connection.input.database),
-      source: 'editor',
+      source: 'export',
     });
 
     if (!response.ok) return { ok: false, message: response.error.message };
