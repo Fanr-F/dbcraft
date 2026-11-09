@@ -1161,15 +1161,12 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **建议**：`DraftPayload` 增加 `customTitle` 并做长度限制；恢复时写回；补草稿恢复测试。
 - **验收**：重命名 → 关闭应用 → 重启，标题保持；清空自定义名后恢复自动标题。
 
-#### H-08 SQLite「测试连接」与实际只读回退口径不一致
+#### H-08 SQLite「测试连接」与实际只读回退口径不一致（已修复）
 
-- **优先级/状态**：P1 / ❌
-- **文档覆盖**：未提。
-- **证据**：`src/main/services/ConnectionManager.ts` `testSqliteFile()`（约 121-131）用读写方式打开，失败直接报错；`src/main/workers/sqlite-worker.ts` `open()`（约 49-76）在读写打开失败时会再以 `readonly: true` 重开，并让 session 标记 `isReadOnly`。
-- **现象**：只读文件或被占用文件「测试连接」失败，但打开会话可以成功（只读）。
-- **影响**：用户误以为文件不可用；测试结果与真实会话能力不一致。
-- **建议**：测试复用 worker 的 open 逻辑（或捕获后 readonly 重试），结果里返回 readonly 标记与提示。
-- **验收**：只读 `demo.db` 测试连接成功并提示「只读模式」；打开会话同样只读；不可读文件仍失败。
+- **优先级/状态**：P1 / ✅（W-20261109-31）
+- **原问题**：`testSqliteFile()` 用读写方式打开，失败直接报错；Worker 打开时会回退只读，导致测试失败但会话可用。
+- **修复**：测试连接复用同样的锁/权限判断，失败时以 `readonly: true` 重开并返回 `readonly` 标记与「只读模式」提示。
+- **验收**：只读/被占用文件测试连接成功并提示只读；不可读文件仍失败。
 
 #### H-09 已保存密码无法清除；编辑连接时测试必须先重输密码（已修复）
 
@@ -1498,6 +1495,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-28 六份文档合并为项目主文档**：诉求是把除 `PRD.md`、`FEATURE_MATRIX.md`、`TECH_DESIGN.md` 外的文档整理成一个，随后删除源文件。变更：新增 `doc/PROJECT_MASTER.md`，合并原 `doc/README.md`、`CONNECTION_TAB_MODEL.md`、`PROJECT_STATUS.md`、`UNFINISHED_ITEMS.md`、`UI_TODO.md`、`WORKLOG.md` 的内容，去重后按「文档定位 / 模型 / 现状与验收 / 未完成项 / UI 清单 / 变更记录」重排；删除六份源文件；更新 `README.md`、`AGENTS.md`、`FEATURE_MATRIX.md`、`TECH_DESIGN.md` 中的引用，并把 `PRD.md` 两处旧链接改指本文 §2（仅链接维护，未改需求内容）。验证：交叉核对合并内容与源文件；纯文档改动，未运行构建/测试。遗留：无；合并后 `doc/` 只保留 PRD、FEATURE_MATRIX、TECH_DESIGN、PROJECT_MASTER 四份文档。
 - **W-20261109-29 功能总表事实核对**：诉求是检查 `FEATURE_MATRIX.md` 的描述与代码是否一致。变更：修正 M01-07「系统对象仅 MSSQL 有开关」为 SQLite/MSSQL 均可开关；M08-02 手动刷新由 ✅ 改为 🟡（作业树与详情页均无显式刷新入口）；M08-11 作业右键菜单由 🟡 改为 ❌（树内没有右键菜单，启停需打开详情页）；补充 M01-08 状态点是会话状态聚合而非主动健康检查；补全 M02-11 未完成边界；M04-18 改为明确「当前未识别/阻止」；M06-06 明确 SQLite 只有 result code 不伪造 SQLSTATE；代码基线从 `9233262` 更新为 `6d7f77e`；统计更新为 `✅80 / 🟡23 / ❌53 / ⏸8`（MOD-08 为 `6/2/4/3`）。涉及 `doc/FEATURE_MATRIX.md`、`doc/PROJECT_MASTER.md`。验证：用脚本按表格行统计状态，与 §0 总览、§12 统计一致；对照 `App.tsx`（`systemObjectsSupported`）、`Sidebar.tsx`（作业树无刷新/右键菜单）、`AgentTabPanel.tsx`（详情页刷新、100/500 历史）、`Workspace.tsx`（分页档位/单行删除）核对。遗留：M08-06 的共享计划/多服务器只读仍按「代码路径可用」标 ✅，没有真实多服务器实例回归，后续可按真机结果收紧为 🟡。
 - **W-20261109-30 M01-13 保存密码开关与已存密码测试**：诉求是实现「保存密码开关 / 清除已保存密码」，并让编辑连接测试时无需重输密码。变更：`ipc-contract.ts` 增加 `ConnectionSaveOptions.rememberPassword`，`connection.test` 增加可选连接 id；`schemas.ts` 增加 `connectionTestSchema` 与保存选项；`metadata.saveConnection` 在 `rememberPassword=false` 时清除 secret 并返回提示；`ConnectionManager.testConnection` 在密码为空且提供 id 时从主进程读取已存密码；`ConnectionDialog` 增加「保存到本地」开关、移除测试前必须重输密码的限制、保存时传递选项；`App.saveConnection` 透传选项。涉及文件：`src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`、`src/main/storage/metadata.ts`、`src/main/services/ConnectionManager.ts`、`src/renderer/src/features/connections/ConnectionDialog.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工点击。遗留：清除密码采用「取消勾选并保存」两步操作，没有单独的立即清除按钮；未补连接保存/密码读取的自动化测试。
+- **W-20261109-31 M01-02 SQLite 测试连接只读口径**：诉求是让 SQLite「测试连接」和真实会话一致处理只读/被占用文件。变更：`ConnectionTestResult` 增加 `readonly`；`testSqliteFile()` 在锁/权限错误时回退 `readonly: true` 重开并返回版本与只读标记；成功提示改为「只读模式（文件被占用或无写权限）」；不可读文件仍失败。涉及 `src/shared/ipc-contract.ts`、`src/main/services/ConnectionManager.ts`。验证：`npm run typecheck`、`npm run build` 通过；未构造只读文件做真机验证。遗留：只读测试尚未纳入 `e2e:sqlite`。
 
 ---
 

@@ -118,13 +118,33 @@ function errorDetails(error: unknown): QueryError {
   };
 }
 
-function testSqliteFile(filePath: string): string {
-  const database = new Database(filePath, { fileMustExist: true });
+function isSqliteLockOrPermissionError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as Error & { code?: string }).code ?? '';
+  return (
+    /SQLITE_BUSY|SQLITE_CANTOPEN|SQLITE_READONLY|EACCES|EBUSY|permission denied|unable to open|database is locked/i.test(
+      `${code} ${error.message}`,
+    )
+  );
+}
+
+function testSqliteFile(filePath: string): { version: string; readonly: boolean } {
+  let database: Database.Database;
+  let readonly = false;
+  try {
+    database = new Database(filePath, { fileMustExist: true });
+  } catch (error) {
+    // 与 sqlite-worker 的打开逻辑保持一致：锁/权限问题回退为只读。
+    if (!isSqliteLockOrPermissionError(error)) throw error;
+    database = new Database(filePath, { fileMustExist: true, readonly: true });
+    readonly = true;
+  }
+
   try {
     const row = database.prepare('select sqlite_version() as version').get() as
       | { version: string }
       | undefined;
-    return row?.version ?? 'unknown';
+    return { version: row?.version ?? 'unknown', readonly };
   } finally {
     database.close();
   }
@@ -173,11 +193,14 @@ export async function testConnection(
 
   if (effectiveInput.type === 'sqlite') {
     try {
-      const version = testSqliteFile(effectiveInput.filePath);
+      const info = testSqliteFile(effectiveInput.filePath);
       return {
         status: 'ok',
         ok: true,
-        message: `SQLite ${version} · 文件可读`,
+        message: info.readonly
+          ? `SQLite ${info.version} · 只读模式（文件被占用或无写权限）`
+          : `SQLite ${info.version} · 文件可读`,
+        readonly: info.readonly,
         elapsedMs: Date.now() - startedAt,
       };
     } catch (error) {

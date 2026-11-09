@@ -49,6 +49,8 @@ export interface ConnectionTestResult {
   ok: boolean;
   message: string;
   elapsedMs: number;
+  /** SQLite 文件被占用/无写权限时，测试连接会以只读方式成功。 */
+  readonly?: boolean;
 }
 
 export interface SessionOpenResult {
