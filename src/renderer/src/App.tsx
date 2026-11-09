@@ -2726,46 +2726,12 @@ export default function App() {
       return;
     }
 
-    const nextTab: QueryTab = {
-      ...activeTab,
-      connectionId: connection.id,
-      sql: DEFAULT_SQL[input.type],
-      table: undefined,
-    };
-    setTabs((current) => current.map((tab) => (tab.id === activeTab.id ? nextTab : tab)));
-    setRuns((current) => {
-      const next = { ...current };
-      delete next[activeTab.id];
-      return next;
-    });
-    setTableMetas((current) => {
-      const next = { ...current };
-      delete next[activeTab.id];
-      return next;
-    });
-    setPendingTableEdits((current) => {
-      const next = { ...current };
-      delete next[activeTab.id];
-      return next;
-    });
-    clearEditHistory(activeTab.id);
-    setNoPkMode((current) => {
-      const next = { ...current };
-      delete next[activeTab.id];
-      return next;
-    });
-
-    await closeTabSession(activeTab.id);
-    await openTabSession(nextTab, connection.id);
-    // 新建连接后自动打开它的对象树（browse session 与 tab session 分离）。
-    const browseTab: QueryTab = {
-      id: browseSessionId(connection.id),
-      title: '',
-      sql: '',
-      connectionId: connection.id,
-    };
-    setBrowseConnectionId(connection.id);
-    void openTabSession(browseTab, connection.id);
+    // 新建连接只保存配置，不改绑/清空当前标签。
+    // 用户双击连接打开对象树，右击「查询」才创建 tab + session。
+    showNotice(
+      'info',
+      `连接「${connection.input.name}」已保存；双击连接打开对象树，右击选择「查询」创建标签。`,
+    );
   };
 
   const deleteSavedConnection = async (id: string) => {

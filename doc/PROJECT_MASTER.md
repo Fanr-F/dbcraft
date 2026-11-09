@@ -1101,15 +1101,12 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **建议**：删除该特判，走通用 `query.execute({ maxRows: 10000 })`；保留 `truncated` 提示；补 `e2e:mssql` 导出断言。
 - **验收**：MSSQL 查询 200 行 → 导出 → 加载全部 → 200 行可导出；超过 1 万行显示截断提示，不再出现「尚未接入」。
 
-#### H-02 新建连接会改绑当前标签并清空 SQL/结果/会话
+#### H-02 新建连接会改绑当前标签并清空 SQL/结果/会话（已修复）
 
-- **优先级/状态**：P1 / ❓
-- **文档覆盖**：未提；与 PRD v0.20 Q27「保存连接是配置（类），tab/session 独立」冲突。
-- **证据**：`App.tsx` `saveConnection()`（约 2686-2765）。新建分支在 2725-2731 生成 `nextTab = { ...activeTab, connectionId: 新连接, sql: DEFAULT_SQL, table: undefined }`，随后 2754 关闭旧 session、2755 打开新 session，2757-2764 再创建 browse session。
-- **现象**：新建连接保存成功后，当前活动 tab 被改绑、SQL 重置、结果与表元数据清空；用户没有确认机会。
-- **影响**：用户在写 SQL 时顺手新建一个连接，会丢掉当前工作；每个新连接固定占两条物理连接（tab + browse），与「右击连接 → 查询才建 tab」的目标交互不一致。
-- **建议**：新建连接默认只保存配置，可选打开左侧树；不碰当前 tab。若保留「新建后直接查询」的便利，至少在执行前明确确认。
-- **验收**：有未保存 SQL 时新建连接，原 tab 的 SQL/结果/session 不变；新连接出现在左侧树；不自动改绑当前 tab。
+- **优先级/状态**：P1 / ✅（W-20261109-32）
+- **原问题**：`saveConnection()` 新建分支会把活动 tab 改绑到新连接、重置 SQL、清空结果并重开 session。
+- **修复**：新建连接只保存配置并提示「双击连接打开对象树，右击查询创建标签」，不再改动当前标签；编辑连接仍只更新配置、关闭左侧树。
+- **验收**：有未保存 SQL 时新建连接，原 tab 的 SQL/结果/session 不变；新连接出现在左侧树。
 
 #### H-03「断开连接」没有关闭独立 browse session
 
@@ -1496,6 +1493,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-29 功能总表事实核对**：诉求是检查 `FEATURE_MATRIX.md` 的描述与代码是否一致。变更：修正 M01-07「系统对象仅 MSSQL 有开关」为 SQLite/MSSQL 均可开关；M08-02 手动刷新由 ✅ 改为 🟡（作业树与详情页均无显式刷新入口）；M08-11 作业右键菜单由 🟡 改为 ❌（树内没有右键菜单，启停需打开详情页）；补充 M01-08 状态点是会话状态聚合而非主动健康检查；补全 M02-11 未完成边界；M04-18 改为明确「当前未识别/阻止」；M06-06 明确 SQLite 只有 result code 不伪造 SQLSTATE；代码基线从 `9233262` 更新为 `6d7f77e`；统计更新为 `✅80 / 🟡23 / ❌53 / ⏸8`（MOD-08 为 `6/2/4/3`）。涉及 `doc/FEATURE_MATRIX.md`、`doc/PROJECT_MASTER.md`。验证：用脚本按表格行统计状态，与 §0 总览、§12 统计一致；对照 `App.tsx`（`systemObjectsSupported`）、`Sidebar.tsx`（作业树无刷新/右键菜单）、`AgentTabPanel.tsx`（详情页刷新、100/500 历史）、`Workspace.tsx`（分页档位/单行删除）核对。遗留：M08-06 的共享计划/多服务器只读仍按「代码路径可用」标 ✅，没有真实多服务器实例回归，后续可按真机结果收紧为 🟡。
 - **W-20261109-30 M01-13 保存密码开关与已存密码测试**：诉求是实现「保存密码开关 / 清除已保存密码」，并让编辑连接测试时无需重输密码。变更：`ipc-contract.ts` 增加 `ConnectionSaveOptions.rememberPassword`，`connection.test` 增加可选连接 id；`schemas.ts` 增加 `connectionTestSchema` 与保存选项；`metadata.saveConnection` 在 `rememberPassword=false` 时清除 secret 并返回提示；`ConnectionManager.testConnection` 在密码为空且提供 id 时从主进程读取已存密码；`ConnectionDialog` 增加「保存到本地」开关、移除测试前必须重输密码的限制、保存时传递选项；`App.saveConnection` 透传选项。涉及文件：`src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`、`src/main/storage/metadata.ts`、`src/main/services/ConnectionManager.ts`、`src/renderer/src/features/connections/ConnectionDialog.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工点击。遗留：清除密码采用「取消勾选并保存」两步操作，没有单独的立即清除按钮；未补连接保存/密码读取的自动化测试。
 - **W-20261109-31 M01-02 SQLite 测试连接只读口径**：诉求是让 SQLite「测试连接」和真实会话一致处理只读/被占用文件。变更：`ConnectionTestResult` 增加 `readonly`；`testSqliteFile()` 在锁/权限错误时回退 `readonly: true` 重开并返回版本与只读标记；成功提示改为「只读模式（文件被占用或无写权限）」；不可读文件仍失败。涉及 `src/shared/ipc-contract.ts`、`src/main/services/ConnectionManager.ts`。验证：`npm run typecheck`、`npm run build` 通过；未构造只读文件做真机验证。遗留：只读测试尚未纳入 `e2e:sqlite`。
+- **W-20261109-32 M01-15 新建连接不再改绑当前标签**：诉求是让新建连接只保存配置，不影响当前 tab 的 SQL/结果/session。变更：`App.saveConnection` 新建分支删除改绑 tab、清空 runs/tableMetas/pending/undo/noPk、关闭旧 session、自动打开 browse session 的逻辑；保存后仅提示「双击连接打开对象树，右击查询创建标签」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工验收。遗留：新建连接暂不自动展开左侧树，需要用户双击；既有 `e2e:sqlite` 未覆盖「新建连接不影响当前 tab」。
 
 ---
 
