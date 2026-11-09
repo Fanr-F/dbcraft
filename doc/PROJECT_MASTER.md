@@ -82,7 +82,7 @@
 4. **库上下文可见**：标签标题显示连接 + 当前库；执行按钮旁数据库下拉；状态栏显示当前库与活动会话数；切换即对该 tab 的 session 执行 `USE`（W-20261109-12）。
 5. **编辑/删除保存连接与已有 tab session 解耦**：编辑只更新配置、不重连/不改写 tab、收起左侧树；删除保留 tab 的 session/SQL/结果并标记「连接已删除」，由用户自行关闭；关闭后不可重连（W-20261109-12/17）。
 6. **重连恢复当前库**：SQLite 超时/断线重连后回到原库（W-20261109-12）。
-7. **仍有边界缺口**：新建连接会改绑当前活动 tab（H-02）、断开连接未关闭 browse session（H-03）、标签自定义名不持久化（H-07）、只剩一个 SQL 标签时关闭静默无反应（H-10）。
+7. **H-01～H-11 已全部修复**：新建连接不再改绑 tab、断开连接会关闭 browse session、标签自定义名随草稿持久化、单标签关闭有提示；剩余缺口见 §3 / §4。
 
 ### 2.2 当前模型（代码事实）
 
@@ -100,7 +100,7 @@
 | 删除连接 | 保留 tab session/SQL/结果，写 `connectionSnapshot`；标签标记「连接已删除」 | `deleteSavedConnection` |
 | 编辑连接 | 只更新配置，不重连绑定标签；收起该连接左侧树 | `saveConnection` |
 | 关闭最后标签 | 自动新建一个绑定同一连接的查询标签；单标签时「关闭」静默无反应（H-10） | `closeTab` |
-| 草稿恢复 | 只恢复 SQL 标签的 id/title/sql/connectionId/filePath/connectionSnapshot；不恢复 session、库、结果、表数据/Agent 标签 | `DRAFT_STORAGE_KEY` |
+| 草稿恢复 | 只恢复 SQL 标签的 id/title/customTitle/sql/connectionId/filePath/connectionSnapshot；不恢复 session、库、结果、表数据/Agent 标签 | `DRAFT_STORAGE_KEY` |
 
 关系图（当前）：
 
@@ -140,8 +140,8 @@ Server（servers 表）
 | 连接只读/环境/SSL/字符集 | 🟡 环境标签有；只读没有 | 多标签共享同一配置 | v1.0 显示环境徽标；只读 v1.x |
 | 连接编辑时提示影响范围 | ✅ 已改为不重连已有 tab | 新 tab/重连才用新配置 | 保留 |
 | 连接删除时保留 SQL | ✅ 保留 session/SQL/结果 + 快照 | 关闭后不可重连 | 保留 |
-| 连接断开/关闭全部会话 | 🟡 断开单个连接；browse 未一起关（H-03） | 没有「全部断开」 | 修 H-03；v1.0 可加「全部断开」 |
-| 连接配置导入/导出 | 🟡 不含密码；MSSQL 命名实例往返会丢、重复导入无去重（H-04） | 备份/迁移会改变连接方式 | 修 H-04 |
+| 连接断开/关闭全部会话 | 🟡 断开单个连接并同时关闭 browse（H-03 已修） | 没有「全部断开」 | v1.0 可加「全部断开」 |
+| 连接配置导入/导出 | ✅ 不含密码；命名实例可往返，重复导入跳过（H-04 已修） | — | 保留 |
 
 #### 2.4.2 标签管理
 
@@ -158,7 +158,7 @@ Server（servers 表）
 | 标签过多滚动/收缩 | 🟡 横向排列 | 窄窗口溢出 | v1.0 基础滚动 |
 | 后台查询可取消 | ✅ 标签右键「取消查询」 | — | 保留 |
 | 标签类型统一管理 | 🟡 SQL/表数据/表设计/Agent | 关闭/复制/重命名行为不完全一致 | v1.0 统一标签模型 |
-| 标签自定义名称持久化 | ❌ 重启丢失（H-07） | 用户整理过的标签名丢失 | 修 H-07 |
+| 标签自定义名称持久化 | ✅ 随草稿保存/恢复（W-20261109-35） | — | 保留 |
 
 #### 2.4.3 会话管理
 
@@ -1085,7 +1085,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | R 架构/韧性 | 9 | 类型、存储、生命周期已具备，但缺健康检查、恢复或收尾 |
 | C 文档/代码不一致 | 4 | 需要回写文档或补代码 |
 
-**建议最先处理（按顺序）**：H-01 → H-03 → H-04 → H-02（需确认语义）→ H-05 → H-06（需拍板）→ H-07/H-08/H-09 → K-09。
+**H 组已全部修复**（W-20261109-30～40）；下一步优先处理 K-09、K-02、H 组之外的 K/R 项。
 
 ### 4.2 H：代码走查新发现
 
@@ -1478,6 +1478,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-38 H-05 关闭标签先取消查询**：诉求是关闭正在执行查询的标签时先取消服务端查询。变更：`cancelQueryForTab` 增加 `silent` 参数；`closeTab` 在关闭 session 前 `await` 取消；`closeTabsByIds` 批量关闭时逐个取消；取消失败不阻塞关闭。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用 MySQL `SLEEP` 做真机验证。遗留：主进程 `MysqlSession.close()` 仍是 `connection.end()`，取消依赖关闭前的 `query.cancel`；SQLite 取消仍会终止 Worker。
 - **W-20261109-39 H-11 清理死文件**：诉求是移除无引用 shim 与临时探针脚本。变更：确认 `AgentJobsDialog.tsx` 无引用后删除；当前工作区未发现 `scripts/tmp-probe-*.mjs`。涉及 `src/renderer/src/components/AgentJobsDialog.tsx`（删除）。验证：`npm run typecheck`、`npm run build` 通过。遗留：无。
 - **W-20261109-40 H-06 补齐历史来源**：诉求是让表数据浏览和导出重查在历史里显示真实来源，而不是一律「编辑器」。变更：`QuerySource` 增加 `table-page` / `export`，同步 zod、history-store、历史弹窗/详情标签；`runQuery` 对 `tab.table` 的内部查询自动用 `table-page`，导出重查用 `export`。涉及 `src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/storage/history-store.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/HistoryDialog.tsx`、`HistoryDetailDialog.tsx`。验证：`npm run typecheck`、`npm run test:history`、`npm run test:sql-mask`、`npm run build` 通过。遗留：内部表数据查询仍会写历史（只改来源，没有做「不记录」策略）；未做真机点击验收。
+- **W-20261109-41 功能表状态同步（H 组收口）**：诉求是把已完成的 H 组修复同步回功能表与模型文档。变更：M02-15 说明改为自定义标签名已持久化；X-10 改为 ✅；统计更新为 `✅88 / 🟡21 / ❌47 / ⏸8`；模型 §2.1 结论、连接导入/导出、断开 browse、标签自定义名、§4.1 建议顺序同步；H-01～H-11 均标记已修复。涉及 `doc/FEATURE_MATRIX.md`、`doc/PROJECT_MASTER.md`。验证：脚本按表格行统计，结果与 §0/§12 一致。遗留：H 组已收口，K/R/C 组仍有大量未完成项。
 
 ---
 
