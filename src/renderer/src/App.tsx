@@ -2805,11 +2805,18 @@ export default function App() {
     const affected = tabs.filter(
       (tab) => tab.connectionId === id && sessions[tab.id] !== undefined,
     );
+    const hadBrowse = browseConnectionId === id;
+    if (hadBrowse) {
+      await closeTabSession(browseSessionId(id));
+      setBrowseConnectionId(null);
+    }
     await Promise.all(affected.map((tab) => closeTabSession(tab.id)));
+
+    const closed = affected.length + (hadBrowse ? 1 : 0);
     showNotice(
       'info',
-      affected.length > 0
-        ? '已断开连接，标签保留，下次执行会重新连接。'
+      closed > 0
+        ? `已断开连接${hadBrowse ? '与对象树' : ''}，标签保留，下次执行会重新连接。`
         : '该连接当前没有活动会话。',
     );
   };

@@ -1108,14 +1108,11 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **修复**：新建连接只保存配置并提示「双击连接打开对象树，右击查询创建标签」，不再改动当前标签；编辑连接仍只更新配置、关闭左侧树。
 - **验收**：有未保存 SQL 时新建连接，原 tab 的 SQL/结果/session 不变；新连接出现在左侧树。
 
-#### H-03「断开连接」没有关闭独立 browse session
+#### H-03「断开连接」没有关闭独立 browse session（已修复）
 
-- **优先级/状态**：P1 / ❌
-- **文档覆盖**：未提；browse session 是 W-20261109-15 之后的新结构。
-- **证据**：`App.tsx` `disconnectConnection()`（约 2834-2845）只遍历 `tabs`；browse session id 由 `browseSessionId()` 生成（约 305），打开/关闭在 `openBrowseConnection()` / `closeBrowseConnection()`（约 1220-1243）。
-- **现象**：右击连接「断开连接」后，tab 会话关闭，但 `browse-<connectionId>` 仍 ready；左侧树仍可展开/刷新。若该连接只有树、没有 tab，还会提示「该连接当前没有活动会话」。
-- **影响**：「断开连接」语义不完整；用户无法判断是否真的断开；树继续持有物理连接。
-- **建议**：同时 `closeTabSession(browseSessionId(id))`、清 `browseConnectionId` 与 browse 缓存；提示改为「已断开连接与对象树」。
+- **优先级/状态**：P1 / ✅（W-20261109-34）
+- **原问题**：`disconnectConnection()` 只遍历 tab，browse session 仍 ready，左侧树继续可展开/刷新。
+- **修复**：断开时同时关闭 `browse-<connectionId>`、清 `browseConnectionId` 与按 session 的缓存；提示区分「已断开连接与对象树」。
 - **验收**：展开树 → 右击「断开连接」→ 树收起、状态点变未连接；再展开时重新建会话。
 
 #### H-04 连接导入导出往返丢 MSSQL 命名实例，且重复导入无去重（已修复）
@@ -1492,6 +1489,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-31 M01-02 SQLite 测试连接只读口径**：诉求是让 SQLite「测试连接」和真实会话一致处理只读/被占用文件。变更：`ConnectionTestResult` 增加 `readonly`；`testSqliteFile()` 在锁/权限错误时回退 `readonly: true` 重开并返回版本与只读标记；成功提示改为「只读模式（文件被占用或无写权限）」；不可读文件仍失败。涉及 `src/shared/ipc-contract.ts`、`src/main/services/ConnectionManager.ts`。验证：`npm run typecheck`、`npm run build` 通过；未构造只读文件做真机验证。遗留：只读测试尚未纳入 `e2e:sqlite`。
 - **W-20261109-32 M01-15 新建连接不再改绑当前标签**：诉求是让新建连接只保存配置，不影响当前 tab 的 SQL/结果/session。变更：`App.saveConnection` 新建分支删除改绑 tab、清空 runs/tableMetas/pending/undo/noPk、关闭旧 session、自动打开 browse session 的逻辑；保存后仅提示「双击连接打开对象树，右击查询创建标签」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工验收。遗留：新建连接暂不自动展开左侧树，需要用户双击；既有 `e2e:sqlite` 未覆盖「新建连接不影响当前 tab」。
 - **W-20261109-33 M01-10 连接导入导出命名实例与去重**：诉求是补上 MSSQL 命名实例往返和重复导入去重。变更：`connection-export.ts` 的 mssql 分支保留合法 `instanceName`（非法值丢弃）；`server-identity.ts` 新增 `connectionProfileKey`（服务器 key + 名称）；`ipc-contract.ts` 的导入结果增加 `duplicates`；`router.ts` 导入前读取现有连接并按 key 跳过重复，导入提示包含跳过数量。涉及 `src/shared/connection-export.ts`、`src/shared/server-identity.ts`、`src/shared/ipc-contract.ts`、`src/main/ipc/router.ts`、`src/renderer/src/App.tsx`、`scripts/test-connection-export.mjs`。验证：`npm run typecheck`、`npm run test:connection-export`、`npm run build` 通过。遗留：去重策略目前固定「跳过」，没有覆盖/新建选项；未在真实 Electron 中手工导入验证。
+- **W-20261109-34 H-03 断开连接同时关闭 browse session**：诉求是让「断开连接」同时关闭左侧对象树的独立 browse session。变更：`disconnectConnection` 在关闭 tab session 前先关闭 `browse-<connectionId>`、清 `browseConnectionId` 与按 session 的缓存；提示区分「已断开连接与对象树」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中点击验收。遗留：没有专门的单元测试；对象树折叠状态仍由 UI 自行处理。
 
 ---
 
