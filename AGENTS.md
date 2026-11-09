@@ -101,7 +101,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - 日志统一走 `src/main/logging/logger.ts`（主进程）与 `src/renderer/src/logging.ts`（渲染进程，
   经 `log:write` 汇入主进程）。`npm run dev` 默认 `debug`，打包后 `info`，可用 `DBCRAFT_LOG_LEVEL` 覆盖。
   开发日志在项目根 `logs/`（已 gitignore），打包后写 userData；可用 `DBCRAFT_LOG_DIR` 覆盖。
-  日志不得记录 SQL 文本、密码或连接串；约定见 `doc/PROJECT_STATUS.md` §6「日志约定」。
+  日志不得记录 SQL 文本、密码或连接串；约定见 `doc/PROJECT_MASTER.md` §3.8「日志约定」。
 - 表数据页只是带分页上下文的 SQL 标签：双击表生成 `SELECT * ... LIMIT/OFFSET`，每页 50/200/500，
   可下拉或点击列头排序（`ORDER BY`），过滤生成参数化 `LIKE ? ESCAPE '!'`；分页/排序/过滤 SQL 用
   `buildTablePageQuery`（`shared/dialect/identifiers.ts`），不要手写方言分支，也不要把过滤值拼进 SQL。
@@ -148,12 +148,12 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 
 ## 文档记录（强制）
 
-- **每次改动都必须记录**：代码、脚本、配置、文档。改完在 `doc/WORKLOG.md` 末尾追加一条
+- **每次改动都必须记录**：代码、脚本、配置、文档。改完在 `doc/PROJECT_MASTER.md` §6「变更记录」末尾追加一条
   （编号 `W-YYYYMMDD-NN`），写清诉求、变更、涉及文件、验证结果、遗留/风险；不要改写历史条目。
-- UI 改动同时维护 `doc/UI_TODO.md` 的勾选状态；没在真实 Electron 里点过只能标“进行中/未真机验收”，
+- UI 改动同时维护 `doc/PROJECT_MASTER.md` §5 的勾选状态；没在真实 Electron 里点过只能标“进行中/未真机验收”，
   不能写“已完成”。
-- 状态变化同步 `doc/PROJECT_STATUS.md`；需求取舍不擅自改 `doc/PRD.md`，偏差写进状态文档和日志。
-- 文档索引在 `README.md`「文档」一节。
+- 状态变化同步 `doc/PROJECT_MASTER.md` §3；需求取舍不擅自改 `doc/PRD.md`，偏差写进状态文档和变更记录。
+- 文档索引在 `README.md`「文档」一节；项目主文档为 `doc/PROJECT_MASTER.md`。
 
 ## 环境坑
 
