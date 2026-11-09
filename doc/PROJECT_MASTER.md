@@ -1163,14 +1163,11 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **修复**：连接对话框增加「保存到本地」开关，取消勾选并保存会清除已存密码；`connection:test` 允许携带连接 id，主进程在密码为空时使用已存密码测试，密码仍不回传渲染层；`connection:save` 增加 `rememberPassword` 选项。
 - **验收**：编辑连接可取消勾选并保存来清除密码；测试连接无需重输；密码仍只在主进程解密。
 
-#### H-10 只剩一个普通 SQL 标签时，「关闭」静默无反应
+#### H-10 只剩一个普通 SQL 标签时，「关闭」静默无反应（已修复）
 
-- **优先级/状态**：P2 / ❌
-- **文档覆盖**：未提。
-- **证据**：`App.tsx` `closeTab()` 第 2211 行 `if (tabs.length <= 1 && !closing.kind) return;`；`Workspace.tsx` 标签右键菜单「关闭」没有按此条件禁用。
-- **现象**：单标签时点关闭没有提示、没有动作。
-- **影响**：交互像坏了；与「关闭其他/全部」的行为不一致。
-- **建议**：菜单项置灰并提示「至少保留一个 SQL 标签」，或允许关闭后自动新建空标签。
+- **优先级/状态**：P2 / ✅（W-20261109-36）
+- **原问题**：`closeTab()` 在只剩一个非 kind 标签时直接返回；标签右键「关闭」没有置灰。
+- **修复**：右键「关闭」在只剩一个 SQL 标签时置灰；`closeTab` 被直接调用时给出「至少保留一个 SQL 标签」提示。
 - **验收**：单标签时右键「关闭」置灰或有明确提示；不会静默失败。
 
 #### H-11 死文件与临时探针脚本留在仓库
@@ -1488,6 +1485,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-33 M01-10 连接导入导出命名实例与去重**：诉求是补上 MSSQL 命名实例往返和重复导入去重。变更：`connection-export.ts` 的 mssql 分支保留合法 `instanceName`（非法值丢弃）；`server-identity.ts` 新增 `connectionProfileKey`（服务器 key + 名称）；`ipc-contract.ts` 的导入结果增加 `duplicates`；`router.ts` 导入前读取现有连接并按 key 跳过重复，导入提示包含跳过数量。涉及 `src/shared/connection-export.ts`、`src/shared/server-identity.ts`、`src/shared/ipc-contract.ts`、`src/main/ipc/router.ts`、`src/renderer/src/App.tsx`、`scripts/test-connection-export.mjs`。验证：`npm run typecheck`、`npm run test:connection-export`、`npm run build` 通过。遗留：去重策略目前固定「跳过」，没有覆盖/新建选项；未在真实 Electron 中手工导入验证。
 - **W-20261109-34 H-03 断开连接同时关闭 browse session**：诉求是让「断开连接」同时关闭左侧对象树的独立 browse session。变更：`disconnectConnection` 在关闭 tab session 前先关闭 `browse-<connectionId>`、清 `browseConnectionId` 与按 session 的缓存；提示区分「已断开连接与对象树」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中点击验收。遗留：没有专门的单元测试；对象树折叠状态仍由 UI 自行处理。
 - **W-20261109-35 H-07 标签自定义名称持久化**：诉求是重命名标签后重启仍保留名称。变更：`DraftPayload` 的标签项增加 `customTitle`，`persistDraftTabs` 保存、`loadDraftTabs` 恢复，均限制 80 字符；`renameTab` 同步截断。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未做重启手工验收。遗留：草稿恢复仍只覆盖 SQL 标签，不恢复 session/结果。
+- **W-20261109-36 H-10 单标签关闭行为**：诉求是避免只剩一个 SQL 标签时「关闭」静默无反应。变更：`Workspace` 标签右键「关闭」在仅剩一个 SQL 标签时置灰；`App.closeTab` 被直接调用时提示「至少保留一个 SQL 标签」。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中点击验收。遗留：未改变「关闭后自动新建空标签」的备选交互。
 
 ---
 

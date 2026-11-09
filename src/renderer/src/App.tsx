@@ -2214,7 +2214,10 @@ export default function App() {
   const closeTab = (id: string) => {
     const closing = tabs.find((tab) => tab.id === id);
     if (!closing) return;
-    if (tabs.length <= 1 && !closing.kind) return;
+    if (tabs.length <= 1 && !closing.kind) {
+      showNotice('info', '至少保留一个 SQL 标签；可先新建查询再关闭当前标签。');
+      return;
+    }
     if (countPendingEdits(pendingTableEdits[id]) > 0) {
       if (!window.confirm('该标签有未提交的表格修改，关闭会丢弃。继续吗？')) {
         return;

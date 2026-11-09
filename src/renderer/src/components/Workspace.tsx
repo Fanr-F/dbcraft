@@ -312,6 +312,7 @@ export function Workspace({
           items={[
             {
               label: '关闭',
+              disabled: tabs.length <= 1 && !menuTab.kind,
               onSelect: () => onCloseTab(menuTab.id),
             },
             {
