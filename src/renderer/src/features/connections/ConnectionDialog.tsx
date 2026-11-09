@@ -58,7 +58,7 @@ interface ConnectionDialogProps {
   editingId?: string;
   passwordStored?: boolean;
   onClose: () => void;
-  onSave: (input: ConnectionInput, id?: string) => void;
+  onSave: (input: ConnectionInput, id?: string, rememberPassword?: boolean) => void;
 }
 
 function formFromInput(input: ConnectionInput): FormState {
@@ -174,6 +174,7 @@ export function ConnectionDialog({
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+  const [rememberPassword, setRememberPassword] = useState(true);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -224,12 +225,6 @@ export function ConnectionDialog({
       return;
     }
 
-    // 编辑模式不会把已存密码取回渲染层；此时留空无法完成认证测试。
-    if (editing && passwordStored && form.type !== 'sqlite' && !form.password) {
-      setError('测试连接需要重新输入密码；保存时可以留空以保持原密码。');
-      return;
-    }
-
     setError(null);
     setTestResult(null);
     setTesting(true);
@@ -245,7 +240,7 @@ export function ConnectionDialog({
         });
         return;
       }
-      setTestResult(await api.connection.test(buildInput(form)));
+      setTestResult(await api.connection.test(buildInput(form), editingId));
     } catch (caught) {
       setTestResult({
         status: 'failed',
@@ -264,7 +259,7 @@ export function ConnectionDialog({
       setError(problem);
       return;
     }
-    onSave(buildInput(form), editingId);
+    onSave(buildInput(form), editingId, rememberPassword);
   };
 
   return (
@@ -425,6 +420,23 @@ export function ConnectionDialog({
                     onChange={(event) => update('password', event.target.value)}
                   />
                 </label>
+
+                <div className="field check-group span-2">
+                  <span>密码保存</span>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={rememberPassword}
+                      onChange={(event) => setRememberPassword(event.target.checked)}
+                    />
+                    保存到本地
+                  </label>
+                  <p className="form-note">
+                    {editing && passwordStored
+                      ? '当前已保存密码；留空表示保持不变，取消勾选并保存会清除已保存密码。'
+                      : '取消勾选后，本次仍可用输入的密码测试连接，但不会保存到本地。'}
+                  </p>
+                </div>
 
                 <label className="field">
                   <span>数据库</span>

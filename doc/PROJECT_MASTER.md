@@ -1171,14 +1171,12 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **建议**：测试复用 worker 的 open 逻辑（或捕获后 readonly 重试），结果里返回 readonly 标记与提示。
 - **验收**：只读 `demo.db` 测试连接成功并提示「只读模式」；打开会话同样只读；不可读文件仍失败。
 
-#### H-09 已保存密码无法清除；编辑连接时测试必须先重输密码
+#### H-09 已保存密码无法清除；编辑连接时测试必须先重输密码（已修复）
 
-- **优先级/状态**：P1 / ❌（历史审计提过一句「保存密码开关/清除密码」，未排期）
-- **证据**：`src/main/storage/metadata.ts` `saveConnection()`（约 496-507）空密码保留旧 secret；`ConnectionDialog.tsx` 没有「保存密码/清除密码」控件；227-229 在「编辑 + 已有密码」时要求重新输入密码才能测试。
-- **现象**：无法在本机清除已保存密码；换账号只能删连接重建；测试按钮对已存密码用户不可用。
-- **影响**：凭据生命周期不完整；密码轮换/泄露处置困难。
-- **建议**：增加「保存密码」开关与「清除已保存密码」；测试连接允许主进程使用已存密码（仍不回传渲染层）。
-- **验收**：编辑连接可一键清除密码；测试连接无需重输；密码仍不出主进程。
+- **优先级/状态**：P1 / ✅（W-20261109-30）
+- **原问题**：`saveConnection()` 空密码保留旧 secret；连接对话框没有保存/清除密码控件；编辑连接测试要求重新输入密码。
+- **修复**：连接对话框增加「保存到本地」开关，取消勾选并保存会清除已存密码；`connection:test` 允许携带连接 id，主进程在密码为空时使用已存密码测试，密码仍不回传渲染层；`connection:save` 增加 `rememberPassword` 选项。
+- **验收**：编辑连接可取消勾选并保存来清除密码；测试连接无需重输；密码仍只在主进程解密。
 
 #### H-10 只剩一个普通 SQL 标签时，「关闭」静默无反应
 
@@ -1499,6 +1497,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-27 清理过时需求审计文档**：删除 `doc/REQUIREMENTS_AUDIT.md`（基线停留在 v0.16/v0.17，状态已被功能表取代，明细已由未完成项承接）；更新 README/doc 索引/状态/未完成项/模型审计引用；记录恢复方式。验证：无引用残留，PRD SHA256 不变。遗留：只删除明确过时的一份。
 - **W-20261109-28 六份文档合并为项目主文档**：诉求是把除 `PRD.md`、`FEATURE_MATRIX.md`、`TECH_DESIGN.md` 外的文档整理成一个，随后删除源文件。变更：新增 `doc/PROJECT_MASTER.md`，合并原 `doc/README.md`、`CONNECTION_TAB_MODEL.md`、`PROJECT_STATUS.md`、`UNFINISHED_ITEMS.md`、`UI_TODO.md`、`WORKLOG.md` 的内容，去重后按「文档定位 / 模型 / 现状与验收 / 未完成项 / UI 清单 / 变更记录」重排；删除六份源文件；更新 `README.md`、`AGENTS.md`、`FEATURE_MATRIX.md`、`TECH_DESIGN.md` 中的引用，并把 `PRD.md` 两处旧链接改指本文 §2（仅链接维护，未改需求内容）。验证：交叉核对合并内容与源文件；纯文档改动，未运行构建/测试。遗留：无；合并后 `doc/` 只保留 PRD、FEATURE_MATRIX、TECH_DESIGN、PROJECT_MASTER 四份文档。
 - **W-20261109-29 功能总表事实核对**：诉求是检查 `FEATURE_MATRIX.md` 的描述与代码是否一致。变更：修正 M01-07「系统对象仅 MSSQL 有开关」为 SQLite/MSSQL 均可开关；M08-02 手动刷新由 ✅ 改为 🟡（作业树与详情页均无显式刷新入口）；M08-11 作业右键菜单由 🟡 改为 ❌（树内没有右键菜单，启停需打开详情页）；补充 M01-08 状态点是会话状态聚合而非主动健康检查；补全 M02-11 未完成边界；M04-18 改为明确「当前未识别/阻止」；M06-06 明确 SQLite 只有 result code 不伪造 SQLSTATE；代码基线从 `9233262` 更新为 `6d7f77e`；统计更新为 `✅80 / 🟡23 / ❌53 / ⏸8`（MOD-08 为 `6/2/4/3`）。涉及 `doc/FEATURE_MATRIX.md`、`doc/PROJECT_MASTER.md`。验证：用脚本按表格行统计状态，与 §0 总览、§12 统计一致；对照 `App.tsx`（`systemObjectsSupported`）、`Sidebar.tsx`（作业树无刷新/右键菜单）、`AgentTabPanel.tsx`（详情页刷新、100/500 历史）、`Workspace.tsx`（分页档位/单行删除）核对。遗留：M08-06 的共享计划/多服务器只读仍按「代码路径可用」标 ✅，没有真实多服务器实例回归，后续可按真机结果收紧为 🟡。
+- **W-20261109-30 M01-13 保存密码开关与已存密码测试**：诉求是实现「保存密码开关 / 清除已保存密码」，并让编辑连接测试时无需重输密码。变更：`ipc-contract.ts` 增加 `ConnectionSaveOptions.rememberPassword`，`connection.test` 增加可选连接 id；`schemas.ts` 增加 `connectionTestSchema` 与保存选项；`metadata.saveConnection` 在 `rememberPassword=false` 时清除 secret 并返回提示；`ConnectionManager.testConnection` 在密码为空且提供 id 时从主进程读取已存密码；`ConnectionDialog` 增加「保存到本地」开关、移除测试前必须重输密码的限制、保存时传递选项；`App.saveConnection` 透传选项。涉及文件：`src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`、`src/main/storage/metadata.ts`、`src/main/services/ConnectionManager.ts`、`src/renderer/src/features/connections/ConnectionDialog.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工点击。遗留：清除密码采用「取消勾选并保存」两步操作，没有单独的立即清除按钮；未补连接保存/密码读取的自动化测试。
 
 ---
 

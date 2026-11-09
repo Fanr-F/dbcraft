@@ -154,13 +154,26 @@ function sessionMessage(session: DatabaseSession): string {
   return session.note ? `${base}（${session.note}）` : base;
 }
 
-export async function testConnection(input: ConnectionInput): Promise<ConnectionTestResult> {
+export async function testConnection(
+  input: ConnectionInput,
+  id?: string,
+): Promise<ConnectionTestResult> {
   const startedAt = Date.now();
-  log.debug('测试连接', { type: input.type });
 
-  if (input.type === 'sqlite') {
+  // 编辑已保存连接时，渲染层拿不到密码；允许主进程用已存密码测试。
+  let effectiveInput = input;
+  if (id && input.type !== 'sqlite' && !input.password) {
+    const stored = getConnectionInput(id);
+    if (stored && stored.type === input.type && stored.password) {
+      effectiveInput = { ...input, password: stored.password };
+    }
+  }
+
+  log.debug('测试连接', { type: effectiveInput.type });
+
+  if (effectiveInput.type === 'sqlite') {
     try {
-      const version = testSqliteFile(input.filePath);
+      const version = testSqliteFile(effectiveInput.filePath);
       return {
         status: 'ok',
         ok: true,
@@ -179,7 +192,7 @@ export async function testConnection(input: ConnectionInput): Promise<Connection
 
   let session: DatabaseSession | null = null;
   try {
-    session = await createSession(input, resolveConnectTimeoutMs());
+    session = await createSession(effectiveInput, resolveConnectTimeoutMs());
     return {
       status: 'ok',
       ok: true,

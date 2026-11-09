@@ -2683,14 +2683,18 @@ export default function App() {
     await runQuery(query.sql, nextTab, query.params, { internal: true });
   };
 
-  const saveConnection = async (input: ConnectionInput, id?: string) => {
+  const saveConnection = async (
+    input: ConnectionInput,
+    id?: string,
+    rememberPassword = true,
+  ) => {
     const api = window.dbcraft;
     if (!api) {
       showNotice('error', '未检测到 Electron IPC 桥接。');
       return;
     }
 
-    const result = await api.connection.save(input, id);
+    const result = await api.connection.save(input, id, { rememberPassword });
     if (!result.ok) {
       showNotice('error', result.message);
       return;

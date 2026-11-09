@@ -51,9 +51,15 @@ export const connectionInputSchema: z.ZodType<ConnectionInput> = z.discriminated
   mssqlSchema,
 ]);
 
+export const connectionTestSchema = z.object({
+  id: z.string().min(1).max(128).optional(),
+  input: connectionInputSchema,
+});
+
 export const connectionSaveSchema = z.object({
   id: z.string().min(1).max(128).optional(),
   input: connectionInputSchema,
+  rememberPassword: z.boolean().optional(),
 });
 
 export const connectionOpenSchema = z.object({

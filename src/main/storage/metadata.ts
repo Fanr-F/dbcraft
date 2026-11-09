@@ -481,7 +481,11 @@ export function listConnections(): ConnectionListResult {
   }
 }
 
-export function saveConnection(input: ConnectionInput, id?: string): ConnectionSaveResult {
+export function saveConnection(
+  input: ConnectionInput,
+  id?: string,
+  options?: { rememberPassword?: boolean },
+): ConnectionSaveResult {
   try {
     const db = requireDatabase();
     const now = new Date().toISOString();
@@ -493,10 +497,16 @@ export function saveConnection(input: ConnectionInput, id?: string): ConnectionS
 
     const connectionId = existing?.id ?? id ?? randomUUID();
     const createdAt = existing?.created_at ?? now;
+    const rememberPassword = options?.rememberPassword !== false;
     let secret: Buffer | null = existing?.secret ?? null;
     let warning: string | undefined;
 
-    if (passwordOf(input).length > 0) {
+    if (!rememberPassword) {
+      secret = null;
+      warning = existing?.secret
+        ? '已清除保存的密码；下次连接需要重新输入。'
+        : '密码未保存；下次连接需要重新输入。';
+    } else if (passwordOf(input).length > 0) {
       if (safeStorage.isEncryptionAvailable()) {
         secret = safeStorage.encryptString(passwordOf(input));
       } else {

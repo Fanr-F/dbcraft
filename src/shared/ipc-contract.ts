@@ -60,6 +60,14 @@ export interface SessionOpenResult {
   readonly?: boolean;
 }
 
+export interface ConnectionSaveOptions {
+  /**
+   * 是否把密码保存到本地。默认 true。
+   * false 会清除已保存的密码；本次会话仍可使用输入框中的密码测试连接。
+   */
+  rememberPassword?: boolean;
+}
+
 /** 已持久化的连接；`input.password` 永远是空串，密码只在主进程内解密使用。 */
 export interface ConnectionRecord {
   id: string;
@@ -605,9 +613,13 @@ export interface DBCraftApi {
     selectSqliteFile: () => Promise<string | null>;
   };
   connection: {
-    test: (input: ConnectionInput) => Promise<ConnectionTestResult>;
+    test: (input: ConnectionInput, id?: string) => Promise<ConnectionTestResult>;
     list: () => Promise<ConnectionListResult>;
-    save: (input: ConnectionInput, id?: string) => Promise<ConnectionSaveResult>;
+    save: (
+      input: ConnectionInput,
+      id?: string,
+      options?: ConnectionSaveOptions,
+    ) => Promise<ConnectionSaveResult>;
     remove: (id: string) => Promise<ConnectionDeleteResult>;
     removeAll: () => Promise<ConnectionRemoveAllResult>;
     open: (sessionId: string, connectionId: string) => Promise<SessionOpenResult>;

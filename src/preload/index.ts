@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
   type ConnectionInput,
+  type ConnectionSaveOptions,
   type DBCraftApi,
 } from '../shared/ipc-contract';
 
@@ -13,10 +14,15 @@ const api: DBCraftApi = {
     selectSqliteFile: () => ipcRenderer.invoke(IPC_CHANNELS.dialogSelectSqliteFile),
   },
   connection: {
-    test: (input: ConnectionInput) => ipcRenderer.invoke(IPC_CHANNELS.connectionTest, input),
+    test: (input: ConnectionInput, id?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.connectionTest, { input, id }),
     list: () => ipcRenderer.invoke(IPC_CHANNELS.connectionList),
-    save: (input: ConnectionInput, id?: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.connectionSave, { input, id }),
+    save: (input: ConnectionInput, id?: string, options?: ConnectionSaveOptions) =>
+      ipcRenderer.invoke(IPC_CHANNELS.connectionSave, {
+        input,
+        id,
+        rememberPassword: options?.rememberPassword,
+      }),
     remove: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.connectionDelete, id),
     removeAll: () => ipcRenderer.invoke(IPC_CHANNELS.connectionRemoveAll),
     open: (sessionId: string, connectionId: string) =>

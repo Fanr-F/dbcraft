@@ -46,9 +46,9 @@ import {
   agentDetailSchema,
   agentListSchema,
   agentScriptSchema,
-  connectionInputSchema,
   connectionOpenSchema,
   connectionSaveSchema,
+  connectionTestSchema,
   ddlExecuteSchema,
   ddlGetSchema,
   exportSaveSchema,
@@ -177,7 +177,7 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.connectionTest,
     async (_event, rawInput: unknown): Promise<ConnectionTestResult> => {
       const startedAt = Date.now();
-      const parsed = connectionInputSchema.safeParse(rawInput);
+      const parsed = connectionTestSchema.safeParse(rawInput);
 
       if (!parsed.success) {
         return {
@@ -188,7 +188,7 @@ export function registerIpcHandlers(): void {
         };
       }
 
-      return testConnection(parsed.data);
+      return testConnection(parsed.data.input, parsed.data.id);
     },
   );
 
@@ -205,7 +205,9 @@ export function registerIpcHandlers(): void {
         };
       }
 
-      return saveConnection(parsed.data.input, parsed.data.id);
+      return saveConnection(parsed.data.input, parsed.data.id, {
+        rememberPassword: parsed.data.rememberPassword,
+      });
     },
   );
 
