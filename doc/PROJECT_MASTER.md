@@ -1091,15 +1091,12 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 
 > 证据行号以当前工作区为准，函数名同时给出，防止后续行号漂移。
 
-#### H-01 MSSQL「加载全部并导出」仍被旧 guard 挡住
+#### H-01 MSSQL「加载全部并导出」仍被旧 guard 挡住（已修复）
 
-- **优先级/状态**：P1 / ❌
-- **文档覆盖**：未提；历史审计只写了导出格式可用。
-- **证据**：`src/renderer/src/App.tsx` `loadAllForExport()`（约 3542-3613）在 3556-3558 直接返回 `MSSQL 驱动尚未接入。`；`ExportDialog.tsx:215` 仍提供「加载全部（最多 10000 行）」。
-- **现象**：MSSQL 结果页点「加载全部」必失败，但 MSSQL 查询、分页、取消、DDL 都已接入。
-- **影响**：MSSQL 用户只能导出当前页；与 README「MSSQL 均已接入真实查询」的观感冲突。
-- **建议**：删除该特判，走通用 `query.execute({ maxRows: 10000 })`；保留 `truncated` 提示；补 `e2e:mssql` 导出断言。
-- **验收**：MSSQL 查询 200 行 → 导出 → 加载全部 → 200 行可导出；超过 1 万行显示截断提示，不再出现「尚未接入」。
+- **优先级/状态**：P1 / ✅（W-20261109-37）
+- **原问题**：`loadAllForExport()` 对 MSSQL 直接返回「MSSQL 驱动尚未接入」，但其他查询/导出路径已接入。
+- **修复**：删除 MSSQL 特判，统一走 `query.execute({ maxRows: 10000 })` 和现有截断提示。
+- **验收**：MSSQL 查询 200 行 → 导出 → 加载全部 → 200 行可导出；超过 1 万行显示截断提示。
 
 #### H-02 新建连接会改绑当前标签并清空 SQL/结果/会话（已修复）
 
@@ -1486,6 +1483,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-34 H-03 断开连接同时关闭 browse session**：诉求是让「断开连接」同时关闭左侧对象树的独立 browse session。变更：`disconnectConnection` 在关闭 tab session 前先关闭 `browse-<connectionId>`、清 `browseConnectionId` 与按 session 的缓存；提示区分「已断开连接与对象树」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中点击验收。遗留：没有专门的单元测试；对象树折叠状态仍由 UI 自行处理。
 - **W-20261109-35 H-07 标签自定义名称持久化**：诉求是重命名标签后重启仍保留名称。变更：`DraftPayload` 的标签项增加 `customTitle`，`persistDraftTabs` 保存、`loadDraftTabs` 恢复，均限制 80 字符；`renameTab` 同步截断。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未做重启手工验收。遗留：草稿恢复仍只覆盖 SQL 标签，不恢复 session/结果。
 - **W-20261109-36 H-10 单标签关闭行为**：诉求是避免只剩一个 SQL 标签时「关闭」静默无反应。变更：`Workspace` 标签右键「关闭」在仅剩一个 SQL 标签时置灰；`App.closeTab` 被直接调用时提示「至少保留一个 SQL 标签」。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中点击验收。遗留：未改变「关闭后自动新建空标签」的备选交互。
+- **W-20261109-37 H-01 MSSQL 加载全部导出**：诉求是去掉 MSSQL「加载全部」的旧 guard。变更：删除 `loadAllForExport` 中 `connection.input.type === 'mssql'` 直接返回「MSSQL 驱动尚未接入」的分支，统一走 `query.execute({ maxRows: 10000 })` 与现有截断提示。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL 实例上点导出。遗留：`e2e:mssql` 未补导出断言；超过 1 万行仍截断。
 
 ---
 

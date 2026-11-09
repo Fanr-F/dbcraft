@@ -3539,9 +3539,6 @@ export default function App() {
     const tab = activeTab;
     const connection = connections.find((item) => item.id === tab.connectionId);
     if (!connection) return { ok: false, message: '当前标签没有绑定连接。' };
-    if (connection.input.type === 'mssql') {
-      return { ok: false, message: 'MSSQL 驱动尚未接入。' };
-    }
 
     let ready = sessions[tab.id]?.status === 'ready';
     if (!ready) {
