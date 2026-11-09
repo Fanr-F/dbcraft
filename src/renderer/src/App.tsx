@@ -1806,7 +1806,7 @@ export default function App() {
     await runQuery(record.sqlText, tab);
   };
 
-  const cancelQueryForTab = async (tabId: string) => {
+  const cancelQueryForTab = async (tabId: string, silent = false) => {
     const requestId = runningRequests.current[tabId];
     if (!requestId) return;
 
@@ -1814,6 +1814,7 @@ export default function App() {
     if (!api) return;
 
     const canceled = await api.query.cancel(requestId);
+    if (silent) return;
     showNotice(
       canceled ? 'info' : 'error',
       canceled ? '已请求取消查询。' : '查询已结束或无法取消。',
@@ -2211,7 +2212,7 @@ export default function App() {
     }
   };
 
-  const closeTab = (id: string) => {
+  const closeTab = async (id: string) => {
     const closing = tabs.find((tab) => tab.id === id);
     if (!closing) return;
     if (tabs.length <= 1 && !closing.kind) {
@@ -2242,6 +2243,9 @@ export default function App() {
 
     const index = tabs.findIndex((tab) => tab.id === id);
     if (index < 0) return;
+
+    // 关闭前先取消该标签正在执行的查询，避免关闭后查询仍在后台占锁/写历史。
+    await cancelQueryForTab(id, true);
 
     const next = tabs.filter((tab) => tab.id !== id);
     if (next.length === 0) {
@@ -2350,7 +2354,7 @@ export default function App() {
   };
 
   /** 批量关闭标签；用于标签右键菜单。 */
-  const closeTabsByIds = (ids: string[]) => {
+  const closeTabsByIds = async (ids: string[]) => {
     const unique = Array.from(new Set(ids));
     const closing = tabs.filter((tab) => unique.includes(tab.id));
     if (closing.length === 0) return;
@@ -2372,6 +2376,9 @@ export default function App() {
 
     let next = tabs.filter((tab) => !unique.includes(tab.id));
     let nextActive = activeTabId;
+    for (const tab of closing) {
+      await cancelQueryForTab(tab.id, true);
+    }
     if (next.length === 0) {
       const number = tabCounter.current;
       tabCounter.current += 1;

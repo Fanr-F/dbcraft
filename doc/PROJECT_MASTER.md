@@ -1119,15 +1119,12 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **修复**：导入保留合法 `instanceName`（非法值丢弃）；新增 `connectionProfileKey`（服务器 key + 名称），导入时跳过同服务器同名配置并返回 `duplicates`；导入提示「跳过 N 个重复」并继续提示密码需重新输入。
 - **验收**：命名实例导出再导入仍走实例；连续导入两次不产生重复；结果返回 imported/skipped/duplicates。
 
-#### H-05 关闭标签不会取消正在执行的查询
+#### H-05 关闭标签不会取消正在执行的查询（已修复）
 
-- **优先级/状态**：P1 / ❌
-- **文档覆盖**：未提；PRD 只要求「关闭标签/断开/退出时提交/丢弃/取消」。
-- **证据**：`App.tsx` `closeTab()`（约 2208-2232）没有取消逻辑；`closeTabSession()`（约 1103-1153）直接 `api.session.close()`；`src/main/services/mysql/MysqlSession.ts:528-530` 的 `close()` 用 `connection.end()`（等当前语句跑完，不发送 `KILL QUERY`）；`ConnectionManager.closeSession()`（约 1220-1227）先删 sessions map 再 close。
-- **现象**：关闭正在跑长查询的 MySQL 标签后，查询仍继续执行，历史稍后写入，`runningRequests` 也没有清理。
-- **影响**：用户以为已停止；长查询继续占锁/占连接；关闭标签后仍可能收到结果并写历史。
-- **建议**：关闭标签前先对 `runningRequests[tabId]` 调 `query.cancel`，等待取消结果，再关闭 session；清理 running 状态。
-- **验收**：MySQL `SLEEP(60)` 执行中关闭标签，`SHOW PROCESSLIST` 中查询很快消失或结束；历史状态为 `cancelled`；SQLite/MSSQL 行为保持现状。
+- **优先级/状态**：P1 / ✅（W-20261109-38）
+- **原问题**：`closeTab()` 没有取消逻辑，`closeTabSession()` 直接 `session.close()`；MySQL 的 `connection.end()` 会等当前语句跑完。
+- **修复**：关闭单个标签前先 `await cancelQueryForTab(id, true)`，再关闭 session；批量关闭也逐个取消；取消失败不阻塞关闭。
+- **验收**：MySQL `SLEEP(60)` 执行中关闭标签，查询很快结束，历史状态为 `cancelled`；其他标签不受影响。
 
 #### H-06 表数据翻页/排序/过滤/导出重查都会写进历史，且来源固定为 editor
 
@@ -1484,6 +1481,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-35 H-07 标签自定义名称持久化**：诉求是重命名标签后重启仍保留名称。变更：`DraftPayload` 的标签项增加 `customTitle`，`persistDraftTabs` 保存、`loadDraftTabs` 恢复，均限制 80 字符；`renameTab` 同步截断。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未做重启手工验收。遗留：草稿恢复仍只覆盖 SQL 标签，不恢复 session/结果。
 - **W-20261109-36 H-10 单标签关闭行为**：诉求是避免只剩一个 SQL 标签时「关闭」静默无反应。变更：`Workspace` 标签右键「关闭」在仅剩一个 SQL 标签时置灰；`App.closeTab` 被直接调用时提示「至少保留一个 SQL 标签」。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中点击验收。遗留：未改变「关闭后自动新建空标签」的备选交互。
 - **W-20261109-37 H-01 MSSQL 加载全部导出**：诉求是去掉 MSSQL「加载全部」的旧 guard。变更：删除 `loadAllForExport` 中 `connection.input.type === 'mssql'` 直接返回「MSSQL 驱动尚未接入」的分支，统一走 `query.execute({ maxRows: 10000 })` 与现有截断提示。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL 实例上点导出。遗留：`e2e:mssql` 未补导出断言；超过 1 万行仍截断。
+- **W-20261109-38 H-05 关闭标签先取消查询**：诉求是关闭正在执行查询的标签时先取消服务端查询。变更：`cancelQueryForTab` 增加 `silent` 参数；`closeTab` 在关闭 session 前 `await` 取消；`closeTabsByIds` 批量关闭时逐个取消；取消失败不阻塞关闭。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用 MySQL `SLEEP` 做真机验证。遗留：主进程 `MysqlSession.close()` 仍是 `connection.end()`，取消依赖关闭前的 `query.cancel`；SQLite 取消仍会终止 Worker。
 
 ---
 
