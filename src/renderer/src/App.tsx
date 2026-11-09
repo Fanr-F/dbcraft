@@ -1481,6 +1481,10 @@ export default function App() {
       showNotice('error', 'SQL 不能为空。');
       return;
     }
+    if (sql.length > 1_000_000) {
+      showNotice('error', 'SQL 超过 1 MB，无法执行；请拆分语句或保存为 .sql 文件。');
+      return;
+    }
 
     // 表数据页有未提交修改时，直接执行会丢弃它们，先要求处理。
     if (

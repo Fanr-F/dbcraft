@@ -398,7 +398,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 | SQL 文件能力（v1.x） | 缺新建/另存为/最近文件/拖入 |
 | 参数化执行（v1.x） | 无 |
 | 快捷键自定义（v1.x） | 设置面板只展示说明 |
-| 超长 SQL | 无 >1MB 保护提示 |
+| 超长 SQL | 执行前检查 >1 MB 并提示拆分/另存，不再无提示提交 |
 
 #### 3.4.3 MOD-03 查询历史
 
@@ -1480,6 +1480,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-40 H-06 补齐历史来源**：诉求是让表数据浏览和导出重查在历史里显示真实来源，而不是一律「编辑器」。变更：`QuerySource` 增加 `table-page` / `export`，同步 zod、history-store、历史弹窗/详情标签；`runQuery` 对 `tab.table` 的内部查询自动用 `table-page`，导出重查用 `export`。涉及 `src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/storage/history-store.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/HistoryDialog.tsx`、`HistoryDetailDialog.tsx`。验证：`npm run typecheck`、`npm run test:history`、`npm run test:sql-mask`、`npm run build` 通过。遗留：内部表数据查询仍会写历史（只改来源，没有做「不记录」策略）；未做真机点击验收。
 - **W-20261109-41 功能表状态同步（H 组收口）**：诉求是把已完成的 H 组修复同步回功能表与模型文档。变更：M02-15 说明改为自定义标签名已持久化；X-10 改为 ✅；统计更新为 `✅88 / 🟡21 / ❌47 / ⏸8`；模型 §2.1 结论、连接导入/导出、断开 browse、标签自定义名、§4.1 建议顺序同步；H-01～H-11 均标记已修复。涉及 `doc/FEATURE_MATRIX.md`、`doc/PROJECT_MASTER.md`。验证：脚本按表格行统计，结果与 §0/§12 一致。遗留：H 组已收口，K/R/C 组仍有大量未完成项。
 - **W-20261109-42 M05-01 表数据分页补 1000**：诉求是支持 50/200/500/1000 四档分页。变更：`Workspace.tsx` 每页下拉增加 1000；`type` 仍为 number，无需改协议。涉及 `src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中切到 1000 行验收。遗留：分页 SQL 与后端未变；未补 E2E。
+- **W-20261109-43 M02-17 超长 SQL 保护**：诉求是 >1MB SQL 执行前给出明确提示。变更：`runQuery` 在空 SQL 检查后增加 `sql.length > 1_000_000` 拦截，提示拆分语句或保存为 `.sql` 文件。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未构造 1MB SQL 做真机验证。遗留：编辑器格式化/补全仍未对超长 SQL 做降级。
 
 ---
 
