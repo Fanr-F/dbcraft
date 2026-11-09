@@ -119,6 +119,7 @@ export function HistoryDialog({
   );
   const [refreshToken, setRefreshToken] = useState(0);
   const [records, setRecords] = useState<HistoryRecord[]>([]);
+  const [limit, setLimit] = useState(200);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -174,7 +175,7 @@ export function HistoryDialog({
           ...(until ? { until } : {}),
           sortBy,
           sortDir,
-          limit: 200,
+          limit,
         })
         .then((result) => {
           if (cancelled) return;
@@ -211,6 +212,7 @@ export function HistoryDialog({
     customUntil,
     sort,
     refreshToken,
+    limit,
   ]);
 
   const displaySql = (record: HistoryRecord) =>
@@ -327,7 +329,7 @@ export function HistoryDialog({
         <header className="modal-header">
           <div>
             <h2 id="history-title">查询历史</h2>
-            <p>点击记录插入到编辑器光标处；最多展示最近 200 条。Ctrl+E 可随时打开。</p>
+            <p>点击记录插入到编辑器光标处；当前最多展示 {limit} 条，可按 200 条加载更多。Ctrl+E 可随时打开。</p>
           </div>
           <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
             <Icon name="close" />
@@ -587,6 +589,16 @@ export function HistoryDialog({
             关闭
           </button>
           <span className="spacer" />
+          {records.length >= limit && limit < 1000 && (
+            <button
+              type="button"
+              className="btn"
+              disabled={loading}
+              onClick={() => setLimit((value) => Math.min(1000, value + 200))}
+            >
+              加载更多
+            </button>
+          )}
           <button type="button" className="btn" onClick={reload} disabled={loading}>
             刷新
           </button>

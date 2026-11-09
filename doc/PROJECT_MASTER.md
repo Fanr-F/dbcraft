@@ -1176,7 +1176,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid` | §5、§3.4.5 | P1 | 🟡 |
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出 | §3.6.4 | P2 | ❌ |
 | K-04 | 编辑器：版本感知补全、类型提示、光标所在语句执行、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、最近文件/另存为/拖入、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
-| K-05 | 历史：列表分页/加载更多（当前固定 200，`HistoryDialog.tsx:175`）、`.sql`/`.csv` 导出、复杂形式的敏感字段脱敏 | §3.4.3 | P1/P2 | 🟡 |
+| K-05 | 历史：`.sql`/`.csv` 导出、复杂形式的敏感字段脱敏 | §3.4.3 | P1/P2 | 🟡 |
 | K-06 | Agent：运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
 | K-07 | 设置：跟随系统主题、字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
 | K-08 | 连接：SQLite 文件拖入、认证插件字段、独立「只读连接」标记、Percona 真实实例回归、全量错误码 | §3.4.1 | P2 | 🟡 |
@@ -1485,6 +1485,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-45 M06-10 CSV 导出选项**：诉求是支持 CSV 分隔符、表头开关和 NULL `\N` 标记。变更：`toCsv` 增加 `CsvOptions`（delimiter/header/nullMarker），按分隔符正确引用；导出弹窗增加逗号/分号/Tab、包含表头、NULL 空字段/`\N` 选项；`test-export` 增加选项用例。涉及 `src/shared/export/formats.ts`、`src/renderer/src/components/ExportDialog.tsx`、`scripts/test-export.mjs`。验证：`npm run typecheck`、`npm run test:export`、`npm run build` 通过。遗留：CSV 公式注入防护仍未做；未真机点击。
 - **W-20261109-46 M08-08 Agent 30 秒自动刷新**：诉求是作业树与详情页定期刷新。变更：`Sidebar` 在作业树展开时每 30 秒调用 `onLoadAgentJobs`（用 ref 避免定时器被频繁重建）；`AgentJobDetailView` 每 30 秒重新加载当前作业详情。涉及 `src/renderer/src/components/Sidebar.tsx`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用真实 MSSQL Agent 观察 30 秒刷新。遗留：自动刷新未做开关；作业树无显式手动刷新按钮的问题仍在（M08-02）。
 - **W-20261109-47 M08-02 Agent 手动刷新**：诉求是补上作业列表/详情的手动刷新入口。变更：对象树顶部刷新按钮在 MSSQL 连接下同时调用 `loadAgentJobs`；作业详情工具栏增加「刷新」按钮。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL Agent 上点击。遗留：作业行本身仍没有独立刷新按钮；UI 清单只标「进行中」。
+- **W-20261109-48 M03-10 历史加载更多**：诉求是历史列表支持分页/加载更多。变更：`HistoryDialog` 增加 `limit` 状态（默认 200），查询带上 limit；底部在满页且未到 1000 时显示「加载更多」，每次 +200；说明文案显示当前上限。涉及 `src/renderer/src/components/HistoryDialog.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击。遗留：仍是「增大 limit 重查」，不是真正的 offset 分页；超过 1000 条无法继续加载。
 
 ---
 
