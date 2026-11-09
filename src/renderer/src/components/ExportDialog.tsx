@@ -55,6 +55,9 @@ export function ExportDialog({
 }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>('csv');
   const [tableName, setTableName] = useState('export_data');
+  const [csvDelimiter, setCsvDelimiter] = useState(',');
+  const [csvHeader, setCsvHeader] = useState(true);
+  const [csvNullMarker, setCsvNullMarker] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [exportColumns, setExportColumns] = useState(columns);
@@ -107,7 +110,11 @@ export function ExportDialog({
 
     let content: string;
     if (format === 'csv') {
-      content = toCsv(exportColumns, exportRows);
+      content = toCsv(exportColumns, exportRows, {
+        delimiter: csvDelimiter,
+        header: csvHeader,
+        nullMarker: csvNullMarker,
+      });
     } else if (format === 'json') {
       content = toJson(exportColumns, exportRows);
     } else {
@@ -189,6 +196,43 @@ export function ExportDialog({
               ))}
             </div>
           </div>
+
+          {format === 'csv' && (
+            <div className="field">
+              <span>CSV 选项</span>
+              <div className="export-formats">
+                <label className="check">
+                  分隔符
+                  <select
+                    value={csvDelimiter}
+                    onChange={(event) => setCsvDelimiter(event.target.value)}
+                  >
+                    <option value=",">逗号</option>
+                    <option value=";">分号</option>
+                    <option value={'\t'}>Tab</option>
+                  </select>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={csvHeader}
+                    onChange={(event) => setCsvHeader(event.target.checked)}
+                  />
+                  包含表头
+                </label>
+                <label className="check">
+                  NULL 标记
+                  <select
+                    value={csvNullMarker}
+                    onChange={(event) => setCsvNullMarker(event.target.value)}
+                  >
+                    <option value="">空字段</option>
+                    <option value="\\N">\N</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
 
           {format === 'sql' && (
             <label className="field">

@@ -29,6 +29,16 @@ assert(csv.endsWith('\r\n'), 'CSV should end with CRLF');
 const csvEmpty = toCsv(columns, []);
 assert(csvEmpty === '\uFEFFid,name,note\r\n', 'empty CSV should keep header');
 
+const csvOptions = toCsv(columns, [[1, null, 'a;b']], {
+  delimiter: ';',
+  header: false,
+  nullMarker: '\\N',
+});
+assert(csvOptions === '\uFEFF1;\\N;"a;b"\r\n', `CSV options wrong:\n${csvOptions}`);
+
+const csvNoHeaderNoRows = toCsv(columns, [], { header: false });
+assert(csvNoHeaderNoRows === '\uFEFF', 'headerless empty CSV should only have BOM');
+
 const json = toJson(columns, rows);
 const parsed = JSON.parse(json);
 assert(parsed.length === 2, 'JSON row count wrong');

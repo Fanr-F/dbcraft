@@ -3,25 +3,49 @@ import { quoteIdent } from '../dialect/identifiers.ts';
 
 const BOM = '\uFEFF';
 
-function csvCell(value: QueryCell): string {
-  if (value === null) return '';
-  const text = String(value);
-  if (/[",\r\n]/.test(text)) {
+export interface CsvOptions {
+  /** 默认逗号；可选 `;`、Tab 等。 */
+  delimiter?: string;
+  /** 是否输出表头，默认 true。 */
+  header?: boolean;
+  /** NULL 的输出文本；默认空字符串，可选 `\\N`。 */
+  nullMarker?: string;
+}
+
+function csvCell(value: QueryCell, delimiter: string): string {
+  const text = value === null ? '' : String(value);
+  if (text.includes(delimiter) || /["\r\n]/.test(text)) {
     return `"${text.replace(/"/g, '""')}"`;
   }
   return text;
 }
 
-/** CSV：UTF-8 BOM、逗号分隔、CRLF、双引号转义；NULL 输出为空字段。 */
-export function toCsv(columns: QueryColumn[], rows: QueryCell[][]): string {
+/** CSV：UTF-8 BOM、默认逗号分隔、CRLF、双引号转义；NULL 默认输出空字段。 */
+export function toCsv(
+  columns: QueryColumn[],
+  rows: QueryCell[][],
+  options: CsvOptions = {},
+): string {
+  const delimiter = options.delimiter ?? ',';
+  const header = options.header !== false;
+  const nullMarker = options.nullMarker ?? '';
   const lines: string[] = [];
-  lines.push(columns.map((column) => csvCell(column.name)).join(','));
-
-  for (const row of rows) {
-    lines.push(columns.map((_, index) => csvCell(row[index] ?? null)).join(','));
+  if (header) {
+    lines.push(columns.map((column) => csvCell(column.name, delimiter)).join(delimiter));
   }
 
-  return `${BOM}${lines.join('\r\n')}\r\n`;
+  for (const row of rows) {
+    lines.push(
+      columns
+        .map((_, index) => {
+          const value = row[index] ?? null;
+          return csvCell(value === null ? nullMarker : value, delimiter);
+        })
+        .join(delimiter),
+    );
+  }
+
+  return `${BOM}${lines.join('\r\n')}${lines.length > 0 ? '\r\n' : ''}`;
 }
 
 /** JSON：列名做键，保留 `null` 与空串的区别。 */
