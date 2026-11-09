@@ -170,6 +170,9 @@ export function ExportDialog({
         </header>
 
         <div className="modal-body">
+          <p className="form-note export-sensitive-note">
+            导出文件将包含完整查询结果；如包含密码、令牌或个人数据，请妥善保管并在必要时脱敏。
+          </p>
           <div className="field">
             <span>格式</span>
             <div className="export-formats">
