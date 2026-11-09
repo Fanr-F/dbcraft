@@ -18,6 +18,7 @@ import type {
   StatsGetResult,
 } from '../../shared/ipc-contract';
 import { normalizeAppSettings } from '../../shared/settings';
+import { serverDisplayName, serverKey } from '../../shared/server-identity';
 import { createLogger } from '../logging/logger';
 import {
   HISTORY_SCHEMA,
@@ -38,6 +39,9 @@ interface ConnectionRow {
   secret: Buffer | null;
   created_at: string;
   updated_at: string;
+  last_opened_at?: string | null;
+  server_id?: string | null;
+  server_name?: string | null;
 }
 
 let database: Database.Database | null = null;
@@ -57,7 +61,16 @@ const SCHEMA = `
     secret BLOB,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    last_opened_at TEXT
+    last_opened_at TEXT,
+    server_id TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS servers (
+    id TEXT PRIMARY KEY,
+    server_key TEXT NOT NULL UNIQUE,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -75,6 +88,66 @@ function ensureLastOpenedColumn(db: Database.Database): void {
   }
 }
 
+/** v5：服务器实体。旧连接按 host/port/instance/文件路径回填 server_id。 */
+function ensureServerColumn(db: Database.Database): void {
+  const columns = db.prepare('PRAGMA table_info(connections)').all() as Array<{
+    name: string;
+  }>;
+  if (!columns.some((column) => column.name === 'server_id')) {
+    db.exec('ALTER TABLE connections ADD COLUMN server_id TEXT');
+  }
+
+  const rows = db
+    .prepare('SELECT id, config_json FROM connections WHERE server_id IS NULL')
+    .all() as Array<{ id: string; config_json: string }>;
+  for (const row of rows) {
+    let input: ConnectionInput;
+    try {
+      input = JSON.parse(row.config_json) as ConnectionInput;
+    } catch {
+      continue;
+    }
+    const key = serverKey(input);
+    const name = serverDisplayName(input);
+    const now = new Date().toISOString();
+    const existing = db
+      .prepare('SELECT id FROM servers WHERE server_key = ?')
+      .get(key) as { id: string } | undefined;
+    const serverId = existing?.id ?? randomUUID();
+    if (!existing) {
+      db.prepare(
+        'INSERT INTO servers (id, server_key, type, name, created_at) VALUES (?, ?, ?, ?, ?)',
+      ).run(serverId, key, input.type, name, now);
+    }
+    db.prepare('UPDATE connections SET server_id = ? WHERE id = ?').run(serverId, row.id);
+  }
+}
+
+/** 查找或创建服务器，返回 server id。 */
+function ensureServer(
+  db: Database.Database,
+  input: ConnectionInput,
+): string {
+  const key = serverKey(input);
+  const name = serverDisplayName(input);
+  const existing = db
+    .prepare('SELECT id FROM servers WHERE server_key = ?')
+    .get(key) as { id: string } | undefined;
+  if (existing) {
+    db.prepare('UPDATE servers SET type = ?, name = ? WHERE id = ?').run(
+      input.type,
+      name,
+      existing.id,
+    );
+    return existing.id;
+  }
+  const id = randomUUID();
+  db.prepare(
+    'INSERT INTO servers (id, server_key, type, name, created_at) VALUES (?, ?, ?, ?, ?)',
+  ).run(id, key, input.type, name, new Date().toISOString());
+  return id;
+}
+
 /**
  * 打开本地元数据库。位置固定在 `<userData>/dbcraft-meta.db`，
  * 与用户自己的 SQLite 连接文件分开，避免被对象树/查询误操作。
@@ -90,11 +163,12 @@ export function openMetadataDatabase(): void {
     opened.pragma('busy_timeout = 3000');
     opened.exec(SCHEMA);
     ensureLastOpenedColumn(opened);
+    ensureServerColumn(opened);
     opened.exec(HISTORY_SCHEMA);
     if (!ensureHistoryFts(opened)) {
       log.warn('FTS5 trigram 不可用，历史搜索将回退 LIKE');
     }
-    opened.pragma('user_version = 4');
+    opened.pragma('user_version = 5');
     database = opened;
     openError = null;
     log.info('元数据库已打开', { file });
@@ -220,6 +294,7 @@ export function flushQueryHistoryWrites(): void {
     const entry = pendingHistory.shift()!;
     try {
       recordHistory(requireDatabase(), entry, {
+        dedupe: currentSettings().historyDedupe,
         retentionLimit: historyRetentionLimit(),
       });
     } catch (error) {
@@ -377,6 +452,8 @@ function toRecord(row: ConnectionRow, config: ConnectionInput): ConnectionRecord
     passwordStored: row.secret !== null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.server_id ? { serverId: row.server_id } : {}),
+    ...(row.server_name ? { serverName: row.server_name } : {}),
   };
 }
 
@@ -384,7 +461,11 @@ export function listConnections(): ConnectionListResult {
   try {
     const rows = requireDatabase()
       .prepare(
-        'SELECT id, config_json, secret, created_at, updated_at FROM connections ORDER BY COALESCE(last_opened_at, updated_at) DESC',
+        `SELECT c.id, c.config_json, c.secret, c.created_at, c.updated_at,
+                c.last_opened_at, c.server_id, s.name AS server_name
+         FROM connections c
+         LEFT JOIN servers s ON s.id = c.server_id
+         ORDER BY COALESCE(c.last_opened_at, c.updated_at) DESC`,
       )
       .all() as ConnectionRow[];
 
@@ -426,10 +507,12 @@ export function saveConnection(input: ConnectionInput, id?: string): ConnectionS
     }
 
     const config = stripPassword(input);
+    const serverId = ensureServer(db, input);
+    const serverName = serverDisplayName(input);
 
     db.prepare(
-      `INSERT INTO connections (id, name, type, group_name, env, config_json, secret, created_at, updated_at, last_opened_at)
-       VALUES (@id, @name, @type, @group, @env, @config, @secret, @createdAt, @updatedAt, @lastOpenedAt)
+      `INSERT INTO connections (id, name, type, group_name, env, config_json, secret, created_at, updated_at, last_opened_at, server_id)
+       VALUES (@id, @name, @type, @group, @env, @config, @secret, @createdAt, @updatedAt, @lastOpenedAt, @serverId)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          type = excluded.type,
@@ -437,7 +520,8 @@ export function saveConnection(input: ConnectionInput, id?: string): ConnectionS
          env = excluded.env,
          config_json = excluded.config_json,
          secret = excluded.secret,
-         updated_at = excluded.updated_at`,
+         updated_at = excluded.updated_at,
+         server_id = excluded.server_id`,
     ).run({
       id: connectionId,
       name: input.name,
@@ -449,6 +533,7 @@ export function saveConnection(input: ConnectionInput, id?: string): ConnectionS
       createdAt,
       updatedAt: now,
       lastOpenedAt: now,
+      serverId,
     });
 
     log.info(existing ? '连接已更新' : '连接已保存', {
@@ -465,6 +550,8 @@ export function saveConnection(input: ConnectionInput, id?: string): ConnectionS
         passwordStored: secret !== null,
         createdAt,
         updatedAt: now,
+        serverId,
+        serverName,
       },
       ...(warning ? { warning } : {}),
     };
@@ -475,7 +562,11 @@ export function saveConnection(input: ConnectionInput, id?: string): ConnectionS
 
 export function removeConnection(id: string): { ok: true } | { ok: false; message: string } {
   try {
-    const info = requireDatabase().prepare('DELETE FROM connections WHERE id = ?').run(id);
+    const db = requireDatabase();
+    const info = db.prepare('DELETE FROM connections WHERE id = ?').run(id);
+    db.prepare(
+      'DELETE FROM servers WHERE id NOT IN (SELECT server_id FROM connections WHERE server_id IS NOT NULL)',
+    ).run();
     log.info('连接已删除', { id, removed: info.changes });
     return { ok: true };
   } catch (error) {
@@ -485,7 +576,9 @@ export function removeConnection(id: string): { ok: true } | { ok: false; messag
 
 export function removeAllConnections(): ConnectionRemoveAllResult {
   try {
-    const info = requireDatabase().prepare('DELETE FROM connections').run();
+    const db = requireDatabase();
+    const info = db.prepare('DELETE FROM connections').run();
+    db.prepare('DELETE FROM servers').run();
     log.info('已删除全部连接', { removed: info.changes });
     return { ok: true, removed: info.changes };
   } catch (error) {

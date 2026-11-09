@@ -4,7 +4,10 @@
  * 运行：npm run test:sqlite-rebuild
  */
 import Database from 'better-sqlite3';
-import { buildSqliteRebuild } from '../src/shared/dialect/sqlite-rebuild.ts';
+import {
+  buildSqliteRebuild,
+  buildSqliteRebuildTable,
+} from '../src/shared/dialect/sqlite-rebuild.ts';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -103,6 +106,63 @@ compositeDb.close();
 
 const missing = buildSqliteRebuild(detail, { name: 'nope', type: 'TEXT', notNull: false });
 assert(!missing.ok, 'missing column should be rejected');
+
+// 整表重建：重命名表/列、加列、删列，并保留显式索引。
+const fullDetail = {
+  ...detail,
+  comment: null,
+  foreignKeys: [],
+  checks: [],
+};
+const fullRebuild = buildSqliteRebuildTable(
+  fullDetail,
+  [
+    { name: 'id', type: 'INTEGER', primaryKey: true, notNull: true, originalName: 'id' },
+    { name: 'full_name', type: 'TEXT', originalName: 'name' },
+    {
+      name: 'status',
+      type: 'TEXT',
+      notNull: true,
+      defaultValue: "'active'",
+    },
+  ],
+  'users_new',
+);
+assert(fullRebuild.ok, `table rebuild failed: ${fullRebuild.ok ? '' : fullRebuild.message}`);
+assert(
+  fullRebuild.ok && fullRebuild.statements[0].includes('"__dbcraft_rebuild_users_new"'),
+  'table rebuild temp name wrong',
+);
+assert(
+  fullRebuild.ok &&
+    fullRebuild.statements[1].includes('("id", "full_name") SELECT "id", "name"'),
+  'table rebuild copy mapping wrong',
+);
+assert(
+  fullRebuild.ok && fullRebuild.statements.some((sql) => sql.includes('CREATE UNIQUE INDEX "idx_users_name"')),
+  'table rebuild index not recreated',
+);
+
+const fullDb = new Database(':memory:');
+fullDb.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, note TEXT DEFAULT 'x')");
+fullDb.exec('CREATE UNIQUE INDEX idx_users_name ON users(name)');
+fullDb.prepare('INSERT INTO users (id, name) VALUES (?, ?), (?, ?)').run(1, 'alice', 2, 'bob');
+fullDb.exec('BEGIN');
+for (const sql of fullRebuild.ok ? fullRebuild.statements : []) fullDb.exec(sql);
+fullDb.exec('COMMIT');
+const fullRows = fullDb.prepare('SELECT id, full_name, status FROM users_new ORDER BY id').all();
+assert(fullRows.length === 2 && fullRows[0].full_name === 'alice', 'table rebuild data lost');
+assert(fullRows[0].status === 'active', 'added column default not applied');
+const fullIndexes = fullDb.prepare('PRAGMA index_list(users_new)').all();
+assert(
+  fullIndexes.some((index) => index.name === 'idx_users_name'),
+  'table rebuild lost index',
+);
+assert(
+  fullDb.prepare('PRAGMA index_info(idx_users_name)').all()[0].name === 'full_name',
+  'index column not remapped after rename',
+);
+fullDb.close();
 
 // 真实 SQLite 回放：数据、索引与新列定义都要保留。
 const database = new Database(':memory:');

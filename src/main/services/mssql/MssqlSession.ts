@@ -18,7 +18,7 @@ import type {
   TableMeta,
   TableTriggerInfo,
 } from '../../../shared/ipc-contract';
-import { normalizeRowLimit } from '../../../shared/settings.ts';
+import { resolveRowLimit } from '../../../shared/settings.ts';
 import { normalizeMssqlAddress } from '../../../shared/mssql-address.ts';
 import type { DatabaseSession } from '../DatabaseSession';
 import { formatMssqlCell } from './values.ts';
@@ -221,7 +221,7 @@ export class MssqlSession implements DatabaseSession {
 
   async query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult> {
     const startedAt = Date.now();
-    const rowLimit = normalizeRowLimit(maxRows, MAX_ROWS);
+    const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     const result = await this.run(sql, params ?? [], rowLimit);
     const hasColumns = result.columns.length > 0;
     const formatRow = (row: RawCell[]): QueryCell[] =>
@@ -292,9 +292,11 @@ export class MssqlSession implements DatabaseSession {
     return result.rows.map((row) => {
       // sys.objects.type 是 char(2)，会带尾部空格。
       const type = asString(row[2]?.value).trim();
+      const schema = asString(row[0]?.value);
       return {
-        name: qualifiedName(asString(row[0]?.value), asString(row[1]?.value)),
+        name: qualifiedName(schema, asString(row[1]?.value)),
         type: type === 'V' ? ('view' as const) : type === 'U' ? ('table' as const) : ('procedure' as const),
+        schema,
       };
     });
   }

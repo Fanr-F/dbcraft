@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import type {
   DatabaseType,
   HistoryRecord,
@@ -13,9 +14,12 @@ import { Icon } from './Icon';
 
 interface HistoryDialogProps {
   connections: SavedConnection[];
+  /** 设置里的脱敏默认值；用户仍可在面板内临时切换。 */
+  defaultMasked: boolean;
   onClose: () => void;
   onInsert: (sql: string) => void;
-  onRun: (sql: string) => void;
+  /** 再次执行：由外层决定回到原连接/原库，原连接不存在时退化为插入。 */
+  onRun: (record: HistoryRecord) => void;
 }
 
 const STATUS_LABELS: Record<QueryStatus, string> = {
@@ -42,14 +46,72 @@ function firstLine(sql: string): string {
   return line.length > 120 ? `${line.slice(0, 120)}…` : line;
 }
 
-export function HistoryDialog({ connections, onClose, onInsert, onRun }: HistoryDialogProps) {
+/** 命中在后续行时截取命中附近片段，避免高亮只存在于首行而看不到。 */
+function snippetFor(sql: string, query: string): string {
+  const needle = query.trim();
+  if (!needle) return firstLine(sql);
+  const index = sql.toLowerCase().indexOf(needle.toLowerCase());
+  if (index < 0) return firstLine(sql);
+
+  const start = Math.max(0, index - 40);
+  const end = Math.min(sql.length, index + needle.length + 80);
+  const fragment = sql.slice(start, end).replace(/\s+/g, ' ');
+  return `${start > 0 ? '…' : ''}${fragment}${end < sql.length ? '…' : ''}`;
+}
+
+/** 把输入框里的本地时间转成 ISO；空值/非法值返回 undefined。 */
+function toIso(value: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+/** 搜索结果高亮：大小写不敏感，按字面量匹配，不解析正则。 */
+function highlightMatch(text: string, query: string): ReactNode {
+  const needle = query.trim();
+  if (!needle) return text;
+  const lowerText = text.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+
+  while (cursor < text.length) {
+    const index = lowerText.indexOf(lowerNeedle, cursor);
+    if (index < 0) {
+      nodes.push(text.slice(cursor));
+      break;
+    }
+    if (index > cursor) nodes.push(text.slice(cursor, index));
+    nodes.push(
+      <mark key={`match-${key++}`} className="history-match">
+        {text.slice(index, index + needle.length)}
+      </mark>,
+    );
+    cursor = index + needle.length;
+  }
+
+  return nodes.length > 0 ? nodes : text;
+}
+
+type TimeRange = 'all' | 'today' | '1' | '7' | '30' | 'custom';
+
+export function HistoryDialog({
+  connections,
+  defaultMasked,
+  onClose,
+  onInsert,
+  onRun,
+}: HistoryDialogProps) {
   const [query, setQuery] = useState('');
   const [dialect, setDialect] = useState<DatabaseType | ''>('');
   const [status, setStatus] = useState<QueryStatus | ''>('');
   const [source, setSource] = useState<QuerySource | ''>('');
   const [connectionId, setConnectionId] = useState('');
   const [databaseQuery, setDatabaseQuery] = useState('');
-  const [timeRange, setTimeRange] = useState<'all' | '1' | '7' | '30'>('all');
+  const [timeRange, setTimeRange] = useState<TimeRange>('all');
+  const [customSince, setCustomSince] = useState('');
+  const [customUntil, setCustomUntil] = useState('');
   const [sort, setSort] = useState<'time-desc' | 'time-asc' | 'duration-desc' | 'duration-asc'>(
     'time-desc',
   );
@@ -57,8 +119,16 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [detail, setDetail] = useState<HistoryRecord | null>(null);
-  const [masked, setMasked] = useState(false);
+  const [masked, setMasked] = useState(defaultMasked);
+
+  const knownConnectionIds = useMemo(
+    () => new Set(connections.map((connection) => connection.id)),
+    [connections],
+  );
+  const isDeletedConnection = (record: HistoryRecord) =>
+    record.connectionId.length > 0 && !knownConnectionIds.has(record.connectionId);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -79,10 +149,17 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
 
       setLoading(true);
       const [sortBy, sortDir] = sort.split('-') as ['time' | 'duration', 'asc' | 'desc'];
-      const since =
-        timeRange === 'all'
-          ? undefined
-          : new Date(Date.now() - Number(timeRange) * 86_400_000).toISOString();
+      let since: string | undefined;
+      if (timeRange === 'today') {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        since = startOfDay.toISOString();
+      } else if (timeRange === 'custom') {
+        since = toIso(customSince);
+      } else if (timeRange !== 'all') {
+        since = new Date(Date.now() - Number(timeRange) * 86_400_000).toISOString();
+      }
+      const until = timeRange === 'custom' ? toIso(customUntil) : undefined;
       api.history
         .list({
           query,
@@ -92,6 +169,7 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
           ...(connectionId ? { connectionId } : {}),
           ...(databaseQuery.trim() ? { databaseName: databaseQuery.trim() } : {}),
           ...(since ? { since } : {}),
+          ...(until ? { until } : {}),
           sortBy,
           sortDir,
           limit: 200,
@@ -119,7 +197,19 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, dialect, status, source, connectionId, databaseQuery, timeRange, sort, refreshToken]);
+  }, [
+    query,
+    dialect,
+    status,
+    source,
+    connectionId,
+    databaseQuery,
+    timeRange,
+    customSince,
+    customUntil,
+    sort,
+    refreshToken,
+  ]);
 
   const displaySql = (record: HistoryRecord) =>
     masked ? maskSensitiveSql(record.sqlText) : record.sqlText;
@@ -173,6 +263,25 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
     setRecords((current) => current.filter((record) => record.id !== id));
   };
 
+  const copySql = async (record: HistoryRecord) => {
+    try {
+      await navigator.clipboard.writeText(record.sqlText);
+      setMessage('SQL 已复制到剪贴板。');
+    } catch {
+      setError('复制失败，请打开详情手动选择。');
+    }
+  };
+
+  const filterByConnection = (record: HistoryRecord) => {
+    if (!record.connectionId) {
+      setMessage('该记录没有连接信息，无法按连接筛选。');
+      return;
+    }
+    setConnectionId(record.connectionId);
+    const suffix = knownConnectionIds.has(record.connectionId) ? '' : '（连接已删除）';
+    setMessage(`已筛选连接：${record.connectionName || record.connectionId}${suffix}`);
+  };
+
   const clearAll = async () => {
     if (!window.confirm('清空全部查询历史？该操作不可撤销。')) return;
     const api = window.dbcraft;
@@ -189,6 +298,7 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
     if (!connectionId) return;
     const name =
       connections.find((connection) => connection.id === connectionId)?.input.name ??
+      records.find((record) => record.connectionId === connectionId)?.connectionName ??
       '当前连接';
     if (!window.confirm(`清空「${name}」的全部查询历史？该操作不可撤销。`)) return;
 
@@ -215,7 +325,7 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
         <header className="modal-header">
           <div>
             <h2 id="history-title">查询历史</h2>
-            <p>点击记录插入到当前编辑器；最多展示最近 200 条。</p>
+            <p>点击记录插入到编辑器光标处；最多展示最近 200 条。Ctrl+E 可随时打开。</p>
           </div>
           <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
             <Icon name="close" />
@@ -280,6 +390,13 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
               onChange={(event) => setConnectionId(event.target.value)}
             >
               <option value="">全部连接</option>
+              {connectionId && !knownConnectionIds.has(connectionId) && (
+                <option value={connectionId}>
+                  {records.find((record) => record.connectionId === connectionId)
+                    ?.connectionName || connectionId}
+                  （已删除）
+                </option>
+              )}
               {connections.map((connection) => (
                 <option key={connection.id} value={connection.id}>
                   {connection.input.name}
@@ -303,15 +420,33 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
             <select
               aria-label="时间范围"
               value={timeRange}
-              onChange={(event) =>
-                setTimeRange(event.target.value as 'all' | '1' | '7' | '30')
-              }
+              onChange={(event) => setTimeRange(event.target.value as TimeRange)}
             >
               <option value="all">全部时间</option>
+              <option value="today">今天</option>
               <option value="1">最近 1 天</option>
               <option value="7">最近 7 天</option>
               <option value="30">最近 30 天</option>
+              <option value="custom">自定义…</option>
             </select>
+
+            {timeRange === 'custom' && (
+              <div className="history-custom-range">
+                <input
+                  type="datetime-local"
+                  aria-label="开始时间"
+                  value={customSince}
+                  onChange={(event) => setCustomSince(event.target.value)}
+                />
+                <span>至</span>
+                <input
+                  type="datetime-local"
+                  aria-label="结束时间"
+                  value={customUntil}
+                  onChange={(event) => setCustomUntil(event.target.value)}
+                />
+              </div>
+            )}
 
             <input
               className="table-filter-input"
@@ -332,6 +467,7 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
           </div>
 
           {error && <div className="form-error">{error}</div>}
+          {message && <div className="form-note history-message">{message}</div>}
 
           {loading ? (
             <div className="history-empty">正在加载…</div>
@@ -357,7 +493,9 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
                   title={displaySql(record)}
                 >
                   <div className="history-main">
-                    <span className="history-sql">{firstLine(displaySql(record))}</span>
+                    <span className="history-sql">
+                      {highlightMatch(snippetFor(displaySql(record), query), query)}
+                    </span>
                     <span className="history-meta">
                       <span className={`badge status-${record.status}`}>
                         {STATUS_LABELS[record.status]}
@@ -368,8 +506,38 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
                       <span>{DATABASE_TYPE_LABELS[record.dialect] ?? record.dialect}</span>
                       <span>{SOURCE_LABELS[record.source]}</span>
                       {record.connectionName && <span>{record.connectionName}</span>}
+                      {isDeletedConnection(record) && (
+                        <span className="badge badge-warn" title={record.connectionName}>
+                          连接已删除
+                        </span>
+                      )}
                     </span>
                   </div>
+                  <button
+                    type="button"
+                    className="icon-btn history-delete"
+                    title="复制 SQL"
+                    aria-label="复制此条 SQL"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void copySql(record);
+                    }}
+                  >
+                    <Icon name="copy" size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn history-delete"
+                    title="仅看此连接"
+                    aria-label="仅看此连接的历史"
+                    disabled={!record.connectionId}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      filterByConnection(record);
+                    }}
+                  >
+                    <Icon name="filter" size={12} />
+                  </button>
                   <button
                     type="button"
                     className="icon-btn history-delete"
@@ -389,7 +557,7 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
                     aria-label="插入并执行此条历史"
                     onClick={(event) => {
                       event.stopPropagation();
-                      onRun(record.sqlText);
+                      onRun(record);
                     }}
                   >
                     <Icon name="play" size={12} />
@@ -448,14 +616,15 @@ export function HistoryDialog({ connections, onClose, onInsert, onRun }: History
         <HistoryDetailDialog
           record={detail}
           displaySql={displaySql(detail)}
+          connectionDeleted={isDeletedConnection(detail)}
           onClose={() => setDetail(null)}
           onInsert={(sql) => {
             setDetail(null);
             onInsert(sql);
           }}
-          onRun={(sql) => {
+          onRun={(record) => {
             setDetail(null);
-            onRun(sql);
+            onRun(record);
           }}
         />
       )}

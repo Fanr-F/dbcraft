@@ -28,6 +28,8 @@ const api: DBCraftApi = {
   },
   query: {
     execute: (request) => ipcRenderer.invoke(IPC_CHANNELS.queryExecute, request),
+    executeScript: (request) =>
+      ipcRenderer.invoke(IPC_CHANNELS.queryExecuteScript, request),
     cancel: (requestId: string) => ipcRenderer.invoke(IPC_CHANNELS.queryCancel, requestId),
   },
   schema: {

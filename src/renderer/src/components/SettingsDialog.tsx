@@ -30,6 +30,8 @@ export function SettingsDialog({
   const [queryTimeoutMs, setQueryTimeoutMs] = useState(settings.queryTimeoutMs);
   const [connectTimeoutMs, setConnectTimeoutMs] = useState(settings.connectTimeoutMs);
   const [historyEnabled, setHistoryEnabled] = useState(settings.historyEnabled);
+  const [historyDedupe, setHistoryDedupe] = useState(settings.historyDedupe);
+  const [historyMask, setHistoryMask] = useState(settings.historyMask);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState<string | null>(null);
@@ -144,6 +146,8 @@ export function SettingsDialog({
     setQueryTimeoutMs(DEFAULT_APP_SETTINGS.queryTimeoutMs);
     setConnectTimeoutMs(DEFAULT_APP_SETTINGS.connectTimeoutMs);
     setHistoryEnabled(DEFAULT_APP_SETTINGS.historyEnabled);
+    setHistoryDedupe(DEFAULT_APP_SETTINGS.historyDedupe);
+    setHistoryMask(DEFAULT_APP_SETTINGS.historyMask);
     setDiagnosticsMessage('已恢复默认值，点击「保存」后生效。');
   };
 
@@ -159,6 +163,8 @@ export function SettingsDialog({
         queryTimeoutMs,
         connectTimeoutMs,
         historyEnabled,
+        historyDedupe,
+        historyMask,
       });
       if (result.ok) {
         onClose();
@@ -228,7 +234,7 @@ export function SettingsDialog({
             >
               {RESULT_ROW_LIMIT_OPTIONS.map((option) => (
                 <option key={option} value={option}>
-                  {option} 行
+                  {option === 0 ? '不限制' : `${option} 行`}
                 </option>
               ))}
             </select>
@@ -237,6 +243,12 @@ export function SettingsDialog({
             超出上限时结果区只保留前 N 行并显示截断提示；导出只包含已加载的行。
             修改在下次执行查询时生效。
           </p>
+          {resultRowLimit === 0 && (
+            <p className="form-error">
+              「不限制」会加载全部结果；大结果集可能占用大量内存并导致界面卡顿，
+              建议配合 WHERE / LIMIT 使用。
+            </p>
+          )}
 
           <label className="field">
             <span>查询历史保留条数</span>
@@ -246,13 +258,14 @@ export function SettingsDialog({
             >
               {HISTORY_RETENTION_OPTIONS.map((option) => (
                 <option key={option} value={option}>
-                  {option} 条
+                  {option === 0 ? '不限制' : `${option} 条`}
                 </option>
               ))}
             </select>
           </label>
           <p className="form-note">
             超出保留条数后按最后执行时间淘汰；修改在下次写入历史时生效。
+            选择「不限制」后不会自动淘汰，超过 50,000 条时搜索可能变慢。
           </p>
 
           <label className="check">
@@ -265,6 +278,30 @@ export function SettingsDialog({
           </label>
           <p className="form-note">
             关闭后新执行的查询不再写入历史；已有记录保留，可随时在历史面板清理。
+          </p>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={historyDedupe}
+              onChange={(event) => setHistoryDedupe(event.target.checked)}
+            />
+            60 秒内相同 SQL 合并为一条
+          </label>
+          <p className="form-note">
+            开启后同连接同 SQL 在 60 秒内重复执行只保留一条并累计执行次数；关闭后每次都单独记录。
+          </p>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={historyMask}
+              onChange={(event) => setHistoryMask(event.target.checked)}
+            />
+            历史默认脱敏显示
+          </label>
+          <p className="form-note">
+            开启后列表与详情把 `password` / `token` 等赋值字面量显示为 `***`；搜索仍匹配原文。
           </p>
 
           <label className="field">
@@ -322,6 +359,10 @@ export function SettingsDialog({
                 <kbd>Ctrl</kbd> + <kbd>S</kbd>
               </span>
               <span>保存 SQL 文件</span>
+              <span>
+                <kbd>Ctrl</kbd> + <kbd>E</kbd>
+              </span>
+              <span>打开查询历史</span>
               <span>
                 <kbd>Esc</kbd>
               </span>
@@ -395,7 +436,9 @@ export function SettingsDialog({
                 historyRetention === settings.historyRetention &&
                 queryTimeoutMs === settings.queryTimeoutMs &&
                 connectTimeoutMs === settings.connectTimeoutMs &&
-                historyEnabled === settings.historyEnabled)
+                historyEnabled === settings.historyEnabled &&
+                historyDedupe === settings.historyDedupe &&
+                historyMask === settings.historyMask)
             }
             onClick={() => void save()}
           >

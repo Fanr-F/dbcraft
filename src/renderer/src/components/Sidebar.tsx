@@ -9,6 +9,7 @@ import type {
   TableExtras,
 } from '@shared/ipc-contract';
 import { agentRunStatusLabel } from '@shared/agent';
+import { serverDisplayName, serverKey, serverTypeLabel } from '@shared/server-identity';
 import type { SavedConnection, SessionStatus } from '../types';
 import { buildGroupTree, countGroup, type GroupNode } from '../utils/groups';
 import { ContextMenu } from './ContextMenu';
@@ -32,6 +33,35 @@ interface SidebarProps {
   showSystemObjects: boolean;
   systemObjectsSupported: boolean;
   sessionReadOnly: boolean;
+  /** 编辑/删除保存连接后收起该连接的对象树。 */
+  collapseSignal?: { connectionId: string; token: number } | null;
+  /** 独立 browse session：左侧对象树不再依赖当前 tab。 */
+  browseConnectionId: string | null;
+  browseSessionStatus: SessionStatus;
+  browseSchemaObjects: SchemaObject[];
+  browseDatabases: DatabaseInfo[];
+  browseObjectsByDatabase: Record<string, SchemaObject[]>;
+  browseCurrentDatabase: string | null;
+  browseDatabaseLoading: string | null;
+  browseTableExtras: Record<string, TableExtras>;
+  browseTableExtrasLoadingKey: string | null;
+  browseSchemaLoading: boolean;
+  browseShowSystemObjects: boolean;
+  onOpenBrowseConnection: (id: string) => void;
+  onCloseBrowseConnection: (id: string) => void;
+  onRefreshBrowse: () => void;
+  onToggleBrowseSystemObjects: (next: boolean) => void;
+  onSelectBrowseDatabase: (database: string) => void;
+  onLoadBrowseTableExtras: (database: string, table: string) => void;
+  onOpenTableInBrowse: (connectionId: string, name: string, database?: string) => void;
+  onOpenTableDataInBrowse: (
+    connectionId: string,
+    name: string,
+    kind: 'table' | 'view',
+    database?: string,
+  ) => void;
+  onOpenProcedureInBrowse: (connectionId: string, name: string, database?: string) => void;
+  onEnsureConnectionTab: (connectionId: string) => Promise<boolean> | boolean;
   onSelectConnection: (id: string) => void;
   onNewConnection: () => void;
   onRefreshSchema: () => void;
@@ -58,10 +88,11 @@ interface SidebarProps {
   onRenameColumn: (name: string, database?: string) => void;
   onModifyColumn: (name: string, database?: string) => void;
   onShowStructure: (name: string, database?: string) => void;
+  onEditStructure: (name: string, database?: string) => void;
   onCreateIndex: (name: string, database?: string) => void;
   onDropIndex: (name: string, database?: string) => void;
   onDropColumn: (name: string, database?: string) => void;
-  onNewTable: () => void;
+  onNewTable: (schema?: string) => void;
   onNewView: () => void;
   onRunScript: () => void;
   onGenerateDatabaseDdl: (connectionId: string) => void;
@@ -103,29 +134,36 @@ function searchText(connection: SavedConnection): string {
 export function Sidebar({
   connections,
   activeConnectionId,
-  activeConnection,
   connectionStates,
   activeSessionStatus,
   schemaObjects,
   databases,
   objectsByDatabase,
-  currentDatabase,
-  databaseLoading,
-  tableExtras,
-  tableExtrasLoadingKey,
-  schemaLoading,
-  showSystemObjects,
-  systemObjectsSupported,
   sessionReadOnly,
-  onSelectConnection,
+  collapseSignal,
+  browseConnectionId,
+  browseSessionStatus,
+  browseSchemaObjects,
+  browseDatabases,
+  browseObjectsByDatabase,
+  browseCurrentDatabase,
+  browseDatabaseLoading,
+  browseTableExtras,
+  browseTableExtrasLoadingKey,
+  browseSchemaLoading,
+  browseShowSystemObjects,
+  onOpenBrowseConnection,
+  onCloseBrowseConnection,
+  onRefreshBrowse,
+  onToggleBrowseSystemObjects,
+  onSelectBrowseDatabase,
+  onLoadBrowseTableExtras,
+  onOpenTableInBrowse,
+  onOpenTableDataInBrowse,
+  onOpenProcedureInBrowse,
+  onEnsureConnectionTab,
   onNewConnection,
-  onRefreshSchema,
-  onToggleSystemObjects,
-  onSelectDatabase,
-  onLoadTableExtras,
   onOpenTable,
-  onOpenTableData,
-  onOpenProcedure,
   onDeleteConnection,
   onEditConnection,
   onDuplicateConnection,
@@ -143,6 +181,7 @@ export function Sidebar({
   onRenameColumn,
   onModifyColumn,
   onShowStructure,
+  onEditStructure,
   onCreateIndex,
   onDropIndex,
   onDropColumn,
@@ -162,7 +201,15 @@ export function Sidebar({
   onOpenAgentJob,
 }: SidebarProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [collapsedServers, setCollapsedServers] = useState<Record<string, boolean>>({});
   const [expandedConnections, setExpandedConnections] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!collapseSignal) return;
+    setExpandedConnections((current) => ({
+      ...current,
+      [collapseSignal.connectionId]: false,
+    }));
+  }, [collapseSignal?.token]);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     tables: true,
     views: true,
@@ -203,6 +250,7 @@ export function Sidebar({
     name: string;
     kind: DdlObjectKind;
     database?: string;
+    schema?: string;
   } | null>(null);
 
   const normalizedQuery = treeQuery.trim().toLowerCase();
@@ -214,12 +262,20 @@ export function Sidebar({
         matchesName(object.name),
       ) ||
       (agentJobs ?? []).some((job) => matchesName(job.name)));
+  const browseObjectMatches =
+    normalizedQuery.length > 0 &&
+    (browseDatabases.some((database) => matchesName(database.name)) ||
+      [
+        ...Object.values(browseObjectsByDatabase).flat(),
+        ...browseSchemaObjects,
+      ].some((object) => matchesName(object.name)));
 
   const filteredConnections = normalizedQuery
     ? connections.filter(
         (connection) =>
           searchText(connection).includes(normalizedQuery) ||
-          (connection.id === activeConnectionId && activeObjectMatches),
+          (connection.id === activeConnectionId && activeObjectMatches) ||
+          (connection.id === browseConnectionId && browseObjectMatches),
       )
     : connections;
 
@@ -253,11 +309,12 @@ export function Sidebar({
   };
 
   const isConnectionExpanded = (connection: SavedConnection) =>
-    expandedConnections[connection.id] ?? connection.id === activeConnectionId;
+    expandedConnections[connection.id] ??
+    (connection.id === activeConnectionId || connection.id === browseConnectionId);
 
   const expandConnection = (connection: SavedConnection) => {
     setExpandedConnections((current) => ({ ...current, [connection.id]: true }));
-    onSelectConnection(connection.id);
+    onOpenBrowseConnection(connection.id);
   };
 
   const renderAgentSection = () => (
@@ -346,8 +403,12 @@ export function Sidebar({
 
   const renderConnection = (connection: SavedConnection) => {
     const active = connection.id === activeConnectionId;
+    const browsing = connection.id === browseConnectionId;
     const expanded = isConnectionExpanded(connection);
-    const state = connectionStates[connection.id] ?? 'closed';
+    const state = browsing ? browseSessionStatus : (connectionStates[connection.id] ?? 'closed');
+    const browseCanManage = browsing && connection.id === activeConnectionId;
+    const browseSystemSupported =
+      connection.input.type === 'sqlite' || connection.input.type === 'mssql';
     const stateLabel =
       state === 'ready'
         ? '已连接'
@@ -389,6 +450,7 @@ export function Sidebar({
               event.stopPropagation();
               if (expanded) {
                 setExpandedConnections((current) => ({ ...current, [connection.id]: false }));
+                onCloseBrowseConnection(connection.id);
               } else {
                 expandConnection(connection);
               }
@@ -402,9 +464,13 @@ export function Sidebar({
           </button>
           <button
             type="button"
-            className={`connection-item ${active ? 'is-active' : ''}`}
+            className={`connection-item ${active || browsing ? 'is-active' : ''}`}
             title="右键查看更多操作"
             onClick={() => expandConnection(connection)}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              expandConnection(connection);
+            }}
             onContextMenu={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -415,6 +481,7 @@ export function Sidebar({
             <span className="connection-meta">
               <span className="connection-name">{connection.input.name}</span>
               <span className="connection-sub">
+                {connection.serverName ? `${connection.serverName} · ` : ''}
                 {DATABASE_TYPE_LABELS[connection.input.type]} · {summarize(connection.input)}
               </span>
             </span>
@@ -441,56 +508,52 @@ export function Sidebar({
           </button>
         </div>
 
-        {active && expanded && activeSessionStatus !== 'ready' && (
+        {browsing && expanded && browseSessionStatus !== 'ready' && (
           <div className="connection-objects">
             <div className="tree-empty">
-              {activeSessionStatus === 'opening'
+              {browseSessionStatus === 'opening'
                 ? '正在连接…'
-                : activeSessionStatus === 'error'
+                : browseSessionStatus === 'error'
                   ? '连接失败'
                   : '未连接'}
             </div>
           </div>
         )}
 
-        {active && expanded && activeSessionStatus === 'ready' && (
+        {browsing && expanded && browseSessionStatus === 'ready' && (
           <div className="connection-objects">
             <div className="connection-object-actions">
               <button
                 type="button"
                 className="icon-btn"
-                title={
-                  activeConnection?.input.type === 'mssql'
-                    ? 'MSSQL 驱动尚未接入'
-                    : sessionReadOnly
-                      ? '当前为只读会话，无法建表'
-                      : '新建表'
-                }
-                onClick={onNewTable}
-                disabled={
-                  !activeConnection ||
-                  activeConnection.input.type === 'mssql' ||
-                  sessionReadOnly
-                }
+                title={sessionReadOnly ? '当前为只读会话，无法建表' : '新建表'}
+                onClick={() => {
+                  if (browseCanManage) {
+                    onNewTable();
+                  } else {
+                    void Promise.resolve(onEnsureConnectionTab(connection.id)).then((ok) => {
+                      if (ok) onNewTable();
+                    });
+                  }
+                }}
+                disabled={sessionReadOnly}
               >
                 <Icon name="plus" size={14} />
               </button>
               <button
                 type="button"
                 className="icon-btn"
-                title={
-                  activeConnection?.input.type === 'mssql'
-                    ? 'MSSQL 驱动尚未接入'
-                    : sessionReadOnly
-                      ? '当前为只读会话，无法建视图'
-                      : '新建视图'
-                }
-                onClick={onNewView}
-                disabled={
-                  !activeConnection ||
-                  activeConnection.input.type === 'mssql' ||
-                  sessionReadOnly
-                }
+                title={sessionReadOnly ? '当前为只读会话，无法建视图' : '新建视图'}
+                onClick={() => {
+                  if (browseCanManage) {
+                    onNewView();
+                  } else {
+                    void Promise.resolve(onEnsureConnectionTab(connection.id)).then((ok) => {
+                      if (ok) onNewView();
+                    });
+                  }
+                }}
+                disabled={sessionReadOnly}
               >
                 <Icon name="view" size={14} />
               </button>
@@ -498,10 +561,17 @@ export function Sidebar({
                 type="button"
                 className="icon-btn"
                 title="执行 SQL 脚本（多语句）"
-                onClick={onRunScript}
+                onClick={() => {
+                  if (browseCanManage) {
+                    onRunScript();
+                  } else {
+                    void Promise.resolve(onEnsureConnectionTab(connection.id)).then((ok) => {
+                      if (ok) onRunScript();
+                    });
+                  }
+                }}
                 disabled={
-                  !activeConnection ||
-                  activeConnection.input.type === 'mssql' ||
+                  connection.input.type === 'mssql' ||
                   sessionReadOnly
                 }
               >
@@ -511,58 +581,75 @@ export function Sidebar({
                 type="button"
                 className="icon-btn"
                 title="刷新对象"
-                onClick={onRefreshSchema}
-                disabled={!activeConnection || schemaLoading}
+                onClick={onRefreshBrowse}
+                disabled={browseSchemaLoading}
               >
                 <Icon name="refresh" size={14} />
               </button>
             </div>
 
             <label
-              className={`tree-row tree-toggle ${systemObjectsSupported ? '' : 'is-disabled'}`}
+              className={`tree-row tree-toggle ${browseSystemSupported ? '' : 'is-disabled'}`}
               title={
-                systemObjectsSupported
+                browseSystemSupported
                   ? '显示或隐藏数据库系统对象（如 sqlite_*、sys.*、master/msdb 系统表）'
                   : '当前连接类型没有可显示的系统对象'
               }
             >
               <input
                 type="checkbox"
-                checked={showSystemObjects}
-                disabled={!systemObjectsSupported || schemaLoading}
-                onChange={(event) => onToggleSystemObjects(event.target.checked)}
+                checked={browseShowSystemObjects}
+                disabled={!browseSystemSupported || browseSchemaLoading}
+                onChange={(event) => onToggleBrowseSystemObjects(event.target.checked)}
               />
               <span>显示系统对象</span>
             </label>
 
             <ObjectTree
-              dialect={activeConnection?.input.type ?? connection.input.type}
+              dialect={connection.input.type}
               query={treeQuery}
-              databases={databases}
-              currentDatabase={currentDatabase}
-              objectsByDatabase={objectsByDatabase}
-              schemaObjects={schemaObjects}
-              loadingDatabase={databaseLoading}
-              loading={schemaLoading}
-              tableExtras={tableExtras}
-              tableExtrasLoadingKey={tableExtrasLoadingKey}
-              onSelectDatabase={onSelectDatabase}
-              onLoadTableExtras={onLoadTableExtras}
-              onOpenTable={onOpenTable}
-              onOpenTableData={onOpenTableData}
-              onOpenProcedure={onOpenProcedure}
-              onTableContextMenu={(event, name, kind, database) => {
-                setObjectMenu({
-                  x: event.clientX,
-                  y: event.clientY,
-                  name,
-                  kind,
-                  ...(database ? { database } : {}),
+              databases={browseDatabases}
+              currentDatabase={browseCurrentDatabase}
+              objectsByDatabase={browseObjectsByDatabase}
+              schemaObjects={browseSchemaObjects}
+              loadingDatabase={browseDatabaseLoading}
+              loading={browseSchemaLoading}
+              tableExtras={browseTableExtras}
+              tableExtrasLoadingKey={browseTableExtrasLoadingKey}
+              onSelectDatabase={onSelectBrowseDatabase}
+              onLoadTableExtras={onLoadBrowseTableExtras}
+              onOpenTable={(name, database) =>
+                onOpenTableInBrowse(connection.id, name, database)
+              }
+              onOpenTableData={(name, kind, database) =>
+                onOpenTableDataInBrowse(connection.id, name, kind, database)
+              }
+              onOpenProcedure={(name, database) =>
+                onOpenProcedureInBrowse(connection.id, name, database)
+              }
+              onTableContextMenu={(event, name, kind, database, schema) => {
+                const position = { x: event.clientX, y: event.clientY };
+                const showMenu = () => {
+                  setObjectMenu({
+                    x: position.x,
+                    y: position.y,
+                    name,
+                    kind,
+                    ...(database ? { database } : {}),
+                    ...(schema ? { schema } : {}),
+                  });
+                };
+                if (browseCanManage) {
+                  showMenu();
+                  return;
+                }
+                void Promise.resolve(onEnsureConnectionTab(connection.id)).then((ok) => {
+                  if (ok) showMenu();
                 });
               }}
             />
 
-            {agentAvailable && renderAgentSection()}
+            {browseCanManage && agentAvailable && renderAgentSection()}
           </div>
         )}
       </div>
@@ -650,12 +737,74 @@ export function Sidebar({
         {renderGroupHeader(node, depth, true)}
         {!collapsed && (
           <>
-            {node.connections.map(renderConnection)}
+            {renderServerGroups(node.connections, depth + 1)}
             {node.children.map((child) => renderGroupNode(child, depth + 1))}
           </>
         )}
       </div>
     );
+  };
+
+  const renderServerGroups = (list: SavedConnection[], depth: number) => {
+    const groups = new Map<
+      string,
+      { key: string; name: string; type: string; connections: SavedConnection[] }
+    >();
+    for (const connection of list) {
+      const key = connection.serverId ?? serverKey(connection.input);
+      const existing = groups.get(key);
+      if (existing) {
+        existing.connections.push(connection);
+      } else {
+        groups.set(key, {
+          key,
+          name: connection.serverName ?? serverDisplayName(connection.input),
+          type: serverTypeLabel(connection.input),
+          connections: [connection],
+        });
+      }
+    }
+
+    return Array.from(groups.values()).map((server) => {
+      const collapsed = normalizedQuery.length === 0 && Boolean(collapsedServers[server.key]);
+      return (
+        <div className="connection-server" key={server.key}>
+          <div
+            className="connection-server-head"
+            style={{ paddingLeft: 8 + depth * 12 }}
+            role="button"
+            tabIndex={0}
+            aria-expanded={!collapsed}
+            title={`${server.type} · ${server.name}`}
+            onClick={() =>
+              setCollapsedServers((current) => ({
+                ...current,
+                [server.key]: !current[server.key],
+              }))
+            }
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setCollapsedServers((current) => ({
+                  ...current,
+                  [server.key]: !current[server.key],
+                }));
+              }
+            }}
+          >
+            <Icon
+              name="chevron"
+              size={11}
+              className={collapsed ? 'chevron collapsed' : 'chevron'}
+            />
+            <span className="connection-server-name">{server.name}</span>
+            <span className="connection-server-type">{server.type}</span>
+            <span className="tree-count">{server.connections.length}</span>
+          </div>
+          {!collapsed && server.connections.map((connection) => renderConnection(connection))}
+        </div>
+      );
+    });
   };
 
   return (
@@ -732,13 +881,13 @@ export function Sidebar({
                       <span className="tree-count">{tree.connections.length}</span>
                     </div>
                     {!(normalizedQuery.length === 0 && collapsedGroups['']) &&
-                      tree.connections.map(renderConnection)}
+                      renderServerGroups(tree.connections, 1)}
                   </div>
                 )}
                 {tree.children.map((child) => renderGroupNode(child, 0))}
               </>
             ) : (
-              filteredConnections.map(renderConnection)
+              renderServerGroups(filteredConnections, 0)
             )}
           </div>
         </>
@@ -763,8 +912,14 @@ export function Sidebar({
               onSelect: () => onDuplicateConnection(menu.connection.id),
             },
             {
-              label: '新建查询',
+              label: '查询',
               onSelect: () => onNewQueryForConnection(menu.connection.id),
+            },
+            {
+              label: '新建表…',
+              disabled:
+                menu.connection.id !== activeConnectionId || activeSessionStatus !== 'ready',
+              onSelect: () => onNewTable(),
             },
             {
               label: '生成库级 DDL',
@@ -849,7 +1004,15 @@ export function Sidebar({
             ...(objectMenu.kind === 'table'
               ? [
                   {
-                    label: '表结构…',
+                    label: '编辑表结构…',
+                    onSelect: () => onEditStructure(objectMenu.name, objectMenu.database),
+                  },
+                  {
+                    label: '新建表…',
+                    onSelect: () => onNewTable(objectMenu.schema),
+                  },
+                  {
+                    label: '查看表结构…',
                     onSelect: () => onShowStructure(objectMenu.name, objectMenu.database),
                   },
                   {
@@ -888,6 +1051,10 @@ export function Sidebar({
                   },
                 ]
               : [
+                  {
+                    label: '新建表…',
+                    onSelect: () => onNewTable(objectMenu.schema),
+                  },
                   {
                     label: '删除视图…',
                     danger: true,

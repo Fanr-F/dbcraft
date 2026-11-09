@@ -18,11 +18,11 @@ import type {
   TableMeta,
   TableTriggerInfo,
 } from '../../../shared/ipc-contract';
-import { quoteIdent } from '../../../shared/dialect/identifiers';
-import { parseTimeoutMs } from '../../../shared/timeouts';
-import { normalizeRowLimit } from '../../../shared/settings';
+import { quoteIdent } from '../../../shared/dialect/identifiers.ts';
+import { parseTimeoutMs } from '../../../shared/timeouts.ts';
+import { resolveRowLimit } from '../../../shared/settings.ts';
 import type { DatabaseSession } from '../DatabaseSession';
-import { encodeCell } from '../query-values';
+import { encodeCell } from '../query-values.ts';
 
 const MAX_ROWS = 2000;
 
@@ -138,7 +138,7 @@ export class MariaSession implements DatabaseSession {
     maxRows?: number,
   ): Promise<QueryResult> {
     const startedAt = Date.now();
-    const rowLimit = normalizeRowLimit(maxRows, MAX_ROWS);
+    const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     const stream = this.connection.queryStream({ sql, rowsAsArray: true }, params);
 
     return new Promise<QueryResult>((resolve, reject) => {
@@ -196,7 +196,7 @@ export class MariaSession implements DatabaseSession {
     maxRows?: number,
   ): Promise<QueryResult> {
     const startedAt = Date.now();
-    const rowLimit = normalizeRowLimit(maxRows, MAX_ROWS);
+    const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     const rows = await this.connection.query({ sql, rowsAsArray: true }, params);
 
     if (Array.isArray(rows)) {

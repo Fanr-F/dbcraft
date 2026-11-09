@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { HistoryRecord } from '@shared/ipc-contract';
 import { Icon } from './Icon';
 
@@ -5,9 +6,11 @@ interface HistoryDetailDialogProps {
   record: HistoryRecord;
   /** 脱敏后的 SQL；插入/执行仍使用原始 SQL。 */
   displaySql?: string;
+  /** 原连接已从本地连接列表删除。 */
+  connectionDeleted?: boolean;
   onClose: () => void;
   onInsert: (sql: string) => void;
-  onRun: (sql: string) => void;
+  onRun: (record: HistoryRecord) => void;
 }
 
 const STATUS_LABELS: Record<HistoryRecord['status'], string> = {
@@ -26,10 +29,23 @@ const SOURCE_LABELS: Record<HistoryRecord['source'], string> = {
 export function HistoryDetailDialog({
   record,
   displaySql,
+  connectionDeleted,
   onClose,
   onInsert,
   onRun,
 }: HistoryDetailDialogProps) {
+  const [copied, setCopied] = useState(false);
+
+  const copySql = async () => {
+    try {
+      await navigator.clipboard.writeText(record.sqlText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div
@@ -55,6 +71,7 @@ export function HistoryDetailDialog({
         <div className="modal-body">
           <div className="history-detail-meta">
             <span>连接：{record.connectionName || '—'}</span>
+            {connectionDeleted && <span className="badge badge-warn">连接已删除</span>}
             <span>数据库：{record.databaseName || '—'}</span>
             <span>方言：{record.dialect}</span>
             <span>执行次数：{record.execCount}</span>
@@ -75,13 +92,16 @@ export function HistoryDetailDialog({
             关闭
           </button>
           <span className="spacer" />
+          <button type="button" className="btn" onClick={() => void copySql()}>
+            {copied ? '已复制' : '复制 SQL'}
+          </button>
           <button type="button" className="btn" onClick={() => onInsert(record.sqlText)}>
             插入编辑器
           </button>
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => onRun(record.sqlText)}
+            onClick={() => onRun(record)}
           >
             插入并执行
           </button>

@@ -11,6 +11,9 @@ import type {
   QueryError,
   QueryRequest,
   QueryResponse,
+  QueryScriptRequest,
+  QueryScriptResponse,
+  QueryScriptStatement,
   SchemaGetOptions,
   SchemaGetResult,
   SchemaUseDatabaseResult,
@@ -427,6 +430,260 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
     if (timer) clearTimeout(timer);
     runningQueries.delete(request.requestId);
   }
+}
+
+/**
+ * 编辑器内多语句：按渲染层已分好的语句顺序执行，遇错停止。
+ * 每条语句独立记录历史；取消/超时也停在该语句。
+ */
+export async function executeQueryScript(
+  request: QueryScriptRequest,
+): Promise<QueryScriptResponse> {
+  const startedAt = Date.now();
+  if (runningQueries.has(request.requestId)) {
+    return {
+      ok: false,
+      error: {
+        message: '重复的查询请求 ID。',
+        code: 'DUPLICATE_REQUEST',
+        ...NOT_RETRYABLE,
+      },
+    };
+  }
+
+  const session = sessions.get(request.sessionId);
+  if (!session) {
+    return {
+      ok: false,
+      error: {
+        message: '会话未打开，请重新执行或切换标签页。',
+        code: 'NOT_CONNECTED',
+        ...NOT_RETRYABLE,
+      },
+    };
+  }
+  if (!session.alive) {
+    sessions.delete(request.sessionId);
+    return {
+      ok: false,
+      error: {
+        message: '会话已失效，请重新连接。',
+        code: 'NOT_CONNECTED',
+        ...NOT_RETRYABLE,
+        connectionClosed: true,
+      },
+    };
+  }
+
+  const entry: RunningQuery = {
+    sessionId: request.sessionId,
+    session,
+    canceled: false,
+    timedOut: false,
+  };
+  runningQueries.set(request.requestId, entry);
+  const timeoutMs =
+    request.timeoutMs !== undefined ? request.timeoutMs : resolveQueryTimeoutMs();
+  const statements: QueryScriptStatement[] = [];
+  let canceled = false;
+  let timedOut = false;
+
+  log.debug('开始执行 SQL 脚本', {
+    requestId: request.requestId,
+    sessionId: request.sessionId,
+    statementCount: request.statements.length,
+  });
+
+  try {
+    for (let index = 0; index < request.statements.length; index += 1) {
+      if (entry.canceled) {
+        canceled = true;
+        break;
+      }
+
+      const sql = request.statements[index]!;
+      const statementRequest = scriptStatementRequest(request, sql);
+      const statementStartedAt = Date.now();
+      const timer =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              entry.timedOut = true;
+              log.warn('脚本语句超时，请求取消', {
+                requestId: request.requestId,
+                index,
+                timeoutMs,
+              });
+              void session.cancel().catch(() => undefined);
+            }, timeoutMs)
+          : null;
+
+      try {
+        const result = await session.query(sql, undefined, request.maxRows);
+        if (timer) clearTimeout(timer);
+
+        if (entry.canceled) {
+          canceled = true;
+          recordCanceled(statementRequest, session, statementStartedAt);
+          statements.push({
+            index,
+            sql,
+            ok: false,
+            canceled: true,
+            elapsedMs: Date.now() - statementStartedAt,
+            error: canceledError(session),
+          });
+          break;
+        }
+        if (entry.timedOut) {
+          timedOut = true;
+          recordTimedOut(statementRequest, session, statementStartedAt, timeoutMs);
+          statements.push({
+            index,
+            sql,
+            ok: false,
+            timedOut: true,
+            elapsedMs: Date.now() - statementStartedAt,
+            error: timeoutError(session, timeoutMs),
+          });
+          break;
+        }
+
+        recordHistoryAsync({
+          ...historyBase(statementRequest, session),
+          status: 'success',
+          errorMessage: null,
+          durationMs: Date.now() - statementStartedAt,
+          affectedRows: result.statementType === 'change' ? result.changes : null,
+          returnedRows: result.statementType === 'select' ? result.rowCount : null,
+          executedAt: new Date().toISOString(),
+        });
+        statements.push({
+          index,
+          sql,
+          ok: true,
+          result,
+          elapsedMs: result.elapsedMs,
+        });
+      } catch (error) {
+        if (timer) clearTimeout(timer);
+
+        if (entry.canceled) {
+          canceled = true;
+          recordCanceled(statementRequest, session, statementStartedAt);
+          statements.push({
+            index,
+            sql,
+            ok: false,
+            canceled: true,
+            elapsedMs: Date.now() - statementStartedAt,
+            error: canceledError(session),
+          });
+          break;
+        }
+        if (entry.timedOut) {
+          timedOut = true;
+          recordTimedOut(statementRequest, session, statementStartedAt, timeoutMs);
+          statements.push({
+            index,
+            sql,
+            ok: false,
+            timedOut: true,
+            elapsedMs: Date.now() - statementStartedAt,
+            error: timeoutError(session, timeoutMs),
+          });
+          break;
+        }
+
+        const details = errorDetails(error);
+        log.warn('脚本语句失败', {
+          requestId: request.requestId,
+          index,
+          code: details.code,
+          sqlState: details.sqlState,
+          errno: details.errno,
+        });
+        recordHistoryAsync({
+          ...historyBase(statementRequest, session),
+          status: 'failed',
+          errorMessage: details.message.slice(0, 500),
+          durationMs: Date.now() - statementStartedAt,
+          affectedRows: null,
+          returnedRows: null,
+          executedAt: new Date().toISOString(),
+        });
+        if (!session.alive) {
+          sessions.delete(request.sessionId);
+        }
+        statements.push({
+          index,
+          sql,
+          ok: false,
+          elapsedMs: Date.now() - statementStartedAt,
+          error: session.alive ? details : { ...details, connectionClosed: true },
+        });
+        break;
+      }
+    }
+  } finally {
+    runningQueries.delete(request.requestId);
+  }
+
+  if ((canceled || timedOut) && session.cancelDisconnects) {
+    sessions.delete(request.sessionId);
+  }
+
+  log.info('SQL 脚本执行完成', {
+    requestId: request.requestId,
+    executed: statements.length,
+    total: request.statements.length,
+    canceled,
+    timedOut,
+    elapsedMs: Date.now() - startedAt,
+  });
+
+  return {
+    ok: true,
+    result: {
+      statements,
+      total: request.statements.length,
+      elapsedMs: Date.now() - startedAt,
+      canceled,
+      timedOut,
+    },
+  };
+}
+
+function scriptStatementRequest(request: QueryScriptRequest, sql: string): QueryRequest {
+  return {
+    requestId: request.requestId,
+    sessionId: request.sessionId,
+    sql,
+    maxRows: request.maxRows,
+    timeoutMs: request.timeoutMs,
+    connectionId: request.connectionId,
+    connectionName: request.connectionName,
+    dialect: request.dialect,
+    database: request.database,
+    source: request.source,
+  };
+}
+
+function canceledError(session: DatabaseSession): QueryError {
+  return {
+    message: '查询已取消。',
+    code: 'QUERY_CANCELED',
+    ...NOT_RETRYABLE,
+    connectionClosed: session.cancelDisconnects,
+  };
+}
+
+function timeoutError(session: DatabaseSession, timeoutMs: number): QueryError {
+  return {
+    message: timeoutMessage(timeoutMs),
+    code: 'QUERY_TIMEOUT',
+    ...NOT_RETRYABLE,
+    connectionClosed: session.cancelDisconnects,
+  };
 }
 
 function timeoutMessage(timeoutMs: number): string {

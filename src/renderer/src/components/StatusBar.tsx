@@ -12,6 +12,9 @@ const DIALECT_LABELS: Record<DatabaseType, string> = {
 interface StatusBarProps {
   activeConnection: SavedConnection | null;
   sessionRuntime: SessionRuntime | null;
+  sessionCount: number;
+  currentDatabase: string | null;
+  transactionActive: boolean;
   run: RunState;
   running: boolean;
   appInfo: AppInfo | null;
@@ -20,11 +23,17 @@ interface StatusBarProps {
 export function StatusBar({
   activeConnection,
   sessionRuntime,
+  sessionCount,
+  currentDatabase,
+  transactionActive,
   run,
   running,
   appInfo,
 }: StatusBarProps) {
   const online = sessionRuntime?.status === 'ready';
+  const scriptElapsed = run.statements
+    ? run.statements.reduce((total, statement) => total + statement.elapsedMs, 0)
+    : run.elapsedMs;
 
   return (
     <footer className="statusbar">
@@ -45,13 +54,24 @@ export function StatusBar({
           {DIALECT_LABELS[activeConnection.input.type]} {sessionRuntime.version ?? ''}
         </span>
       )}
-
+      {online && currentDatabase && <span>库 {currentDatabase}</span>}
+      {transactionActive && <span className="status-warn">事务中</span>}
       <span className="status-sep" />
-      <span>{running ? '执行中…' : run.error ? '执行失败' : run.executedAt ? `${run.rowCount} 行` : '—'}</span>
-      <span>{run.executedAt && !run.error ? `${run.elapsedMs} ms` : ''}</span>
+      <span>
+        {running
+          ? '执行中…'
+          : run.error
+            ? '执行失败'
+            : run.statements
+              ? `${run.statements.length} 条语句`
+              : run.executedAt
+                ? `${run.rowCount} 行`
+                : '—'}
+      </span>
+      <span>{run.executedAt && !run.error ? `${scriptElapsed} ms` : ''}</span>
       {run.truncated && <span className="status-warn">已截断</span>}
       <span className="status-sep" />
-      <span>标签会话</span>
+      <span>{sessionCount} 个会话</span>
 
       <span className="status-spacer" />
       <span>{appInfo ? `v${appInfo.version} · Electron ${appInfo.electron}` : 'DBCraft'}</span>

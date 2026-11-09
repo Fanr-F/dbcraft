@@ -2,7 +2,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 对应 PRD | `doc/PRD.md` v0.16 |
+| 对应 PRD | `doc/PRD.md` v0.20（本文仍按 v0.16 需求基线设计；多语句/多结果、库/Schema 补全、结果集「不限制」档位、服务器实体、标签管理、事务面板、类/对象 session 模型已落地，设计说明待回填；版本感知补全待补） |
+| 关联审计 | `doc/CONNECTION_TAB_MODEL.md`（连接/服务器/标签/会话模型） |
 | 文档版本 | v0.11（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
@@ -1041,6 +1042,9 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 | 多语句 | 按预期拒绝，提示一次只能执行一条 SQL |
 | 对象树 | 2 表 + 1 视图，点击填入 `SELECT * FROM "table" LIMIT 100;` |
 
+> 注：以下是 v0.7 的历史快照。编辑器多语句已由 W-20261109-22 的客户端分句 + `query:execute-script` 支持；
+> `query:execute` 单语句语义不变。
+
 关键结论：
 
 1. **better-sqlite3 13 的 N-API 预编译可直接用于 Electron 45**，原先“必须 `@electron/rebuild`”的假设不成立；仍需在打包产物中验证 `asarUnpack` 后的 Worker 路径。
@@ -1144,7 +1148,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 - 环境：同一 SQL Server 2016 SP2；测试前启动 SQL Server Agent（`Agent XPs` 自动为 1）。
 - 实现：`services/mssql/agent-queries.ts`（列表/详情/脚本/动作校验，纯逻辑）+ `agent.ts`（历史与 IPC 包装）；
   UI 入口为对象树 `SQL Server Agent → 作业`，展开后在树中列出作业，单击选中、双击打开详情页签
-  （按用户反馈，覆盖 PRD 的作业列表页签）；生命周期 SQL 复用 `shared/agent.ts` 的生成器。
+  （PRD v0.17 已同步为左侧树 + 详情页签）；生命周期 SQL 复用 `shared/agent.ts` 的生成器。
 - 脚本：`USE msdb` + `GO` + `sp_update_job` / `sp_update_jobstep` / `sp_update_schedule`，
   字符串按 `N'...''...'` 转义，共享计划警告，step/schedule 使用生成时 id 快照。
 - 验证脚本：`npm run check:mssql-agent`（创建 `dbcraft_agent_check` 临时作业后删除）。

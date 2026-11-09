@@ -3,6 +3,7 @@
  *
  * 运行：npm run test:ddl
  */
+import { buildTableDesign } from '../src/shared/dialect/table-diff.ts';
 import {
   buildAddColumn,
   buildCreateIndex,
@@ -102,17 +103,10 @@ const failures = [
     },
     '单列主键',
   ],
-  [
-    { name: 't', columns: [{ name: 'a', type: 'INT' }] },
-    'MSSQL',
-  ],
 ];
 
 for (const [definition, expected] of failures) {
-  const result = buildCreateTable(
-    definition.name === 't' && expected === 'MSSQL' ? 'mssql' : 'sqlite',
-    definition,
-  );
+  const result = buildCreateTable('sqlite', definition);
   assert(!result.ok, `expected failure containing "${expected}"`);
   assert(
     result.message.includes(expected),
@@ -136,7 +130,6 @@ const actionFailures = [
   [buildDropObject('sqlite', '', 'view'), '视图名不能为空'],
   [buildRenameTable('sqlite', 'same', 'same'), '相同'],
   [buildRenameTable('sqlite', 'old', ''), '新表名不能为空'],
-  [buildDropObject('mssql', 'users', 'table'), 'MSSQL'],
 ];
 
 for (const [result, expected] of actionFailures) {
@@ -188,7 +181,10 @@ const addFailures = [
     buildAddColumn('sqlite', 'users', { name: 'id', type: 'INT', autoIncrement: true }),
     '不支持主键/自增',
   ],
-  [buildAddColumn('mssql', 'users', { name: 'a', type: 'INT' }), 'MSSQL'],
+  [
+    buildAddColumn('mssql', 'users', { name: 'id', type: 'INT', autoIncrement: true }),
+    '不支持主键/自增',
+  ],
 ];
 
 for (const [result, expected] of addFailures) {
@@ -222,7 +218,6 @@ expectSql(
 const indexFailures = [
   [buildCreateIndex('sqlite', 'users', []), '至少需要一列'],
   [buildCreateIndex('sqlite', '', ['a']), '表名不能为空'],
-  [buildCreateIndex('mssql', 'users', ['a']), 'MSSQL'],
   [buildDropIndex('sqlite', '  '), '索引名不能为空'],
   [buildDropIndex('mysql', 'idx'), '需要表名'],
 ];
@@ -252,7 +247,6 @@ assert(dropColumnWarnings.ok && dropColumnWarnings.warnings.length === 1, 'missi
 const dropColumnFailures = [
   [buildDropColumn('sqlite', '', 'note'), '表名不能为空'],
   [buildDropColumn('sqlite', 'users', '  '), '列名不能为空'],
-  [buildDropColumn('mssql', 'users', 'note'), 'MSSQL'],
 ];
 
 for (const [result, expected] of dropColumnFailures) {
@@ -290,7 +284,6 @@ const renameColumnFailures = [
   [buildRenameColumn('sqlite', 'users', '', 'b'), '原列名不能为空'],
   [buildRenameColumn('sqlite', 'users', 'a', ' '), '新列名不能为空'],
   [buildRenameColumn('sqlite', 'users', 'a', 'a'), '新旧列名相同'],
-  [buildRenameColumn('mssql', 'users', 'a', 'b'), 'MSSQL'],
 ];
 
 for (const [result, expected] of renameColumnFailures) {
@@ -342,7 +335,6 @@ const modifyFailures = [
     }),
     '主键/自增',
   ],
-  [buildModifyColumn('mssql', 'users', 'note', { name: 'note', type: 'TEXT' }), 'MSSQL'],
 ];
 
 for (const [result, expected] of modifyFailures) {
@@ -369,7 +361,6 @@ const viewFailures = [
   [buildCreateView('sqlite', '', 'SELECT 1'), '视图名不能为空'],
   [buildCreateView('sqlite', 'v', '   '), '不能为空'],
   [buildCreateView('sqlite', 'v', 'DROP TABLE users'), '必须以 SELECT 或 WITH 开头'],
-  [buildCreateView('mssql', 'v', 'SELECT 1'), 'MSSQL'],
 ];
 
 for (const [result, expected] of viewFailures) {
@@ -401,3 +392,334 @@ assert(
 );
 
 console.log('ddl table comment check passed');
+
+// TABLE DESIGN：新建与编辑差异
+const detail = {
+  name: 'users',
+  kind: 'table',
+  editable: true,
+  primaryKey: ['id'],
+  columns: [
+    {
+      name: 'id',
+      declaredType: 'INTEGER',
+      notNull: true,
+      primaryKey: true,
+      autoIncrement: true,
+      defaultValue: null,
+      readOnly: true,
+    },
+    {
+      name: 'name',
+      declaredType: 'VARCHAR(10)',
+      notNull: false,
+      primaryKey: false,
+      autoIncrement: false,
+      defaultValue: null,
+      readOnly: false,
+    },
+    {
+      name: 'note',
+      declaredType: 'TEXT',
+      notNull: false,
+      primaryKey: false,
+      autoIncrement: false,
+      defaultValue: null,
+      readOnly: false,
+    },
+    {
+      name: 'old_col',
+      declaredType: 'TEXT',
+      notNull: false,
+      primaryKey: false,
+      autoIncrement: false,
+      defaultValue: null,
+      readOnly: false,
+    },
+  ],
+  indexes: [],
+  foreignKeys: [],
+  checks: [],
+  comment: null,
+};
+
+const createDesign = buildTableDesign({
+  dialect: 'sqlite',
+  mode: 'create',
+  tableName: 'orders',
+  columns: [
+    { name: 'id', type: 'INTEGER', primaryKey: true, autoIncrement: true },
+    { name: 'no', type: 'TEXT', notNull: true },
+  ],
+});
+assert(createDesign.ok, 'create design should succeed');
+assert(
+  createDesign.ok && createDesign.statements[0].includes('CREATE TABLE "orders"'),
+  'create design SQL missing',
+);
+
+const editDesign = buildTableDesign({
+  dialect: 'mysql',
+  mode: 'edit',
+  tableName: 'users_new',
+  detail,
+  columns: [
+    { name: 'id', type: 'INTEGER', primaryKey: true, autoIncrement: true, originalName: 'id' },
+    { name: 'title', type: 'VARCHAR(10)', originalName: 'name' },
+    { name: 'note', type: 'VARCHAR(50)', notNull: true, originalName: 'note' },
+    { name: 'created_at', type: 'DATETIME' },
+  ],
+});
+assert(editDesign.ok, `edit design should succeed: ${editDesign.ok ? '' : editDesign.message}`);
+assert(editDesign.ok && editDesign.statements.length === 5, 'edit design statement count wrong');
+assert(
+  editDesign.ok && editDesign.statements[0] === 'ALTER TABLE `users` RENAME TO `users_new`;',
+  'table rename should come first',
+);
+assert(
+  editDesign.ok && editDesign.statements[1].includes('RENAME COLUMN `name` TO `title`'),
+  'column rename missing',
+);
+assert(
+  editDesign.ok && editDesign.statements[2].includes('ADD COLUMN `created_at`'),
+  'added column missing',
+);
+assert(
+  editDesign.ok && editDesign.statements[3].includes('DROP COLUMN `old_col`'),
+  'dropped column missing',
+);
+assert(
+  editDesign.ok && editDesign.statements[4].includes('MODIFY COLUMN `note` VARCHAR(50) NOT NULL'),
+  'modified column missing',
+);
+
+const sqliteModify = buildTableDesign({
+  dialect: 'sqlite',
+  mode: 'edit',
+  tableName: 'users',
+  detail: {
+    ...detail,
+    columns: detail.columns.map((column) => ({ ...column, declaredType: column.name === 'note' ? 'TEXT' : column.declaredType })),
+  },
+  columns: [
+    { name: 'id', type: 'INTEGER', primaryKey: true, autoIncrement: true, originalName: 'id' },
+    { name: 'name', type: 'VARCHAR(10)', originalName: 'name' },
+    { name: 'note', type: 'VARCHAR(50)', originalName: 'note' },
+    { name: 'old_col', type: 'TEXT', originalName: 'old_col' },
+  ],
+});
+assert(
+  sqliteModify.ok,
+  `sqlite modify should fall back to rebuild: ${sqliteModify.ok ? '' : sqliteModify.message}`,
+);
+assert(
+  sqliteModify.ok && sqliteModify.sqliteForeignKeysOff,
+  'sqlite rebuild must disable foreign keys',
+);
+assert(
+  sqliteModify.ok && sqliteModify.statements[0].includes('CREATE TABLE "__dbcraft_rebuild_users"'),
+  'sqlite rebuild create missing',
+);
+
+const sqliteAdd = buildTableDesign({
+  dialect: 'sqlite',
+  mode: 'edit',
+  tableName: 'users',
+  detail,
+  columns: [
+    ...detail.columns.map((column) => ({
+      name: column.name,
+      type: column.declaredType,
+      primaryKey: column.primaryKey,
+      autoIncrement: column.autoIncrement,
+      notNull: column.notNull,
+      originalName: column.name,
+    })),
+    { name: 'age', type: 'INTEGER' },
+  ],
+});
+assert(sqliteAdd.ok, 'sqlite add should use native ALTER');
+assert(
+  sqliteAdd.ok && sqliteAdd.statements[0] === 'ALTER TABLE "users" ADD COLUMN "age" INTEGER;',
+  'sqlite add statement wrong',
+);
+
+const designFailures = [
+  [
+    buildTableDesign({
+      dialect: 'sqlite',
+      mode: 'edit',
+      tableName: 'users',
+      detail,
+      columns: [{ name: 'name', type: 'VARCHAR(10)', originalName: 'name' }],
+    }),
+    '主键/自增列不能删除',
+  ],
+  [
+    buildTableDesign({
+      dialect: 'sqlite',
+      mode: 'edit',
+      tableName: 'users',
+      detail,
+      columns: [
+        { name: 'id', type: 'INT', primaryKey: false, originalName: 'id' },
+        ...detail.columns.slice(1).map((column) => ({
+          name: column.name,
+          type: column.declaredType,
+          originalName: column.name,
+        })),
+      ],
+    }),
+    '主键列不能',
+  ],
+  [
+    buildTableDesign({
+      dialect: 'sqlite',
+      mode: 'edit',
+      tableName: 'users',
+      detail,
+      columns: detail.columns.map((column) => ({
+        name: column.name,
+        type: column.declaredType,
+        primaryKey: column.primaryKey,
+        autoIncrement: column.autoIncrement,
+        notNull: column.notNull,
+        originalName: column.name,
+      })),
+    }),
+    '没有检测到结构变化',
+  ],
+];
+
+// MSSQL：schema + IDENTITY + 常用 ALTER
+const mssqlCreate = buildCreateTable('mssql', {
+  schema: 'sales',
+  name: 'orders',
+  columns: [
+    { name: 'id', type: 'INT', primaryKey: true, autoIncrement: true },
+    { name: 'no', type: 'NVARCHAR(64)', notNull: true },
+    { name: 'flag', type: 'BIT', defaultValue: '0' },
+  ],
+});
+expectSql(
+  mssqlCreate,
+  'CREATE TABLE [sales].[orders] (\n' +
+    '  [id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,\n' +
+    '  [no] NVARCHAR(64) NOT NULL,\n' +
+    '  [flag] BIT DEFAULT 0\n' +
+    ');',
+);
+expectSql(
+  buildAddColumn('mssql', 'sales.orders', { name: 'note', type: 'NVARCHAR(200)' }),
+  'ALTER TABLE [sales].[orders] ADD [note] NVARCHAR(200);',
+);
+expectSql(
+  buildDropColumn('mssql', 'sales.orders', 'note'),
+  'ALTER TABLE [sales].[orders] DROP COLUMN [note];',
+);
+expectSql(
+  buildRenameColumn('mssql', 'sales.orders', 'no', 'order_no'),
+  "EXEC sp_rename N'sales.orders.no', N'order_no', N'COLUMN';",
+);
+expectSql(
+  buildRenameTable('mssql', 'sales.orders', 'orders_new'),
+  "EXEC sp_rename N'sales.orders', N'orders_new';",
+);
+expectSql(
+  buildModifyColumn('mssql', 'sales.orders', 'no', {
+    name: 'no',
+    type: 'NVARCHAR(128)',
+    notNull: true,
+  }),
+  'ALTER TABLE [sales].[orders] ALTER COLUMN [no] NVARCHAR(128) NOT NULL;',
+);
+expectSql(
+  buildCreateIndex('mssql', 'sales.orders', ['no']),
+  'CREATE INDEX [idx_sales_orders_no] ON [sales].[orders] ([no]);',
+);
+expectSql(
+  buildDropIndex('mssql', 'idx_sales_orders_no', 'sales.orders'),
+  'DROP INDEX [idx_sales_orders_no] ON [sales].[orders];',
+);
+expectSql(
+  buildDropObject('mssql', 'sales.orders', 'table'),
+  'DROP TABLE [sales].[orders];',
+);
+expectSql(
+  buildCreateView('mssql', 'sales.active_orders', 'SELECT * FROM sales.orders'),
+  'CREATE VIEW [sales].[active_orders] AS\nSELECT * FROM sales.orders;',
+);
+
+const mssqlDesign = buildTableDesign({
+  dialect: 'mssql',
+  mode: 'create',
+  tableName: 'orders',
+  schema: 'sales',
+  columns: [
+    { name: 'id', type: 'INT', primaryKey: true, autoIncrement: true },
+    { name: 'no', type: 'NVARCHAR(64)', notNull: true },
+  ],
+});
+assert(
+  mssqlDesign.ok,
+  `MSSQL table design should create schema-qualified table: ${mssqlDesign.ok ? '' : mssqlDesign.message}`,
+);
+assert(
+  mssqlDesign.ok && mssqlDesign.statements[0].includes('[sales].[orders]'),
+  'MSSQL design schema missing',
+);
+assert(
+  mssqlDesign.ok && mssqlDesign.statements[0].includes('IDENTITY(1,1)'),
+  'MSSQL design identity missing',
+);
+
+const mssqlDefaultChange = buildTableDesign({
+  dialect: 'mssql',
+  mode: 'edit',
+  tableName: 'orders',
+  schema: 'sales',
+  detail: {
+    ...detail,
+    name: 'sales.orders',
+    columns: [
+      {
+        ...detail.columns[0],
+        name: 'id',
+        declaredType: 'INT',
+        primaryKey: true,
+        autoIncrement: true,
+      },
+      { ...detail.columns[1], name: 'no', declaredType: 'NVARCHAR(64)', defaultValue: "'x'" },
+    ],
+  },
+  columns: [
+    {
+      name: 'id',
+      type: 'INT',
+      primaryKey: true,
+      autoIncrement: true,
+      originalName: 'id',
+    },
+    {
+      name: 'no',
+      type: 'NVARCHAR(64)',
+      defaultValue: "'y'",
+      originalName: 'no',
+    },
+  ],
+});
+assert(!mssqlDefaultChange.ok, 'MSSQL default value change should be rejected');
+assert(
+  mssqlDefaultChange.message.includes('默认值'),
+  'MSSQL default change message missing',
+);
+
+for (const [result, expected] of designFailures) {
+  assert(!result.ok, `expected table-design failure containing "${expected}"`);
+  assert(
+    result.message.includes(expected),
+    `message "${result.message}" does not include "${expected}"`,
+  );
+}
+
+console.log('ddl table design check passed');

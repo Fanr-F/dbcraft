@@ -16,7 +16,7 @@ export function SqlScriptDialog({ dialect, onClose, onExecute }: SqlScriptDialog
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [results, setResults] = useState<DdlStatementResult[] | null>(null);
-  const parsed = useMemo(() => splitSqlStatements(sql), [sql]);
+  const parsed = useMemo(() => splitSqlStatements(sql, 50, dialect), [sql, dialect]);
 
   const run = async () => {
     if (!parsed.ok || busy) return;
@@ -48,7 +48,10 @@ export function SqlScriptDialog({ dialect, onClose, onExecute }: SqlScriptDialog
         <header className="modal-header">
           <div>
             <h2 id="sql-script-title">执行 SQL 脚本</h2>
-            <p>按顶层分号切分，单次最多 50 条；字符串/注释里的分号不会误切。</p>
+            <p>
+              按顶层分隔符切分，单次最多 50 条；字符串/注释里的分号不会误切，MSSQL `GO`
+              与 MySQL `DELIMITER` 也会被识别。
+            </p>
           </div>
           <button
             type="button"

@@ -1,7 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import type { QueryCell, QueryColumn, QueryResult } from '../../shared/ipc-contract';
-import { normalizeRowLimit } from '../../shared/settings';
+import { resolveRowLimit } from '../../shared/settings';
 import { encodeCell } from '../services/query-values';
 
 type WorkerRequest =
@@ -89,7 +89,7 @@ function execute(sql: string, params?: QueryCell[], maxRows?: number): QueryResu
     throw new Error('SQLite 连接尚未打开');
   }
 
-  const rowLimit = normalizeRowLimit(maxRows, MAX_ROWS);
+  const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
   const startedAt = Date.now();
   const bindings = bindParams(params);
   let statement: Database.Statement;
@@ -97,7 +97,7 @@ function execute(sql: string, params?: QueryCell[], maxRows?: number): QueryResu
     statement = database.prepare(sql);
   } catch (error) {
     if (error instanceof Error && /more than one statement/i.test(error.message)) {
-      throw new Error('一次只能执行一条 SQL；多语句执行将在后续版本支持。');
+      throw new Error('一次只能执行一条 SQL；编辑器内多语句会先分句后逐条执行。');
     }
     throw error;
   }

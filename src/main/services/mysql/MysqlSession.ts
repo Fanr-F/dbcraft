@@ -20,11 +20,11 @@ import type {
   TableMeta,
   TableTriggerInfo,
 } from '../../../shared/ipc-contract';
-import { quoteIdent } from '../../../shared/dialect/identifiers';
-import { parseTimeoutMs } from '../../../shared/timeouts';
-import { normalizeRowLimit } from '../../../shared/settings';
+import { quoteIdent } from '../../../shared/dialect/identifiers.ts';
+import { parseTimeoutMs } from '../../../shared/timeouts.ts';
+import { resolveRowLimit } from '../../../shared/settings.ts';
 import type { DatabaseSession } from '../DatabaseSession';
-import { encodeCell } from '../query-values';
+import { encodeCell } from '../query-values.ts';
 
 const MAX_ROWS = 2000;
 
@@ -155,7 +155,7 @@ export class MysqlSession implements DatabaseSession {
    */
   async query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult> {
     const startedAt = Date.now();
-    const rowLimit = normalizeRowLimit(maxRows, MAX_ROWS);
+    const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     // promise 包装器的 Connection 仍持有底层回调式连接，流式接口只在底层提供。
     const core = (this.connection as unknown as { connection: CoreConnection }).connection;
     const stream = core

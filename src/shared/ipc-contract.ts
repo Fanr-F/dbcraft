@@ -67,6 +67,10 @@ export interface ConnectionRecord {
   passwordStored: boolean;
   createdAt: string;
   updatedAt: string;
+  /** 所属服务器 id；服务器是连接配置的归属（PRD v0.20 Q21 A）。 */
+  serverId?: string;
+  /** 服务器展示名（host:port / instance / SQLite 文件路径）。 */
+  serverName?: string;
 }
 
 export type ConnectionListResult =
@@ -126,7 +130,7 @@ export interface QueryRequest {
   sql: string;
   /** 与 SQL 中 `?` 占位符一一对应的参数（表数据页过滤等内部路径使用）。 */
   params?: QueryCell[];
-  /** 本次查询最多保留的行数；省略时用驱动默认上限。 */
+  /** 本次查询最多保留的行数；0 表示不限制，省略时用驱动默认上限。 */
   maxRows?: number;
   /** 本次查询超时（毫秒），覆盖默认值；0 表示不自动取消。 */
   timeoutMs?: number;
@@ -140,6 +144,47 @@ export interface QueryRequest {
 
 export type QuerySource = 'editor' | 'ddl-preview' | 'grid-edit' | 'agent-control';
 export type QueryStatus = 'success' | 'failed' | 'cancelled';
+
+/** 多语句执行中的单条语句结果；失败后脚本停止。 */
+export interface QueryScriptStatement {
+  /** 从 0 开始的语句序号。 */
+  index: number;
+  sql: string;
+  ok: boolean;
+  result?: QueryResult;
+  error?: QueryError;
+  elapsedMs: number;
+  canceled?: boolean;
+  timedOut?: boolean;
+}
+
+export interface QueryScriptResult {
+  statements: QueryScriptStatement[];
+  /** 请求中的语句总数；失败/取消时可能大于实际执行数。 */
+  total: number;
+  elapsedMs: number;
+  canceled: boolean;
+  timedOut: boolean;
+}
+
+export type QueryScriptResponse =
+  | { ok: true; result: QueryScriptResult }
+  | { ok: false; error: QueryError };
+
+export interface QueryScriptRequest {
+  requestId: string;
+  sessionId: string;
+  /** 渲染层已按方言分句；主进程按顺序逐条执行，遇错停止。 */
+  statements: string[];
+  /** 每条语句最多保留的行数；0 表示不限制。 */
+  maxRows?: number;
+  timeoutMs?: number;
+  connectionId?: string;
+  connectionName?: string;
+  dialect?: DatabaseType;
+  database?: string;
+  source?: QuerySource;
+}
 
 export interface HistoryRecord {
   id: number;
@@ -173,14 +218,19 @@ export interface HistoryListOptions {
   databaseName?: string;
   /** ISO 时间；只返回该时间之后执行的记录。 */
   since?: string;
+  /** ISO 时间；只返回该时间之前执行的记录。 */
+  until?: string;
   sortBy?: 'time' | 'duration';
   sortDir?: 'asc' | 'desc';
   limit?: number;
 }
 
 export interface SchemaObject {
+  /** 后端使用的对象名；MSSQL 为 `schema.table`。 */
   name: string;
   type: 'table' | 'view' | 'procedure';
+  /** MSSQL 的对象 schema；其他方言为空。 */
+  schema?: string;
 }
 
 export interface DatabaseInfo {
@@ -340,6 +390,8 @@ export interface DdlColumnDefinition {
 export interface DdlTableDefinition {
   name: string;
   columns: DdlColumnDefinition[];
+  /** MSSQL 的 schema；其他方言忽略。 */
+  schema?: string;
 }
 
 export interface DdlStatementResult {
@@ -493,6 +545,10 @@ export interface AppSettings {
   connectTimeoutMs: number;
   /** 是否记录查询历史。 */
   historyEnabled: boolean;
+  /** 60 秒内同连接同 SQL 是否合并为一条。 */
+  historyDedupe: boolean;
+  /** 历史列表/详情默认脱敏显示。 */
+  historyMask: boolean;
 }
 
 export type SettingsGetResult =
@@ -562,6 +618,7 @@ export interface DBCraftApi {
   };
   query: {
     execute: (request: QueryRequest) => Promise<QueryResponse>;
+    executeScript: (request: QueryScriptRequest) => Promise<QueryScriptResponse>;
     cancel: (requestId: string) => Promise<boolean>;
   };
   schema: {
@@ -642,6 +699,7 @@ export const IPC_CHANNELS = {
   connectionImport: 'connection:import',
   sessionClose: 'session:close',
   queryExecute: 'query:execute',
+  queryExecuteScript: 'query:execute-script',
   queryCancel: 'query:cancel',
   schemaGet: 'schema:get',
   schemaDatabases: 'schema:databases',

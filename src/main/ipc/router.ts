@@ -29,6 +29,7 @@ import {
   type ExportSaveResult,
   type HistoryListResult,
   type QueryResponse,
+  type QueryScriptResponse,
   type SchemaGetResult,
   type SessionOpenResult,
   type SettingsGetResult,
@@ -57,6 +58,7 @@ import {
   historyListSchema,
   logWriteSchema,
   queryExecuteSchema,
+  queryExecuteScriptSchema,
   schemaDescribeSchema,
   schemaDatabasesSchema,
   schemaGetSchema,
@@ -72,6 +74,7 @@ import {
   closeAllSessions,
   closeSession,
   executeQuery,
+  executeQueryScript,
   executeDdl,
   getSchema,
   getTableDetail,
@@ -320,6 +323,26 @@ export function registerIpcHandlers(): void {
       }
 
       return executeQuery(parsed.data);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.queryExecuteScript,
+    async (_event, rawInput: unknown): Promise<QueryScriptResponse> => {
+      const parsed = queryExecuteScriptSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          ok: false,
+          error: {
+            message: `SQL 脚本无效：${formatConnectionIssues(parsed.error)}`,
+            code: 'INVALID_REQUEST',
+            sqlState: null,
+            errno: null,
+            retryable: false,
+          },
+        };
+      }
+      return executeQueryScript(parsed.data);
     },
   );
 

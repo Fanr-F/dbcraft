@@ -7,6 +7,15 @@
  */
 import { MssqlSession } from '../src/main/services/mssql/MssqlSession.ts';
 import {
+  buildAddColumn,
+  buildCreateTable,
+  buildDropColumn,
+  buildDropObject,
+  buildModifyColumn,
+  buildRenameColumn,
+  buildRenameTable,
+} from '../src/shared/dialect/ddl.ts';
+import {
   buildTableEditStatements,
 } from '../src/shared/dialect/dml.ts';
 import { buildTablePageQuery } from '../src/shared/dialect/identifiers.ts';
@@ -73,7 +82,11 @@ try {
 
   const schema = await session.schema();
   assert(schema.some((item) => item.name === 'dbcraft_check'), 'schema missing test table');
-  console.log(`[对象树] ${schema.length} 个对象`);
+  assert(
+    schema.every((item) => Boolean(item.schema)),
+    'schema objects should carry schema name',
+  );
+  console.log(`[对象树] ${schema.length} 个对象，schema=${schema[0]?.schema}`);
 
   const meta = await session.getTableMeta('dbo.dbcraft_check', 'table');
   assert(meta.editable, 'table should be editable');
@@ -92,6 +105,72 @@ try {
   assert(/IDENTITY\(1,1\)/.test(ddl), 'ddl identity missing');
   assert(/PRIMARY KEY \(\[id\]\)/.test(ddl), 'ddl pk missing');
   console.log('[DDL]\n' + ddl);
+
+  // UI 表设计生成的 MSSQL DDL：schema + IDENTITY + ALTER 在真机回放。
+  await session.query(
+    "IF OBJECT_ID(N'dbo.dbcraft_ui_check', N'U') IS NOT NULL DROP TABLE dbo.dbcraft_ui_check",
+  );
+  const uiCreate = buildCreateTable('mssql', {
+    schema: 'dbo',
+    name: 'dbcraft_ui_check',
+    columns: [
+      { name: 'id', type: 'INT', primaryKey: true, autoIncrement: true },
+      { name: 'name', type: 'NVARCHAR(50)', notNull: true },
+    ],
+  });
+  assert(uiCreate.ok && uiCreate.sql.includes('[dbo].[dbcraft_ui_check]'), 'ui create failed');
+  assert(uiCreate.ok && uiCreate.sql.includes('IDENTITY(1,1)'), 'ui identity missing');
+  await session.query(uiCreate.sql);
+
+  const uiAdd = buildAddColumn('mssql', 'dbo.dbcraft_ui_check', {
+    name: 'note',
+    type: 'NVARCHAR(100)',
+  });
+  assert(uiAdd.ok, 'ui add column failed');
+  await session.query(uiAdd.sql);
+
+  const uiRenameColumn = buildRenameColumn(
+    'mssql',
+    'dbo.dbcraft_ui_check',
+    'note',
+    'memo',
+  );
+  assert(uiRenameColumn.ok, 'ui rename column failed');
+  await session.query(uiRenameColumn.sql);
+
+  const uiModify = buildModifyColumn('mssql', 'dbo.dbcraft_ui_check', 'memo', {
+    name: 'memo',
+    type: 'NVARCHAR(200)',
+    notNull: false,
+  });
+  assert(uiModify.ok, 'ui modify column failed');
+  await session.query(uiModify.sql);
+
+  await session.query(
+    "INSERT INTO dbo.dbcraft_ui_check (name, memo) VALUES (N'ui', N'ok')",
+  );
+  const uiRows = await session.query(
+    'SELECT id, name, memo FROM dbo.dbcraft_ui_check ORDER BY id',
+  );
+  assert(uiRows.rows.length === 1 && uiRows.rows[0][0] === 1, 'ui identity insert failed');
+  assert(uiRows.rows[0][2] === 'ok', 'ui modified column missing');
+
+  const uiDropColumn = buildDropColumn('mssql', 'dbo.dbcraft_ui_check', 'memo');
+  assert(uiDropColumn.ok, 'ui drop column failed');
+  await session.query(uiDropColumn.sql);
+
+  const uiRenameTable = buildRenameTable(
+    'mssql',
+    'dbo.dbcraft_ui_check',
+    'dbcraft_ui_check_renamed',
+  );
+  assert(uiRenameTable.ok, 'ui rename table failed');
+  await session.query(uiRenameTable.sql);
+
+  const uiDropTable = buildDropObject('mssql', 'dbo.dbcraft_ui_check_renamed', 'table');
+  assert(uiDropTable.ok, 'ui drop table failed');
+  await session.query(uiDropTable.sql);
+  console.log('[UI DDL] schema/IDENTITY/ADD/RENAME/MODIFY/DROP ok');
 
   const page = buildTablePageQuery(
     'mssql',
@@ -180,6 +259,16 @@ try {
   await session.query('IF OBJECT_ID(N\'dbo.dbcraft_check\', N\'U\') IS NOT NULL DROP TABLE dbo.dbcraft_check').catch(
     () => undefined,
   );
+  await session
+    .query(
+      "IF OBJECT_ID(N'dbo.dbcraft_ui_check', N'U') IS NOT NULL DROP TABLE dbo.dbcraft_ui_check",
+    )
+    .catch(() => undefined);
+  await session
+    .query(
+      "IF OBJECT_ID(N'dbo.dbcraft_ui_check_renamed', N'U') IS NOT NULL DROP TABLE dbo.dbcraft_ui_check_renamed",
+    )
+    .catch(() => undefined);
   await session.close();
   console.log('[清理] 会话已关闭');
 }

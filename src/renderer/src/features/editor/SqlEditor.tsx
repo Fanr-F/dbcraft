@@ -1,11 +1,17 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { DatabaseType } from '@shared/ipc-contract';
 import { tokenizeSql } from '../../utils/sql-highlight';
 import { findBracketMatch, type BracketMatch } from '../../utils/sql-brackets';
 import {
   applyCompletion,
   extractCompletionContext,
+  extractSignatureHelp,
   filterCompletions,
+  shouldAutoTriggerCompletion,
+  type CompletionContext,
+  type SignatureHelp,
 } from '../../utils/sql-completion';
+import { ContextMenu } from '../../components/ContextMenu';
 
 interface SqlEditorProps {
   value: string;
@@ -14,8 +20,16 @@ interface SqlEditorProps {
   onRun: (sql?: string) => void;
   onSave?: () => void;
   onFormat?: () => void;
+  /** 右键「从历史插入」入口。 */
+  onOpenHistory?: () => void;
+  /** 一次性插入请求；token 变化时在光标处插入 text。 */
+  insertRequest?: { text: string; token: number } | null;
   /** 关键字 + 当前连接对象名。 */
   completionItems?: string[];
+  /** 按光标上下文异步补充列/别名等候选。 */
+  onRequestCompletion?: (context: CompletionContext) => Promise<string[]>;
+  /** 当前连接的方言；用于函数签名提示。 */
+  dialect?: DatabaseType | null;
 }
 
 interface CompletionState {
@@ -30,15 +44,23 @@ export function SqlEditor({
   onRun,
   onSave,
   onFormat,
+  onOpenHistory,
+  insertRequest,
   completionItems = [],
+  onRequestCompletion,
+  dialect = null,
 }: SqlEditorProps) {
   const highlightRef = useRef<HTMLPreElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastInsertToken = useRef<number | null>(null);
+  const completionRequest = useRef(0);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [composing, setComposing] = useState(false);
   const [completion, setCompletion] = useState<CompletionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [bracketMatch, setBracketMatch] = useState<BracketMatch | null>(null);
+  const [signatureHelp, setSignatureHelp] = useState<SignatureHelp | null>(null);
   const tokens = useMemo(() => tokenizeSql(value), [value]);
   const tokenOffsets = useMemo(() => {
     let offset = 0;
@@ -62,13 +84,46 @@ export function SqlEditor({
     setBracketMatch(findBracketMatch(tokens, element.selectionStart));
   };
 
-  const openCompletion = () => {
+  const updateSignatureHelp = (element: HTMLTextAreaElement) => {
+    if (!dialect) {
+      setSignatureHelp(null);
+      return;
+    }
+    setSignatureHelp(
+      extractSignatureHelp(element.value, element.selectionStart, dialect),
+    );
+  };
+
+  const openCompletion = async () => {
     const element = textareaRef.current;
     if (!element) return;
     const context = extractCompletionContext(element.value, element.selectionStart);
-    const filtered = filterCompletions(completionItems, context.prefix);
-    if (filtered.length === 0) return;
-    setCompletion({ items: filtered, start: context.start, end: element.selectionStart });
+    const base = context.qualifier
+      ? []
+      : filterCompletions(completionItems, context.needle);
+    const request = completionRequest.current + 1;
+    completionRequest.current = request;
+
+    let extra: string[] = [];
+    if (onRequestCompletion) {
+      try {
+        extra = await onRequestCompletion(context);
+      } catch {
+        extra = [];
+      }
+    }
+    if (completionRequest.current !== request) return;
+
+    const filtered = filterCompletions([...extra, ...base], context.needle);
+    if (filtered.length === 0) {
+      setCompletion(null);
+      return;
+    }
+    setCompletion({
+      items: filtered,
+      start: context.replaceStart,
+      end: element.selectionStart,
+    });
     setActiveIndex(0);
   };
 
@@ -91,6 +146,28 @@ export function SqlEditor({
       element.setSelectionRange(next.cursor, next.cursor);
     });
   };
+
+  // 历史面板选择记录后，把 SQL 插到当前光标/选区位置，而不是覆盖整个编辑器。
+  useEffect(() => {
+    if (!insertRequest || lastInsertToken.current === insertRequest.token) return;
+    const element = textareaRef.current;
+    if (!element) return;
+    lastInsertToken.current = insertRequest.token;
+
+    const start = element.selectionStart ?? element.value.length;
+    const end = element.selectionEnd ?? start;
+    const before = element.value.slice(0, start);
+    const after = element.value.slice(end);
+    const prefix = before.length > 0 && !before.endsWith('\n') ? '\n' : '';
+    const suffix = after.length > 0 && !after.startsWith('\n') ? '\n' : '';
+    onChange(`${before}${prefix}${insertRequest.text}${suffix}${after}`);
+
+    const cursor = before.length + prefix.length + insertRequest.text.length;
+    requestAnimationFrame(() => {
+      element.focus();
+      element.setSelectionRange(cursor, cursor);
+    });
+  }, [insertRequest, onChange]);
 
   return (
     <div
@@ -134,20 +211,50 @@ export function SqlEditor({
         wrap="off"
         value={value}
         onChange={(event) => {
+          completionRequest.current += 1;
           setCompletion(null);
           setBracketMatch(null);
-          onChange(event.target.value);
+          const next = event.target.value;
+          onChange(next);
+          requestAnimationFrame(() => {
+            const element = textareaRef.current;
+            if (element) updateSignatureHelp(element);
+          });
+          if (
+            !composing &&
+            (next.endsWith('.') ||
+              shouldAutoTriggerCompletion(next, event.target.selectionStart))
+          ) {
+            window.setTimeout(() => void openCompletion(), 0);
+          }
         }}
         onScroll={(event) => {
           syncScroll(event.currentTarget);
           setScrollTop(event.currentTarget.scrollTop);
         }}
-        onSelect={(event) => updateBracketMatch(event.currentTarget)}
-        onKeyUp={(event) => updateBracketMatch(event.currentTarget)}
-        onClick={(event) => updateBracketMatch(event.currentTarget)}
+        onSelect={(event) => {
+          updateBracketMatch(event.currentTarget);
+          updateSignatureHelp(event.currentTarget);
+        }}
+        onKeyUp={(event) => {
+          updateBracketMatch(event.currentTarget);
+          updateSignatureHelp(event.currentTarget);
+        }}
+        onClick={(event) => {
+          updateBracketMatch(event.currentTarget);
+          updateSignatureHelp(event.currentTarget);
+        }}
         onCompositionStart={() => setComposing(true)}
         onCompositionEnd={() => setComposing(false)}
-        onBlur={() => setCompletion(null)}
+        onBlur={() => {
+          completionRequest.current += 1;
+          setCompletion(null);
+          setSignatureHelp(null);
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setMenu({ x: event.clientX, y: event.clientY });
+        }}
         onKeyDown={(event) => {
           if ((event.ctrlKey || event.metaKey) && event.key === ' ') {
             event.preventDefault();
@@ -175,6 +282,7 @@ export function SqlEditor({
             }
             if (event.key === 'Escape') {
               event.preventDefault();
+              completionRequest.current += 1;
               setCompletion(null);
               return;
             }
@@ -218,6 +326,46 @@ export function SqlEditor({
             </button>
           ))}
         </div>
+      )}
+
+      {signatureHelp && (
+        <div className="sql-signature" role="status" aria-label="函数签名">
+          <strong>{signatureHelp.name}</strong>
+          <span>(</span>
+          {signatureHelp.parameters.map((parameter, index) => (
+            <span key={`${parameter}-${index}`}>
+              <span
+                className={
+                  index === signatureHelp.activeParameter ? 'sql-signature-active' : undefined
+                }
+              >
+                {parameter}
+              </span>
+              {index < signatureHelp.parameters.length - 1 ? ', ' : ''}
+            </span>
+          ))}
+          <span>)</span>
+        </div>
+      )}
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              label: '从历史插入',
+              disabled: !onOpenHistory,
+              onSelect: () => onOpenHistory?.(),
+            },
+            {
+              label: '格式化 SQL',
+              disabled: !onFormat,
+              onSelect: () => onFormat?.(),
+            },
+          ]}
+        />
       )}
     </div>
   );

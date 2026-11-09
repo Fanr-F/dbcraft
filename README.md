@@ -45,6 +45,8 @@ npm run typecheck   # TypeScript 检查
 npm run build       # 构建 main / preload / renderer / sqlite worker
 npm run smoke       # 构建后启动 Electron，检查窗口与 preload 桥接
 npm run e2e:sqlite  # 构建后跑 SQLite 真实链路 E2E（连接、对象树、查询、错误）
+npm run e2e:mysql   # 构建后跑 MySQL UI E2E（需 127.0.0.1:3307 便携实例）
+npm run e2e:mssql   # 构建后跑 MSSQL UI E2E（读取 .env.local，会建删临时表）
 npm run pack        # 生成未打包目录（release/）
 npm run dist        # 生成 Windows NSIS 安装包
 ```
@@ -63,6 +65,16 @@ MSSQL 联调（需要可连的 SQL Server）：
 # 命名实例可加：DBCRAFT_MSSQL_INSTANCE=MSSQLSERVER（与 PORT 互斥，走 SQL Browser UDP 1434）
 npm run check:mssql        # 建删临时表，验证查询/对象树/DDL/表编辑/取消
 npm run check:mssql-agent  # 创建/启停/删除临时作业，验证 Agent 列表/详情/脚本/历史
+```
+
+MySQL / MariaDB 可用便携实例联调（默认 `127.0.0.1:3307` / `3308`，root 空密码；
+可用 `DBCRAFT_MYSQL_*` / `DBCRAFT_MARIADB_*` 覆盖）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File spikes/mysql-auth/scripts/setup.ps1
+npm run check:mysql        # 建删临时库，验证库/对象/列/跨库/分页/取消
+npm run check:mariadb
+npm run e2e:mysql          # 启动 Electron，验证连接表单/对象树/查询/多语句
 ```
 
 ## 目录
@@ -103,7 +115,8 @@ src/
 - 主窗口、暗色界面、标签页、SQL 编辑区、结果区、状态栏
 - 五种数据库类型的连接表单
 - SQLite / MySQL / Percona / MariaDB / MSSQL 连接测试、打开、关闭
-- 单语句查询（SELECT / PRAGMA / DML / DDL）
+- 编辑器内多语句执行：按 `;` / MSSQL `GO` / MySQL `DELIMITER` 分句，逐条执行、遇错停止，多结果页签 + 消息面板
+- 当前单语句内部路径仍用 `query:execute`（表数据页、DDL、Agent 等）
 - 查询结果动态列、行数、耗时、影响行数、错误展示
 - 对象树：SQLite 读 `sqlite_master`；MySQL 系读 `information_schema`；MSSQL 读 `sys.objects`
 - 多数据库对象树：MSSQL / MySQL 系连接后列出有权限的数据库，库下分表/视图/存储过程，
@@ -120,17 +133,19 @@ src/
 - DATETIME、DECIMAL、JSON、BIGINT 按数据库返回形态展示
 - 查询取消：MySQL/MariaDB 用 `KILL QUERY`，连接保留；SQLite 终止 Worker，需要重连
 - 每个 SQL 标签一个独立会话/物理连接；标签间查询与取消互不阻塞
-- 结果默认最多返回 2,000 行（设置可调 100/500/1000/2000/5000），超出标记截断
+- 结果默认最多返回 2,000 行（设置可调 100/500/1000/2000/5000/不限制，超出标记截断；「不限制」会提示内存风险）
 
 尚未接入：
 
 - MSSQL Agent 30s 自动刷新与作业运行中状态（P1）
-- MSSQL UI 建表/改表（查看 DDL 与表结构已支持）
-- 列/别名补全、错误波浪线、多结果集
-- 真流式导出/进度/取消（当前导出前最多加载 1 万行）
+- 版本感知、补全类型提示、通配符展开、SQLite ATTACH 库内对象、MySQL 跨库列（列/别名/限定名/库/Schema/函数补全、函数签名、大小写跟随、空格触发、编辑器内多语句与多结果页签已实现）
+- 标签持久化（v1.x；服务器实体/分组/事务面板/独立 browse session/browse-only 对象操作/快照持久化已实现；服务器级 Agent 明确不做）
+- 错误波浪线、真流式导出/进度/取消（当前导出前最多加载 1 万行）
 - 打包/安装包、性能基线与无障碍
 
-设计取舍：**保存连接只是配置**；每个 SQL 标签打开独立会话，一个会话对应一个物理连接。关闭标签即关闭会话；不做连接池。标签之间查询和取消互不阻塞。
+> MSSQL UI 建表/改表已支持 schema + IDENTITY 主路径；默认值、computed、rowversion 等列属性仍需用 SQL 编辑器。
+
+设计取舍：**服务器是身份，保存连接是连接配置（类），session 是运行时对象**（PRD v0.20 目标；当前实现仍是扁平保存连接）。双击保存连接打开左侧树，右击 →「查询」创建 tab + session；每个 SQL 标签与一个 session 强绑定，一个会话对应一个物理连接。关闭标签即关闭会话；不做连接池。编辑/删除保存连接不影响已创建的 tab session。标签之间查询和取消互不阻塞。
 
 连接配置持久化在主进程元数据库 `<userData>/dbcraft-meta.db`；密码经 `safeStorage` 加密后落盘，只在主进程解密，不回传渲染层。
 
@@ -145,11 +160,16 @@ src/
 
 ## 文档
 
-- `doc/PRD.md`：需求
+- `doc/README.md`：doc 目录索引、权威边界与建议阅读顺序
+- `doc/PRD.md`：需求基线（只读；需求变更需单独评审）
+- `doc/FEATURE_MATRIX.md`：功能清单与实现状态（✅/🟡/❌/⏸ 总表）
+- `doc/REQUIREMENTS_AUDIT.md`：需求分层、隐藏需求、PRD 与实现的差异审计（需求收敛建议）
+- `doc/CONNECTION_TAB_MODEL.md`：连接 / 服务器 / 标签 / 会话模型审计与管理建议
 - `doc/TECH_DESIGN.md`：技术设计
 - `doc/PROJECT_STATUS.md`：实现现状、差距、缺陷、验收、DDL 方案、日志约定与变更里程碑
 - `doc/WORKLOG.md`：追加式操作日志（每次代码/文档改动的诉求、变更、文件、验证、遗留）
 - `doc/UI_TODO.md`：UI 逐项调整清单与真机验收状态
+- `doc/UNFINISHED_ITEMS.md`：未完成项与隐藏需求清单（代码走查新发现、文档已列缺口、韧性项与建议顺序）
 
 ## 许可证
 

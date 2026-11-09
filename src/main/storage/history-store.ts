@@ -128,6 +128,8 @@ interface HistoryRow {
 
 export interface HistoryOptions {
   dedupeWindowMs?: number;
+  /** false 时关闭 60 秒合并，每次执行都单独记录。 */
+  dedupe?: boolean;
   retentionLimit?: number;
 }
 
@@ -161,15 +163,18 @@ export function recordHistory(db: DB, entry: HistoryEntry, options: HistoryOptio
   const executedAt = entry.executedAt;
 
   const cutoff = new Date(new Date(executedAt).getTime() - dedupeWindowMs).toISOString();
-  const recent = db
-    .prepare(
-      `SELECT id, exec_count FROM history
-       WHERE connection_id = ? AND sql_text = ? AND last_executed_at >= ?
-       ORDER BY id DESC LIMIT 1`,
-    )
-    .get(entry.connectionId, entry.sqlText, cutoff) as
-    | { id: number; exec_count: number }
-    | undefined;
+  let recent: { id: number; exec_count: number } | undefined;
+  if (options.dedupe !== false) {
+    recent = db
+      .prepare(
+        `SELECT id, exec_count FROM history
+         WHERE connection_id = ? AND sql_text = ? AND last_executed_at >= ?
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(entry.connectionId, entry.sqlText, cutoff) as
+      | { id: number; exec_count: number }
+      | undefined;
+  }
 
   if (recent) {
     db.prepare(
@@ -226,12 +231,14 @@ export function recordHistory(db: DB, entry: HistoryEntry, options: HistoryOptio
     });
   }
 
-  // 超出保留上限时按最后执行时间淘汰最旧记录。
-  db.prepare(
-    `DELETE FROM history WHERE id NOT IN (
-       SELECT id FROM history ORDER BY last_executed_at DESC, id DESC LIMIT ?
-     )`,
-  ).run(retentionLimit);
+  // 超出保留上限时按最后执行时间淘汰最旧记录；0 表示不限制。
+  if (retentionLimit > 0) {
+    db.prepare(
+      `DELETE FROM history WHERE id NOT IN (
+         SELECT id FROM history ORDER BY last_executed_at DESC, id DESC LIMIT ?
+       )`,
+    ).run(retentionLimit);
+  }
 }
 
 /** 组合过滤 + 排序；所有值走参数，排序字段走白名单。 */
@@ -275,6 +282,10 @@ export function listHistory(db: DB, options: HistoryListOptions = {}): HistoryRe
   if (options.since) {
     clauses.push('last_executed_at >= ?');
     params.push(options.since);
+  }
+  if (options.until) {
+    clauses.push('last_executed_at <= ?');
+    params.push(options.until);
   }
 
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';

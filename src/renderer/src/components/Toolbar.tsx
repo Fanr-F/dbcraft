@@ -53,7 +53,12 @@ export function Toolbar({
       </div>
 
       <div className="toolbar-actions">
-        <button type="button" className="icon-btn" title="查询历史" onClick={onOpenHistory}>
+        <button
+          type="button"
+          className="icon-btn"
+          title="查询历史（Ctrl+E）"
+          onClick={onOpenHistory}
+        >
           <Icon name="history" />
         </button>
         <button type="button" className="icon-btn" title="设置" onClick={onOpenSettings}>

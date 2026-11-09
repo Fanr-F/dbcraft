@@ -1,18 +1,30 @@
-import { tokenizeSql } from './sql-highlight.ts';
+import type { DatabaseType } from '@shared/ipc-contract';
 
 export type SplitStatementsResult =
   | { ok: true; statements: string[] }
   | { ok: false; message: string };
 
 /**
- * 按顶层分号切分脚本；字符串/注释里的分号不会被误切。
- * 只用于显式脚本执行，SQL 编辑器仍保持单语句语义。
+ * 按方言切分脚本：
+ * - SQLite / MSSQL 默认按顶层 `;`；
+ * - MSSQL 额外把单独一行的 `GO` 当作分隔符（不发送给服务器）；
+ * - MySQL 系支持 `DELIMITER $$`，自定义分隔符本身不进入语句；
+ * - 字符串、注释、引号标识符里的分隔符不会被误切。
  */
-export function splitSqlStatements(sql: string, limit = 50): SplitStatementsResult {
-  const tokens = tokenizeSql(sql);
+export function splitSqlStatements(
+  sql: string,
+  limit = 50,
+  dialect?: DatabaseType,
+): SplitStatementsResult {
+  const isMssql = dialect === 'mssql';
+  const isMysqlFamily =
+    dialect === 'mysql' || dialect === 'percona' || dialect === 'mariadb';
   const statements: string[] = [];
+  const length = sql.length;
   let current = '';
   let hasContent = false;
+  let delimiter = ';';
+  let index = 0;
 
   const flush = () => {
     const text = current.trim();
@@ -23,17 +35,177 @@ export function splitSqlStatements(sql: string, limit = 50): SplitStatementsResu
     hasContent = false;
   };
 
-  for (const token of tokens) {
-    if (token.type === 'operator' && token.text === ';') {
-      current += token.text;
+  const linePattern = (from: number): string => {
+    const end = sql.indexOf('\n', from);
+    return sql.slice(from, end === -1 ? length : end);
+  };
+
+  const atLineStart = (position: number): boolean =>
+    position === 0 || sql[position - 1] === '\n';
+
+  let state: 'normal' | 'single' | 'double' | 'backtick' | 'bracket' | 'line' | 'block' =
+    'normal';
+
+  while (index < length) {
+    const char = sql[index]!;
+    const next = sql[index + 1];
+
+    if (state === 'single') {
+      current += char;
+      if (char === '\\' && isMysqlFamily && next !== undefined) {
+        current += next;
+        index += 2;
+        continue;
+      }
+      if (char === "'" && next === "'") {
+        current += next;
+        index += 2;
+        continue;
+      }
+      if (char === "'") state = 'normal';
+      index += 1;
+      continue;
+    }
+    if (state === 'double') {
+      current += char;
+      if (char === '\\' && isMysqlFamily && next !== undefined) {
+        current += next;
+        index += 2;
+        continue;
+      }
+      if (char === '"' && next === '"') {
+        current += next;
+        index += 2;
+        continue;
+      }
+      if (char === '"') state = 'normal';
+      index += 1;
+      continue;
+    }
+    if (state === 'backtick') {
+      current += char;
+      if (char === '`' && next === '`') {
+        current += next;
+        index += 2;
+        continue;
+      }
+      if (char === '`') state = 'normal';
+      index += 1;
+      continue;
+    }
+    if (state === 'bracket') {
+      current += char;
+      if (char === ']' && next === ']') {
+        current += next;
+        index += 2;
+        continue;
+      }
+      if (char === ']') state = 'normal';
+      index += 1;
+      continue;
+    }
+    if (state === 'line') {
+      current += char;
+      if (char === '\n') state = 'normal';
+      index += 1;
+      continue;
+    }
+    if (state === 'block') {
+      current += char;
+      if (char === '*' && next === '/') {
+        current += next;
+        state = 'normal';
+        index += 2;
+        continue;
+      }
+      index += 1;
+      continue;
+    }
+
+    // 行级指令：MSSQL GO / MySQL DELIMITER。
+    if (atLineStart(index)) {
+      const line = linePattern(index);
+      if (isMssql && /^\s*GO\s*(?:--.*)?$/i.test(line)) {
+        flush();
+        index += line.length;
+        if (sql[index] === '\n') index += 1;
+        continue;
+      }
+      if (isMysqlFamily && current.trim().length === 0) {
+        const match = /^\s*DELIMITER\s+(\S+)\s*$/i.exec(line);
+        if (match) {
+          delimiter = match[1]!;
+          index += line.length;
+          if (sql[index] === '\n') index += 1;
+          continue;
+        }
+      }
+    }
+
+    // 分隔符。
+    if (delimiter && sql.startsWith(delimiter, index)) {
+      if (delimiter === ';') {
+        current += char;
+        index += 1;
+      } else {
+        index += delimiter.length;
+      }
       flush();
       continue;
     }
-    current += token.text;
-    if (token.type !== 'whitespace' && token.type !== 'comment') {
+
+    if (char === "'") {
+      state = 'single';
+      current += char;
       hasContent = true;
+      index += 1;
+      continue;
     }
+    if (char === '"') {
+      state = 'double';
+      current += char;
+      hasContent = true;
+      index += 1;
+      continue;
+    }
+    if (char === '`') {
+      state = 'backtick';
+      current += char;
+      hasContent = true;
+      index += 1;
+      continue;
+    }
+    if (char === '[') {
+      state = 'bracket';
+      current += char;
+      hasContent = true;
+      index += 1;
+      continue;
+    }
+    if (char === '-' && next === '-') {
+      state = 'line';
+      current += '--';
+      index += 2;
+      continue;
+    }
+    if (char === '#' && isMysqlFamily) {
+      state = 'line';
+      current += char;
+      index += 1;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      state = 'block';
+      current += '/*';
+      index += 2;
+      continue;
+    }
+
+    current += char;
+    if (!/\s/.test(char)) hasContent = true;
+    index += 1;
   }
+
   flush();
 
   if (statements.length === 0) {

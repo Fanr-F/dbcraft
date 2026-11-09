@@ -31,6 +31,7 @@ interface ObjectTreeProps {
     name: string,
     kind: DdlObjectKind,
     database?: string,
+    schema?: string,
   ) => void;
 }
 
@@ -82,24 +83,32 @@ export function ObjectTree({
     name: string,
     kind: DdlObjectKind,
     database: string,
+    schema?: string,
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    onTableContextMenu(event, name, kind, database);
+    onTableContextMenu(event, name, kind, database, schema);
   };
 
-  const renderTableRow = (table: SchemaObject, database: string) => {
+  const objectLabel = (table: SchemaObject) => {
+    if (table.schema && table.name.startsWith(`${table.schema}.`)) {
+      return table.name.slice(table.schema.length + 1);
+    }
+    return table.name;
+  };
+
+  const renderTableRow = (table: SchemaObject, database: string, depth = 2) => {
     if (table.type === 'procedure') {
       return (
         <button
           key={`proc-${database}-${table.name}`}
           type="button"
-          className="tree-row tree-item tree-child-2"
+          className={`tree-row tree-item tree-child-${depth}`}
           title={`打开存储过程 ${table.name}（生成调用 SQL）`}
           onClick={() => onOpenProcedure(table.name, database)}
         >
           <Icon name="script" size={14} />
-          <span>{table.name}</span>
+          <span>{objectLabel(table)}</span>
         </button>
       );
     }
@@ -117,7 +126,7 @@ export function ObjectTree({
 
     return (
       <div key={`${table.type}-${database}-${table.name}`} className="tree-branch">
-        <div className="tree-row tree-item tree-child-2 tree-table-row">
+        <div className={`tree-row tree-item tree-child-${depth} tree-table-row`}>
           {isTable && (
             <button
               type="button"
@@ -145,17 +154,25 @@ export function ObjectTree({
             onClick={() => onOpenTable(table.name, database)}
             onDoubleClick={() => onOpenTableData(table.name, table.type as 'table' | 'view', database)}
             onContextMenu={(event) =>
-              tableContextMenu(event, table.name, table.type as DdlObjectKind, database)
+              tableContextMenu(
+                event,
+                table.name,
+                table.type as DdlObjectKind,
+                database,
+                table.schema,
+              )
             }
           >
             <Icon name={table.type === 'view' ? 'view' : 'table'} size={14} />
-            <span>{table.name}</span>
+            <span>{objectLabel(table)}</span>
           </button>
         </div>
 
         {isTable && extrasOpen && (
           <div className="tree-branch">
-            {extrasLoading && <div className="tree-empty tree-child-3">正在加载表子对象…</div>}
+            {extrasLoading && (
+              <div className={`tree-empty tree-child-${depth + 1}`}>正在加载表子对象…</div>
+            )}
             {folders.map((folder) => {
               if (!extras) return null;
               const openFolder = open(folder.key, true);
@@ -163,7 +180,7 @@ export function ObjectTree({
                 <div key={folder.key}>
                   <button
                     type="button"
-                    className="tree-row tree-item tree-child-3 tree-muted"
+                    className={`tree-row tree-item tree-child-${depth + 1} tree-muted`}
                     aria-expanded={openFolder}
                     onClick={() => toggle(folder.key, true)}
                   >
@@ -181,7 +198,7 @@ export function ObjectTree({
                     extras.constraints.map((constraint) => (
                       <div
                         key={`${folder.key}-${constraint.name}`}
-                        className="tree-row tree-child-4 tree-detail-row"
+                        className={`tree-row tree-child-${depth + 2} tree-detail-row`}
                         title={`${constraint.kind} ${constraint.name}`}
                       >
                         <span>{constraint.name}</span>
@@ -193,7 +210,7 @@ export function ObjectTree({
                     extras.triggers.map((trigger) => (
                       <div
                         key={`${folder.key}-${trigger.name}`}
-                        className="tree-row tree-child-4 tree-detail-row"
+                        className={`tree-row tree-child-${depth + 2} tree-detail-row`}
                       >
                         <span>{trigger.name}</span>
                         {trigger.disabled && <span className="agent-job-tag">禁用</span>}
@@ -204,7 +221,7 @@ export function ObjectTree({
                     extras.indexes.map((index) => (
                       <div
                         key={`${folder.key}-${index.name}`}
-                        className="tree-row tree-child-4 tree-detail-row"
+                        className={`tree-row tree-child-${depth + 2} tree-detail-row`}
                         title={index.columns.join(', ')}
                       >
                         <span>{index.name}</span>
@@ -228,6 +245,53 @@ export function ObjectTree({
     const views = filtered.filter((object) => object.type === 'view');
     const procedures = filtered.filter((object) => object.type === 'procedure');
 
+    /** MSSQL 按 schema 分组；其他方言保持原有平铺结构。 */
+    const renderItems = (folderKey: string, items: SchemaObject[]) => {
+      if (dialect !== 'mssql') {
+        return items.map((item) => renderTableRow(item, database));
+      }
+
+      const groups = new Map<string, SchemaObject[]>();
+      for (const item of items) {
+        const schema = item.schema || 'dbo';
+        groups.set(schema, [...(groups.get(schema) ?? []), item]);
+      }
+
+      return [...groups.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([schema, schemaItems]) => {
+          const schemaKey = `schema:${folderKey}:${database}:${schema}`;
+          const schemaOpen = open(
+            schemaKey,
+            normalizedQuery.length > 0 || groups.size === 1,
+          );
+          return (
+            <div className="tree-branch" key={schemaKey}>
+              <button
+                type="button"
+                className="tree-row tree-item tree-child-2 tree-muted"
+                aria-expanded={schemaOpen}
+                title={`schema ${schema}`}
+                onClick={() =>
+                  toggle(schemaKey, normalizedQuery.length > 0 || groups.size === 1)
+                }
+              >
+                <Icon
+                  name="chevron"
+                  size={11}
+                  className={schemaOpen ? 'chevron' : 'chevron collapsed'}
+                />
+                <Icon name="folder" size={12} />
+                <span>{schema}</span>
+                <span className="tree-count">{schemaItems.length}</span>
+              </button>
+              {schemaOpen &&
+                schemaItems.map((item) => renderTableRow(item, database, 3))}
+            </div>
+          );
+        });
+    };
+
     const folder = (key: string, label: string, count: number, items: SchemaObject[]) => {
       const folderKey = `${key}:${database}`;
       const openFolder = open(folderKey, true);
@@ -248,7 +312,7 @@ export function ObjectTree({
             <span>{label}</span>
             <span className="tree-count">{count}</span>
           </button>
-          {openFolder && items.map((item) => renderTableRow(item, database))}
+          {openFolder && renderItems(folderKey, items)}
         </div>
       );
     };

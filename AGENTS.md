@@ -39,9 +39,13 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - MSSQL 真实实例联调：`npm run check:mssql`（读取 `.env.local`，建删临时表，需 SQL Server）
 - MSSQL Agent 联调：`npm run check:mssql-agent`（读取 `.env.local`，创建/启动/停止/删除测试作业，需 Agent 服务）
 - MSSQL 多库联调：`npm run check:mssql-multidb`（列出数据库、跨库对象、切换库、约束/触发器/索引，需 SQL Server）
+- MySQL / MariaDB 会话联调：`npm run check:mysql` / `npm run check:mariadb`
+  （默认 127.0.0.1:3307/3308，root 空密码；建删临时库，可用 `DBCRAFT_MYSQL_*` / `DBCRAFT_MARIADB_*` 覆盖）
 - 构建：`npm run build`（先 typecheck，产物在 `out/`）
 - 冒烟：`npm run smoke`（构建后检查窗口与 preload 桥接）
 - SQLite E2E：`npm run e2e:sqlite`（自动构建、建临时库、启动 Electron）
+- MySQL E2E：`npm run e2e:mysql`（需 `spikes/mysql-auth/scripts/setup.ps1` 启动的 127.0.0.1:3307 实例）
+- MSSQL E2E：`npm run e2e:mssql`（读取 `.env.local`，会建删临时表，需 SQL Server）
 - 演示库：`npm run demo:db` → `samples/demo.db`（被 `.gitignore` 忽略）
 - `npm run pack` / `npm run dist` 尚未验证，离线环境可能因下载打包工具失败
 
@@ -49,6 +53,11 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 
 - **保存连接只是配置**。每个 SQL 标签 = 一个 session = 一个物理连接；`sessionId` 就是标签 id。
   不要引入连接池，也不要按保存连接复用 session。
+  PRD v0.20 起 v1.0 目标是「服务器 → 连接配置」模型；当前实现仍是扁平保存连接，
+  在服务器实体完成前不要按服务器级 UI 验收；「一个标签一个物理连接」不变。
+  PRD v0.20 的 Q27 规则：保存连接是配置（类），session 是运行时对象；编辑保存只改配置，不重连/不改写已打开 tab；
+  关闭左侧树，双击连接重连；双击连接只打开左侧树，右击 →「查询」才创建 tab + session；删除连接不强制关闭已有 session。
+  当前实现会静默重连绑定标签，改代码时按目标规则处理。
 - `src/shared/ipc-contract.ts` 是 IPC 唯一契约；新增/修改通道时同步更新
   `src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`。
 - `src/main/services/ConnectionManager.ts` 持有 sessions；`DatabaseSession` 是驱动接口；
@@ -77,8 +86,12 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   MySQL / MariaDB 多库路径目前只有类型检查与 SQL 走查，需真实实例回归。
 - 结果值保真：`dateStrings`、`bigNumberStrings`、`jsonStrings`；不要做时区转换，
   也不要把 DECIMAL 转成 number。
-- 结果默认最多 2,000 行（设置面板可调 100/500/1000/2000/5000，通过 `QueryRequest.maxRows` 下发），
-  且只支持单语句。SQLite 多语句会被明确拒绝，不要用简单 split 绕过。
+- 结果默认最多 2,000 行（设置面板可调 100/500/1000/2000/5000/不限制，通过 `QueryRequest.maxRows` 下发）。
+  「不限制」用 `maxRows = 0` 哨兵，`resolveRowLimit` 在驱动层转成 `Infinity`，不做额外硬上限；
+  设置面板会提示内存风险。大结果集仍可能卡顿，不要把它描述成「安全地无限加载」。
+  `query:execute` 仍是单语句路径，SQLite 直接多语句会被明确拒绝；
+  编辑器多语句走 `query:execute-script`：渲染层按方言分句（`;` / MSSQL `GO` / MySQL `DELIMITER`），
+  主进程逐条执行、遇错停止，每条语句一个结果或进入消息面板，不要用简单 split 绕过。
 - 查询默认 30 秒超时，设置面板可调（0/10/30/60/120 秒，通过 `QueryRequest.timeoutMs` 下发并覆盖
   `DBCRAFT_QUERY_TIMEOUT_MS`，0 关闭）；连接/测试超时优先读
   `DBCRAFT_CONNECT_TIMEOUT_MS`，未设置时用设置面板的 `connectTimeoutMs`（默认 8000）。超时复用 cancel，

@@ -134,10 +134,36 @@ assert(
   listHistory(db, { since: new Date(t0.getTime() + 350_000).toISOString() }).length === 1,
   'time range filter failed',
 );
+assert(
+  listHistory(db, {
+    since: new Date(t0.getTime() + 350_000).toISOString(),
+    until: new Date(t0.getTime() + 450_000).toISOString(),
+  }).length === 1,
+  'until time range filter failed',
+);
 const byDuration = listHistory(db, { sortBy: 'duration', sortDir: 'desc' });
 assert(byDuration[0].durationMs === 500, 'duration sort failed');
 const byDurationAsc = listHistory(db, { sortBy: 'duration', sortDir: 'asc' });
 assert(byDurationAsc[0].durationMs === 5, 'duration asc sort failed');
+
+// 关闭去重后，同连接同 SQL 每次都单独记录。
+const noDedupeDb = new Database(join(dir, 'no-dedupe.db'));
+noDedupeDb.exec(HISTORY_SCHEMA);
+recordHistory(
+  noDedupeDb,
+  entry({ executedAt: t0.toISOString(), sqlText: 'SELECT 42;' }),
+  { dedupe: false },
+);
+recordHistory(
+  noDedupeDb,
+  entry({ executedAt: new Date(t0.getTime() + 1_000).toISOString(), sqlText: 'SELECT 42;' }),
+  { dedupe: false },
+);
+assert(
+  listHistory(noDedupeDb).length === 2,
+  'dedupe=false should keep every execution',
+);
+noDedupeDb.close();
 
 // 按连接清空只影响该连接。
 assert(clearConnectionHistory(db, 'conn-2') === 1, 'connection clear failed');
@@ -168,6 +194,26 @@ for (let index = 0; index < 4; index += 1) {
 const limited = listHistory(limitDb);
 assert(limited.length === 2, `retention expected 2, got ${limited.length}`);
 assert(limited[0].sqlText === 'SELECT 3;', 'retention kept wrong rows');
+
+// retentionLimit=0 表示不限制，不能把历史全部删掉。
+const unlimitedDb = new Database(join(dir, 'unlimited.db'));
+unlimitedDb.exec(HISTORY_SCHEMA);
+for (let index = 0; index < 3; index += 1) {
+  recordHistory(
+    unlimitedDb,
+    entry({
+      executedAt: new Date(t0.getTime() + index * 10_000).toISOString(),
+      sqlText: `SELECT ${index};`,
+      connectionId: `conn-${index}`,
+    }),
+    { retentionLimit: 0 },
+  );
+}
+assert(
+  listHistory(unlimitedDb).length === 3,
+  'retentionLimit=0 should keep every row',
+);
+unlimitedDb.close();
 
 // FTS5 trigram：索引已存在时，>=3 字符走 MATCH，短查询回退 LIKE；
 // 先写入历史再建索引，验证 rebuild 能覆盖已有记录。

@@ -5,16 +5,12 @@ export type DdlGenerateResult =
   | { ok: true; sql: string; warnings: string[] }
   | { ok: false; message: string; warnings: string[] };
 
-/** 校验并生成单条 CREATE TABLE；不支持 MSSQL。 */
+/** 校验并生成单条 CREATE TABLE。 */
 export function buildCreateTable(
   dialect: DatabaseType,
   definition: DdlTableDefinition,
 ): DdlGenerateResult {
   const warnings: string[] = [];
-
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings };
-  }
 
   const tableName = definition.name.trim();
   if (!tableName) {
@@ -54,15 +50,25 @@ export function buildCreateTable(
 
   if (autoColumns.length === 1) {
     const column = autoColumns[0];
-    if (!column.primaryKey) {
-      return { ok: false, message: '自增列必须同时设为主键。', warnings };
-    }
-    if (dialect === 'sqlite' && column.type.trim().toUpperCase() !== 'INTEGER') {
-      return {
-        ok: false,
-        message: 'SQLite 的自增列类型必须是 INTEGER。',
-        warnings,
-      };
+    if (dialect === 'mssql') {
+      if (!isMssqlIdentityType(column.type)) {
+        return {
+          ok: false,
+          message: 'MSSQL 的 IDENTITY 列必须是整数类型（tinyint/smallint/int/bigint）。',
+          warnings,
+        };
+      }
+    } else {
+      if (!column.primaryKey) {
+        return { ok: false, message: '自增列必须同时设为主键。', warnings };
+      }
+      if (dialect === 'sqlite' && column.type.trim().toUpperCase() !== 'INTEGER') {
+        return {
+          ok: false,
+          message: 'SQLite 的自增列类型必须是 INTEGER。',
+          warnings,
+        };
+      }
     }
   }
 
@@ -71,9 +77,37 @@ export function buildCreateTable(
   }
 
   const lines = definition.columns.map((column) => `  ${renderColumn(dialect, column)}`);
+  const target =
+    dialect === 'mssql'
+      ? quoteIdent('mssql', qualifyMssqlName(tableName, definition.schema))
+      : quoteIdent(dialect, tableName);
 
-  const sql = `CREATE TABLE ${quoteIdent(dialect, tableName)} (\n${lines.join(',\n')}\n);`;
+  const sql = `CREATE TABLE ${target} (\n${lines.join(',\n')}\n);`;
   return { ok: true, sql, warnings };
+}
+
+/** MSSQL 的对象名以 schema 或已限定的 `schema.table` 形式传入。 */
+function qualifyMssqlName(name: string, schema?: string): string {
+  const trimmed = name.trim();
+  if (schema?.trim()) return `${schema.trim()}.${trimmed}`;
+  return trimmed;
+}
+
+function isMssqlIdentityType(type: string): boolean {
+  return /^(tinyint|smallint|int|bigint)\b/i.test(type.trim());
+}
+
+function mssqlMultipart(name: string): { schema: string; object: string } {
+  const trimmed = name.trim();
+  const index = trimmed.indexOf('.');
+  if (index > 0) {
+    return { schema: trimmed.slice(0, index), object: trimmed.slice(index + 1) };
+  }
+  return { schema: 'dbo', object: trimmed };
+}
+
+function mssqlStringLiteral(value: string): string {
+  return `N'${value.replace(/'/g, "''")}'`;
 }
 
 function renderColumn(dialect: DatabaseType, column: DdlColumnDefinition): string {
@@ -83,6 +117,12 @@ function renderColumn(dialect: DatabaseType, column: DdlColumnDefinition): strin
   if (column.autoIncrement) {
     if (dialect === 'sqlite') {
       return `${columnName} INTEGER PRIMARY KEY AUTOINCREMENT`;
+    }
+    if (dialect === 'mssql') {
+      const parts = [`${columnName} ${type} IDENTITY(1,1)`, 'NOT NULL'];
+      if (column.primaryKey) parts.push('PRIMARY KEY');
+      else if (column.unique) parts.push('UNIQUE');
+      return parts.join(' ');
     }
     return `${columnName} ${type} NOT NULL AUTO_INCREMENT PRIMARY KEY`;
   }
@@ -109,10 +149,6 @@ export function buildAddColumn(
   tableName: string,
   column: DdlColumnDefinition,
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   const table = requireName(tableName, '表名');
   if (!table.ok) {
     return { ok: false, message: table.message, warnings: [] };
@@ -142,7 +178,10 @@ export function buildAddColumn(
 
   return {
     ok: true,
-    sql: `ALTER TABLE ${quoteIdent(dialect, table.name)} ADD COLUMN ${renderColumn(dialect, column)};`,
+    sql:
+      dialect === 'mssql'
+        ? `ALTER TABLE ${quoteIdent('mssql', table.name)} ADD ${renderColumn(dialect, column)};`
+        : `ALTER TABLE ${quoteIdent(dialect, table.name)} ADD COLUMN ${renderColumn(dialect, column)};`,
     warnings,
   };
 }
@@ -163,10 +202,6 @@ export function buildDropObject(
   name: string,
   kind: 'table' | 'view',
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   const target = requireName(name, kind === 'view' ? '视图名' : '表名');
   if (!target.ok) {
     return { ok: false, message: target.message, warnings: [] };
@@ -186,10 +221,6 @@ export function buildRenameTable(
   oldName: string,
   newName: string,
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   const from = requireName(oldName, '原表名');
   if (!from.ok) {
     return { ok: false, message: from.message, warnings: [] };
@@ -202,6 +233,24 @@ export function buildRenameTable(
 
   if (from.name === to.name) {
     return { ok: false, message: '新旧表名相同。', warnings: [] };
+  }
+
+  if (dialect === 'mssql') {
+    if (to.name.includes('.')) {
+      return {
+        ok: false,
+        message: 'MSSQL 重命名表只接受新表名；跨 schema 移动请使用 SQL 编辑器。',
+        warnings: [],
+      };
+    }
+    const current = mssqlMultipart(from.name);
+    return {
+      ok: true,
+      sql: `EXEC sp_rename ${mssqlStringLiteral(
+        `${current.schema}.${current.object}`,
+      )}, ${mssqlStringLiteral(to.name)};`,
+      warnings: [],
+    };
   }
 
   return {
@@ -224,10 +273,6 @@ export function buildCreateIndex(
   columns: string[],
   options: { name?: string; unique?: boolean } = {},
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   const table = requireName(tableName, '表名');
   if (!table.ok) {
     return { ok: false, message: table.message, warnings: [] };
@@ -253,10 +298,6 @@ export function buildDropIndex(  dialect: DatabaseType,
   indexName: string,
   tableName?: string,
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   const index = requireName(indexName, '索引名');
   if (!index.ok) {
     return { ok: false, message: index.message, warnings: [] };
@@ -268,7 +309,11 @@ export function buildDropIndex(  dialect: DatabaseType,
 
   const table = requireName(tableName ?? '', '表名');
   if (!table.ok) {
-    return { ok: false, message: 'MySQL 系删除索引需要表名。', warnings: [] };
+    return {
+      ok: false,
+      message: `${dialect === 'mssql' ? 'MSSQL' : 'MySQL 系'}删除索引需要表名。`,
+      warnings: [],
+    };
   }
 
   return {
@@ -285,7 +330,11 @@ export function buildTableComment(
   comment: string,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
+    return {
+      ok: false,
+      message: 'MSSQL 表注释使用扩展属性（MS_Description），暂不支持 UI 编辑。',
+      warnings: [],
+    };
   }
   if (dialect === 'sqlite') {
     return {
@@ -314,10 +363,6 @@ export function buildCreateView(
   viewName: string,
   selectSql: string,
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   const view = requireName(viewName, '视图名');
   if (!view.ok) {
     return { ok: false, message: view.message, warnings: [] };
@@ -344,10 +389,6 @@ export function buildDropColumn(
   tableName: string,
   columnName: string,
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   const table = requireName(tableName, '表名');
   if (!table.ok) {
     return { ok: false, message: table.message, warnings: [] };
@@ -361,7 +402,9 @@ export function buildDropColumn(
   const warnings =
     dialect === 'sqlite'
       ? ['SQLite 需要 3.35+；低版本请重建表。删除列不可撤销。']
-      : ['删除列不可撤销。'];
+      : dialect === 'mssql'
+        ? ['删除列不可撤销；如有默认约束、索引、CHECK 或外键依赖，需先删除依赖。']
+        : ['删除列不可撤销。'];
 
   return {
     ok: true,
@@ -377,10 +420,6 @@ export function buildRenameColumn(
   oldName: string,
   newName: string,
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   const table = requireName(tableName, '表名');
   if (!table.ok) {
     return { ok: false, message: table.message, warnings: [] };
@@ -398,6 +437,19 @@ export function buildRenameColumn(
 
   if (from.name === to.name) {
     return { ok: false, message: '新旧列名相同。', warnings: [] };
+  }
+
+  if (dialect === 'mssql') {
+    if (to.name.includes('.')) {
+      return { ok: false, message: 'MSSQL 新列名不能包含 schema。', warnings: [] };
+    }
+    return {
+      ok: true,
+      sql: `EXEC sp_rename ${mssqlStringLiteral(
+        `${table.name}.${from.name}`,
+      )}, ${mssqlStringLiteral(to.name)}, ${mssqlStringLiteral('COLUMN')};`,
+      warnings: [],
+    };
   }
 
   const warnings =
@@ -427,10 +479,6 @@ export function buildModifyColumn(
   columnName: string,
   column: DdlColumnDefinition,
 ): DdlGenerateResult {
-  if (dialect === 'mssql') {
-    return { ok: false, message: 'MSSQL 的 UI 建表/改表尚未实现，请使用 SQL 编辑器执行 DDL。', warnings: [] };
-  }
-
   if (dialect === 'sqlite') {
     return {
       ok: false,
@@ -468,6 +516,18 @@ export function buildModifyColumn(
   }
   if (dialect === 'mariadb') {
     warnings.push('MariaDB 的 MODIFY COLUMN 会保留未写出的属性；请核对生成 SQL。');
+  }
+
+  if (dialect === 'mssql') {
+    warnings.push('MSSQL 的 ALTER COLUMN 不修改默认值；如需修改默认值请先删除默认约束。');
+    return {
+      ok: true,
+      sql: `ALTER TABLE ${quoteIdent('mssql', table.name)} ALTER COLUMN ${quoteIdent(
+        'mssql',
+        name.name,
+      )} ${column.type.trim()} ${column.notNull ? 'NOT NULL' : 'NULL'};`,
+      warnings,
+    };
   }
 
   return {

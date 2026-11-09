@@ -47,7 +47,7 @@ try {
     'connection test did not return SQLite version',
   );
 
-  await page.getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
     null,
@@ -59,9 +59,16 @@ try {
     { timeout: 15000 },
   );
 
-  const treeText = await page.locator('.object-tree').innerText();
+  const treeText = await page.locator('.object-tree-body').innerText();
   assert(treeText.includes('demo_users'), 'table demo_users missing from object tree');
   assert(treeText.includes('active_users'), 'view active_users missing from object tree');
+
+  // 查询超时由设置面板下发；环境变量只在未下发时兜底。
+  await page.locator('.toolbar .icon-btn[title="设置"]').click();
+  await page.waitForSelector('.modal', { timeout: 5000 });
+  await page.locator('.modal .field', { hasText: '查询超时' }).locator('select').selectOption('10000');
+  await page.locator('.modal').getByRole('button', { name: '保存', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 5000 });
 
   // 系统对象默认隐藏；勾选后才出现 sqlite_sequence。
   assert(
@@ -70,14 +77,14 @@ try {
   );
   await page.locator('.tree-toggle input').check();
   await page.waitForFunction(
-    () => document.querySelector('.object-tree')?.textContent?.includes('sqlite_sequence') ?? false,
+    () => document.querySelector('.object-tree-body')?.textContent?.includes('sqlite_sequence') ?? false,
     null,
     { timeout: 15000 },
   );
   await page.locator('.tree-toggle input').uncheck();
   await page.waitForFunction(
     () =>
-      !(document.querySelector('.object-tree')?.textContent?.includes('sqlite_sequence') ?? true),
+      !(document.querySelector('.object-tree-body')?.textContent?.includes('sqlite_sequence') ?? true),
     null,
     { timeout: 15000 },
   );
@@ -86,7 +93,7 @@ try {
   const editorValue = await page.locator('.sql-editor').inputValue();
   assert(editorValue.includes('SELECT * FROM "demo_users"'), 'table click did not fill SQL');
 
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('100 行'),
     null,
@@ -103,7 +110,7 @@ try {
   await page.locator('.sql-editor').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 2001) SELECT x FROM cnt;',
   );
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () =>
       document
@@ -114,8 +121,45 @@ try {
   );
   assert((await statusText(page)).includes('2000 行'), 'truncated row count missing from status bar');
 
+  // 「不限制」档位：同样 2001 行不应再截断。
+  await page.locator('.toolbar .icon-btn[title="设置"]').click();
+  await page.waitForSelector('.modal', { timeout: 5000 });
+  await page
+    .locator('.modal .field', { hasText: '单次查询结果上限' })
+    .locator('select')
+    .selectOption('0');
+  assert(
+    (await page.locator('.modal .form-error').innerText()).includes('内存'),
+    'unlimited setting should warn about memory risk',
+  );
+  await page.locator('.modal').getByRole('button', { name: '保存', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 5000 });
+  await page.locator('.sql-editor').fill(
+    'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 2001) SELECT x FROM cnt;',
+  );
+  await page.getByRole('button', { name: '执行', exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('2001 行') ?? false,
+    null,
+    { timeout: 15000 },
+  );
+  assert(
+    !((await page.locator('.result-pane .badge-warn').allInnerTexts()).join(' ').includes('仅显示前')),
+    'unlimited result should not show truncation badge',
+  );
+
+  // 恢复默认上限，避免影响后续断言。
+  await page.locator('.toolbar .icon-btn[title="设置"]').click();
+  await page.waitForSelector('.modal', { timeout: 5000 });
+  await page
+    .locator('.modal .field', { hasText: '单次查询结果上限' })
+    .locator('select')
+    .selectOption('2000');
+  await page.locator('.modal').getByRole('button', { name: '保存', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 5000 });
+
   await page.locator('.sql-editor').fill("UPDATE demo_users SET status = 'blocked' WHERE id = 1;");
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.result-pane')?.textContent?.includes('1 行受影响'),
     null,
@@ -123,7 +167,7 @@ try {
   );
 
   await page.locator('.sql-editor').fill('SELECT * FROM missing_table;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForSelector('.result-error', { timeout: 15000 });
   assert(
     (await page.locator('.result-error').innerText()).includes('no such table'),
@@ -135,20 +179,59 @@ try {
   );
   assert((await statusText(page)).includes('执行失败'), 'status bar did not show failure');
 
-  await page.locator('.sql-editor').fill('SELECT 1; SELECT 2;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.locator('.sql-editor').fill('SELECT 1 AS a; SELECT 2 AS b;');
+  await page.getByRole('button', { name: '执行', exact: true }).click();
+  await page.waitForSelector('.result-tabs', { timeout: 15000 });
   await page.waitForFunction(
-    () =>
-      document
-        .querySelector('.result-error')
-        ?.textContent?.includes('一次只能执行一条 SQL') ?? false,
+    () => document.querySelectorAll('.result-tab').length >= 3,
+    null,
+    { timeout: 5000 },
+  );
+  assert(
+    (await page.locator('.result-tabs').innerText()).includes('结果 1') &&
+      (await page.locator('.result-tabs').innerText()).includes('结果 2'),
+    'multi-statement result tabs missing',
+  );
+  await page.waitForFunction(
+    () => document.querySelector('revo-grid')?.textContent?.includes('1') ?? false,
     null,
     { timeout: 15000 },
+  );
+  await page.locator('.result-tab', { hasText: '结果 2' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('revo-grid')?.textContent?.includes('2') ?? false,
+    null,
+    { timeout: 15000 },
+  );
+  await page.locator('.result-tab', { hasText: '消息' }).click();
+  await page.waitForSelector('.result-messages', { timeout: 5000 });
+  assert(
+    (await page.locator('.result-messages').innerText()).includes('SELECT 1 AS a;'),
+    'message panel missing statement text',
+  );
+
+  // 多语句遇错停止：第一条结果保留，失败原因进入消息面板，后续语句不执行。
+  await page.locator('.sql-editor').fill(
+    'SELECT 10 AS ok; SELECT * FROM missing_multi; SELECT 20 AS never;',
+  );
+  await page.getByRole('button', { name: '执行', exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector('.result-messages')?.textContent?.includes('no such table') ?? false,
+    null,
+    { timeout: 15000 },
+  );
+  assert(
+    (await page.locator('.result-messages').innerText()).includes('后续 1 条未执行'),
+    'message panel missing stop note',
+  );
+  assert(
+    (await page.locator('.result-tabs').innerText()).includes('结果 1'),
+    'first result should remain after later failure',
   );
 
   // 生产连接：DELETE 无 WHERE 必须先弹确认；取消后不得执行。
   await page.locator('.sql-editor').fill('DELETE FROM demo_orders;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForSelector('.danger-modal', { timeout: 5000 });
   assert(
     (await page.locator('.danger-modal').innerText()).includes('没有顶层 WHERE'),
@@ -162,7 +245,7 @@ try {
   );
 
   await page.locator('.sql-editor').fill('SELECT COUNT(*) AS n FROM demo_orders;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('revo-grid')?.textContent?.includes('1500') ?? false,
     null,
@@ -172,7 +255,7 @@ try {
   await page.locator('.sql-editor').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
   );
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForTimeout(300);
   await page.getByRole('button', { name: '取消' }).click();
   await page.waitForFunction(
@@ -207,7 +290,7 @@ try {
   );
 
   await page.locator('.sql-editor').fill('SELECT 42 AS ok;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
     null,
@@ -216,7 +299,7 @@ try {
 
   // 超过 2^53 的整数必须原样返回，不能被 JS number 静默四舍五入。
   await page.locator('.sql-editor').fill('SELECT 9007199254740993 AS big;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('revo-grid')?.textContent?.includes('9007199254740993') ?? false,
     null,
@@ -230,14 +313,21 @@ try {
     null,
     { timeout: 5000 },
   );
-  await page.waitForFunction(
-    () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
-    null,
-    { timeout: 15000 },
-  );
+  try {
+    await page.waitForFunction(
+      () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
+      null,
+      { timeout: 15000 },
+    );
+  } catch (error) {
+    console.error('[e2e] status after new tab:', await statusText(page));
+    console.error('[e2e] tabs:', await page.locator('.tab').allInnerTexts());
+    console.error('[e2e] alerts:', await page.locator('.session-alert').allInnerTexts());
+    throw error;
+  }
 
   await page.locator('.sql-editor').fill('SELECT 2 AS ok;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
     null,
@@ -248,13 +338,13 @@ try {
   await page.locator('.sql-editor').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
   );
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForTimeout(300);
 
   await page.locator('.tab', { hasText: '查询 2' }).click();
   const secondStarted = Date.now();
   await page.locator('.sql-editor').fill('SELECT 3 AS ok;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('执行中'),
     null,
@@ -271,7 +361,7 @@ try {
 
   await page.locator('.tab', { hasText: '查询 2' }).click();
   await page.locator('.sql-editor').fill('SELECT 4 AS ok;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
     null,
@@ -312,35 +402,81 @@ try {
   assert(databaseDdl.includes('CREATE TABLE demo_users'), 'database DDL missing table');
   assert(databaseDdl.includes('CREATE VIEW active_users'), 'database DDL missing view');
 
-  // MOD-04 Phase 3：新建表向导 → DDL 预览 → 执行 → 对象树刷新。
-  await page.locator('.sidebar-heading .icon-btn[title="新建表"]').click();
+  // MOD-04 Phase 3：新建表页签 → DDL 预览 → 执行 → 对象树刷新。
+  await page.locator('.connection-object-actions .icon-btn[title="新建表"]').click();
+  await page.waitForSelector('.table-design-tab', { timeout: 10000 });
   await page.getByPlaceholder('例如：orders').fill('e2e_created');
-  await page.getByRole('button', { name: '生成预览' }).click();
+  await page.getByRole('button', { name: '保存并生成 DDL' }).click();
   await page.waitForSelector('.ddl-preview', { timeout: 5000 });
   assert(
     (await page.locator('.ddl-preview').inputValue()).includes('CREATE TABLE "e2e_created"'),
     'preview missing CREATE TABLE',
   );
-  await page.locator('.designer-modal').getByRole('button', { name: '执行' }).click();
+  assert(
+    (await page.locator('.table-design-db').count()) === 0,
+    'SQLite should hide the database selector',
+  );
+  await page.locator('.table-design-tab').getByRole('button', { name: '执行 DDL' }).click();
+  await page.waitForFunction(() => !document.querySelector('.table-design-tab'), null, {
+    timeout: 15000,
+  });
   await page.waitForFunction(
-    () => document.querySelector('.object-tree')?.textContent?.includes('e2e_created') ?? false,
+    () => document.querySelector('.object-tree-body')?.textContent?.includes('e2e_created') ?? false,
     null,
     { timeout: 15000 },
   );
+
+  // 右击表 → 编辑表结构页签（独立会话，不能改绑当前 SQL 标签）。
+  await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '编辑表结构…' }).click();
+  await page.waitForSelector('.table-design-tab', { timeout: 15000 });
+  assert(
+    (await page.locator('.table-design-header').innerText()).includes('编辑表结构'),
+    'edit structure tab missing title',
+  );
+  await page.locator('.table-design-tab').getByRole('button', { name: '添加列' }).click();
+  await page.getByLabel('第 2 列列名').fill('e2e_struct_col');
+  await page.getByLabel('第 2 列类型').fill('TEXT');
+  await page.getByRole('button', { name: '保存并生成 DDL' }).click();
+  await page.waitForSelector('.ddl-preview', { timeout: 5000 });
+  assert(
+    (await page.locator('.ddl-preview').inputValue()).includes('ADD COLUMN "e2e_struct_col"'),
+    'edit structure preview missing ADD COLUMN',
+  );
+  await page.locator('.table-design-tab').getByRole('button', { name: '执行 DDL' }).click();
+  await page.waitForFunction(() => !document.querySelector('.table-design-tab'), null, {
+    timeout: 15000,
+  });
+
+  // 编辑列类型：SQLite 走整表重建（多语句 + 外键检查关闭）。
+  await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '编辑表结构…' }).click();
+  await page.waitForSelector('.table-design-tab', { timeout: 15000 });
+  await page.getByLabel('第 2 列类型').fill('INTEGER');
+  await page.getByRole('button', { name: '保存并生成 DDL' }).click();
+  await page.waitForSelector('.ddl-preview', { timeout: 5000 });
+  assert(
+    (await page.locator('.ddl-preview').inputValue()).includes('__dbcraft_rebuild_e2e_created'),
+    'edit type preview missing SQLite rebuild',
+  );
+  await page.locator('.table-design-tab').getByRole('button', { name: '执行 DDL' }).click();
+  await page.waitForFunction(() => !document.querySelector('.table-design-tab'), null, {
+    timeout: 15000,
+  });
 
   // MOD-04：添加列，再用查询确认列存在。
   await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: '添加列…' }).click();
   await page.getByLabel('列名').fill('note');
   await page.getByLabel('列类型').fill('TEXT');
-  await page.locator('.modal').getByRole('button', { name: '执行' }).click();
+  await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => !document.querySelector('.modal'),
     null,
     { timeout: 10000 },
   );
   await page.locator('.sql-editor').fill('SELECT * FROM "e2e_created" LIMIT 1;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('revo-grid')?.textContent?.includes('note') ?? false,
     null,
@@ -351,13 +487,13 @@ try {
   await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: '创建索引…' }).click();
   await page.getByPlaceholder('例如：status, created_at').fill('note');
-  await page.locator('.modal').getByRole('button', { name: '执行' }).click();
+  await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 10000 });
 
   await page.locator('.sql-editor').fill(
     "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_e2e_created_note';",
   );
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('revo-grid')?.textContent?.includes('idx_e2e_created_note') ?? false,
     null,
@@ -367,7 +503,7 @@ try {
   await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: '删除索引…' }).click();
   await page.getByPlaceholder('例如：idx_orders_status').fill('idx_e2e_created_note');
-  await page.locator('.modal').getByRole('button', { name: '执行' }).click();
+  await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 10000 });
 
   // MOD-04：删除列（输入列名两次确认）。
@@ -375,28 +511,27 @@ try {
   await page.getByRole('menuitem', { name: '删除列…' }).click();
   await page.getByPlaceholder('例如：note').fill('note');
   await page.getByLabel('再次输入列名确认').fill('note');
-  await page.locator('.modal').getByRole('button', { name: '执行' }).click();
+  await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 10000 });
 
   await page.locator('.sql-editor').fill('SELECT * FROM "e2e_created" LIMIT 1;');
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelector('revo-grid')?.textContent?.includes('id') ?? false,
+    () => {
+      const text = document.querySelector('revo-grid')?.textContent ?? '';
+      return text.includes('id') && !text.includes('note');
+    },
     null,
     { timeout: 15000 },
-  );
-  assert(
-    !(await page.locator('revo-grid').innerText()).includes('note'),
-    'dropped column still visible',
   );
 
   // MOD-04：重命名表与删除表（输入名称确认）。
   await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: '重命名表…' }).click();
   await page.getByPlaceholder('例如：orders_new').fill('e2e_renamed');
-  await page.locator('.modal').getByRole('button', { name: '执行' }).click();
+  await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelector('.object-tree')?.textContent?.includes('e2e_renamed') ?? false,
+    () => document.querySelector('.object-tree-body')?.textContent?.includes('e2e_renamed') ?? false,
     null,
     { timeout: 15000 },
   );
@@ -404,18 +539,25 @@ try {
   await page.locator('.tree-item', { hasText: 'e2e_renamed' }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: '删除表…' }).click();
   await page.getByPlaceholder('e2e_renamed').fill('e2e_renamed');
-  await page.locator('.modal').getByRole('button', { name: '执行' }).click();
+  await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
-    () => !(document.querySelector('.object-tree')?.textContent?.includes('e2e_renamed') ?? false),
+    () => !(document.querySelector('.object-tree-body')?.textContent?.includes('e2e_renamed') ?? false),
     null,
     { timeout: 15000 },
   );
 
-  // MOD-03：查询历史自动记录、打开面板、点击插入编辑器。
-  await page.locator('.toolbar .icon-btn[title="查询历史"]').click();
+  // MOD-03：Ctrl+E 打开历史、搜索命中高亮、点击记录插入编辑器光标处。
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+E' : 'Control+E');
+  await page.waitForSelector('.history-modal', { timeout: 10000 });
   await page.waitForSelector('.history-row', { timeout: 10000 });
   const historyText = await page.locator('.history-list').innerText();
   assert(historyText.includes('SELECT'), 'history list missing executed SQL');
+  await page.getByLabel('搜索查询历史').fill('SELECT');
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('.history-match')),
+    null,
+    { timeout: 5000 },
+  );
   await page.locator('.history-row').first().click();
   await page.waitForFunction(
     () => !document.querySelector('.history-modal'),
@@ -428,7 +570,10 @@ try {
   // MOD-05 第一层：双击表打开数据页，分页浏览。
   await page.locator('.tree-item', { hasText: 'demo_users' }).dblclick();
   await page.waitForFunction(
-    () => document.querySelector('.tab.is-active')?.textContent?.includes('表 · demo_users') ?? false,
+    () => {
+      const tab = document.querySelector('.tab.is-active')?.textContent ?? '';
+      return tab.includes('表 ·') && tab.includes('demo_users');
+    },
     null,
     { timeout: 5000 },
   );
@@ -469,15 +614,15 @@ try {
     { timeout: 5000 },
   );
 
-  // 查询超时：e2e 环境把超时设为 2 秒。
+  // 查询超时：上面把设置面板的查询超时调成了 10 秒。
   await page.locator('.sql-editor').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
   );
-  await page.getByRole('button', { name: '执行' }).click();
+  await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.result-error')?.textContent?.includes('查询超时') ?? false,
     null,
-    { timeout: 15000 },
+    { timeout: 20000 },
   );
 
   await page.screenshot({ path: screenshotPath });

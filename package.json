@@ -13,6 +13,8 @@
     "build": "npm run typecheck && electron-vite build",
     "smoke": "npm run build && node scripts/smoke.mjs",
     "e2e:sqlite": "npm run build && node scripts/e2e-sqlite.mjs",
+    "e2e:mysql": "npm run build && node --no-warnings --env-file-if-exists=.env.local scripts/e2e-mysql.mjs",
+    "e2e:mssql": "npm run build && node --no-warnings --env-file=.env.local scripts/e2e-mssql.mjs",
     "demo:db": "node scripts/create-demo-db.mjs",
     "test:safety": "node --no-warnings --experimental-strip-types scripts/test-safety.mjs",
     "test:groups": "node --no-warnings --experimental-strip-types scripts/test-groups.mjs",
@@ -38,6 +40,8 @@
     "check:mssql": "node --no-warnings --env-file=.env.local scripts/check-mssql-session.mjs",
     "check:mssql-agent": "node --no-warnings --env-file=.env.local scripts/check-mssql-agent.mjs",
     "check:mssql-multidb": "node --no-warnings --env-file=.env.local scripts/check-mssql-multidb.mjs",
+    "check:mysql": "node --no-warnings --experimental-transform-types --env-file-if-exists=.env.local scripts/check-mysql-session.mjs mysql",
+    "check:mariadb": "node --no-warnings --experimental-transform-types --env-file-if-exists=.env.local scripts/check-mysql-session.mjs mariadb",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --win nsis"
   },

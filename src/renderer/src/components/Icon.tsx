@@ -13,6 +13,8 @@ export type IconName =
   | 'close'
   | 'refresh'
   | 'search'
+  | 'copy'
+  | 'filter'
   | 'folder'
   | 'chevron'
   | 'plug';
@@ -72,6 +74,13 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="m16 16 4 4" />
     </>
   ),
+  copy: (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+    </>
+  ),
+  filter: <path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z" />,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,
   chevron: <path d="m9 6 6 6-6 6" />,
   plug: (

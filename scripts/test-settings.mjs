@@ -8,6 +8,7 @@ import {
   RESULT_ROW_LIMIT_OPTIONS,
   normalizeAppSettings,
   normalizeRowLimit,
+  resolveRowLimit,
 } from '../src/shared/settings.ts';
 
 function assert(condition, message) {
@@ -39,6 +40,10 @@ assert(
   normalizeAppSettings({ resultRowLimit: 500, historyRetention: 123 }).historyRetention ===
     10000,
   'invalid retention should fall back',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500, historyRetention: 0 }).historyRetention === 0,
+  'unlimited retention rejected',
 );
 assert(
   normalizeAppSettings({ resultRowLimit: 500, queryTimeoutMs: 0 }).queryTimeoutMs === 0,
@@ -77,6 +82,22 @@ assert(
   'history should default to enabled',
 );
 assert(
+  normalizeAppSettings({ resultRowLimit: 500, historyDedupe: false }).historyDedupe === false,
+  'history dedupe disable rejected',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500 }).historyDedupe === true,
+  'history dedupe should default to enabled',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500, historyMask: false }).historyMask === false,
+  'history mask disable rejected',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500 }).historyMask === true,
+  'history mask should default to enabled',
+);
+assert(
   normalizeAppSettings({ resultRowLimit: 500, theme: 'neon' }).theme === 'dark',
   'unknown theme should fall back',
 );
@@ -97,11 +118,21 @@ assert(
   normalizeAppSettings({ resultRowLimit: '1000' }).resultRowLimit === 1000,
   'string setting should normalize',
 );
+assert(
+  normalizeAppSettings({ resultRowLimit: 0 }).resultRowLimit === 0,
+  'unlimited result rows should be preserved',
+);
+assert(
+  normalizeRowLimit(-1) === 2000,
+  'negative row limit should fall back',
+);
 
 for (const option of RESULT_ROW_LIMIT_OPTIONS) {
   assert(normalizeRowLimit(option) === option, `row limit ${option} rejected`);
 }
-assert(normalizeRowLimit(0) === 2000, 'zero should fall back');
+assert(normalizeRowLimit(0) === 0, 'zero should mean unlimited');
+assert(resolveRowLimit(0) === Number.POSITIVE_INFINITY, 'unlimited should resolve to Infinity');
+assert(resolveRowLimit(500) === 500, 'finite limit should pass through');
 assert(normalizeRowLimit(10_001) === 2000, 'oversized should fall back');
 assert(normalizeRowLimit(undefined) === 2000, 'undefined should fall back');
 assert(normalizeRowLimit('abc') === 2000, 'NaN should fall back');
