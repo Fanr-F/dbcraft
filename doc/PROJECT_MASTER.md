@@ -1164,15 +1164,12 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **修复**：右键「关闭」在只剩一个 SQL 标签时置灰；`closeTab` 被直接调用时给出「至少保留一个 SQL 标签」提示。
 - **验收**：单标签时右键「关闭」置灰或有明确提示；不会静默失败。
 
-#### H-11 死文件与临时探针脚本留在仓库
+#### H-11 死文件与临时探针脚本留在仓库（已清理）
 
-- **优先级/状态**：P2 / 🟡
-- **文档覆盖**：未提。
-- **证据**：`src/renderer/src/components/AgentJobsDialog.tsx` 只有 3 行占位导出（注释说 UI 已迁到 `AgentTabPanel`）；仓库根有未跟踪的 `scripts/tmp-probe-mssql-rows.mjs`、`scripts/tmp-probe-mssql-types.mjs`、`scripts/tmp-probe-tedious.mjs`。
-- **现象**：历史遗留 shim 与临时联调脚本混在源码/脚本目录。
-- **影响**：新人误读；提交与构建噪音；探针脚本可能含本地环境假设。
-- **建议**：确认无引用后删除 `AgentJobsDialog.tsx`；删除或收纳 `tmp-probe-*`（需要的逻辑并入 `check:mssql`）。
-- **验收**：`npm run typecheck` / `npm run build` 通过；仓库不再有 `tmp-probe-*` 与无引用 shim。
+- **优先级/状态**：P2 / ✅（W-20261109-39）
+- **原问题**：`AgentJobsDialog.tsx` 是 3 行兼容空壳；仓库曾有未跟踪的 `tmp-probe-*` 脚本。
+- **修复**：确认无引用后删除 `AgentJobsDialog.tsx`；当前工作区未发现 `scripts/tmp-probe-*.mjs`。
+- **验收**：`npm run typecheck` / `npm run build` 通过；仓库不再有无引用 shim 与临时探针。
 
 ### 4.3 K：文档已列但代码仍未完成
 
@@ -1482,6 +1479,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-36 H-10 单标签关闭行为**：诉求是避免只剩一个 SQL 标签时「关闭」静默无反应。变更：`Workspace` 标签右键「关闭」在仅剩一个 SQL 标签时置灰；`App.closeTab` 被直接调用时提示「至少保留一个 SQL 标签」。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中点击验收。遗留：未改变「关闭后自动新建空标签」的备选交互。
 - **W-20261109-37 H-01 MSSQL 加载全部导出**：诉求是去掉 MSSQL「加载全部」的旧 guard。变更：删除 `loadAllForExport` 中 `connection.input.type === 'mssql'` 直接返回「MSSQL 驱动尚未接入」的分支，统一走 `query.execute({ maxRows: 10000 })` 与现有截断提示。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL 实例上点导出。遗留：`e2e:mssql` 未补导出断言；超过 1 万行仍截断。
 - **W-20261109-38 H-05 关闭标签先取消查询**：诉求是关闭正在执行查询的标签时先取消服务端查询。变更：`cancelQueryForTab` 增加 `silent` 参数；`closeTab` 在关闭 session 前 `await` 取消；`closeTabsByIds` 批量关闭时逐个取消；取消失败不阻塞关闭。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用 MySQL `SLEEP` 做真机验证。遗留：主进程 `MysqlSession.close()` 仍是 `connection.end()`，取消依赖关闭前的 `query.cancel`；SQLite 取消仍会终止 Worker。
+- **W-20261109-39 H-11 清理死文件**：诉求是移除无引用 shim 与临时探针脚本。变更：确认 `AgentJobsDialog.tsx` 无引用后删除；当前工作区未发现 `scripts/tmp-probe-*.mjs`。涉及 `src/renderer/src/components/AgentJobsDialog.tsx`（删除）。验证：`npm run typecheck`、`npm run build` 通过。遗留：无。
 
 ---
 
