@@ -68,6 +68,11 @@ function normalize(raw: unknown): ConnectionInput | null {
   }
 
   if (type === 'mssql') {
+    const instanceName =
+      typeof raw.instanceName === 'string' ? raw.instanceName.trim() : '';
+    const safeInstance = /^[A-Za-z0-9_$#-]{1,64}$/.test(instanceName)
+      ? instanceName
+      : '';
     return {
       type: 'mssql',
       name,
@@ -80,6 +85,7 @@ function normalize(raw: unknown): ConnectionInput | null {
       database,
       encrypt: raw.encrypt !== false,
       trustServerCertificate: raw.trustServerCertificate === true,
+      ...(safeInstance ? { instanceName: safeInstance } : {}),
     };
   }
 

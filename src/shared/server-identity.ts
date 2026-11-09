@@ -29,6 +29,11 @@ export function serverDisplayName(input: ConnectionInput): string {
   return `${input.host.trim()}:${input.port}`;
 }
 
+/** 连接配置去重键：同一服务器 + 同名配置视为重复。 */
+export function connectionProfileKey(input: ConnectionInput): string {
+  return `${serverKey(input)}\u0000${input.name.trim().toLowerCase()}`;
+}
+
 /** 服务器类型标签；用于 UI 显示。 */
 export function serverTypeLabel(input: ConnectionInput): string {
   switch (input.type) {

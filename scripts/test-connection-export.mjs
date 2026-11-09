@@ -7,6 +7,7 @@ import {
   parseConnectionExport,
   serializeConnections,
 } from '../src/shared/connection-export.ts';
+import { connectionProfileKey } from '../src/shared/server-identity.ts';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -80,6 +81,69 @@ assert(mssqlInput.name === 'SQL Server', 'name should be trimmed');
 assert(mssqlInput.group === '' && mssqlInput.env === 'dev', 'defaults wrong');
 assert(mssqlInput.password === '', 'mssql password not cleared');
 assert(mssqlInput.encrypt === true && mssqlInput.trustServerCertificate === false, 'mssql flags wrong');
+
+// MSSQL 命名实例往返不能丢。
+const named = parseConnectionExport(
+  JSON.stringify([
+    {
+      type: 'mssql',
+      name: '命名实例',
+      host: 'db.local',
+      port: 1433,
+      username: 'sa',
+      password: '',
+      database: 'master',
+      instanceName: 'SQLEXPRESS',
+      encrypt: true,
+      trustServerCertificate: false,
+    },
+  ]),
+);
+assert(named.ok, 'named instance import failed');
+assert(named.inputs[0].instanceName === 'SQLEXPRESS', 'named instance lost');
+
+// 非法实例名被丢弃，不进入连接配置。
+const badInstance = parseConnectionExport(
+  JSON.stringify([
+    {
+      type: 'mssql',
+      name: '坏实例',
+      host: 'db.local',
+      port: 1433,
+      username: 'sa',
+      password: '',
+      database: 'master',
+      instanceName: 'x; DROP DATABASE y',
+    },
+  ]),
+);
+assert(
+  badInstance.ok && badInstance.inputs[0].instanceName === undefined,
+  'invalid instance kept',
+);
+
+// 去重键：同服务器 + 同名视为重复；换名或换服务器则不是。
+const base = {
+  type: 'mysql',
+  name: '本地 MySQL',
+  group: '',
+  env: 'dev',
+  host: '127.0.0.1',
+  port: 3306,
+  username: 'root',
+  password: '',
+  database: 'demo',
+  sslMode: 'prefer',
+};
+assert(connectionProfileKey(base) === connectionProfileKey({ ...base }), 'dedupe key unstable');
+assert(
+  connectionProfileKey(base) !== connectionProfileKey({ ...base, name: '另一个名字' }),
+  'dedupe key should include name',
+);
+assert(
+  connectionProfileKey(base) !== connectionProfileKey({ ...base, port: 3307 }),
+  'dedupe key should include server',
+);
 
 const failures = [
   ['not json', 'JSON'],

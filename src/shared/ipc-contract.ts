@@ -98,7 +98,13 @@ export type ConnectionRemoveAllResult =
   | { ok: false; message: string };
 
 export type ConnectionImportResult =
-  | { ok: true; imported: ConnectionRecord[]; skipped: number }
+  | {
+      ok: true;
+      imported: ConnectionRecord[];
+      skipped: number;
+      /** 因「同服务器 + 同名」而跳过的重复配置数量。 */
+      duplicates?: number;
+    }
   | { ok: false; canceled?: boolean; message: string };
 
 export type QueryCell = string | number | boolean | null;

@@ -1118,15 +1118,12 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **建议**：同时 `closeTabSession(browseSessionId(id))`、清 `browseConnectionId` 与 browse 缓存；提示改为「已断开连接与对象树」。
 - **验收**：展开树 → 右击「断开连接」→ 树收起、状态点变未连接；再展开时重新建会话。
 
-#### H-04 连接导入导出往返丢 MSSQL 命名实例，且重复导入无去重
+#### H-04 连接导入导出往返丢 MSSQL 命名实例，且重复导入无去重（已修复）
 
-- **优先级/状态**：P1 / ❌
-- **文档覆盖**：未提。
-- **证据**：`src/shared/connection-export.ts:70-84` 的 mssql 分支没有读取 `instanceName`；`serializeConnections()` 又会把 `instanceName` 原样导出。`src/main/ipc/router.ts:282-291` 导入时逐条 `saveConnection`，没有按 server key/名称去重，`skipped` 只统计校验失败。
-- **现象**：命名实例连接导出再导入后变回 `host:port`；同一文件连续导入两次会生成两份连接；导入后密码一律为空，但没有补录提示。
-- **影响**：备份/迁移会悄悄改变连接方式；连接列表膨胀；用户容易误以为导入是幂等的。
-- **建议**：`normalize()` 补 `instanceName`（与 port 互斥规则保持一致）；导入前按 `serverKey + name` 去重，或提供「跳过/覆盖/新建」策略；导入结果提示「密码为空，请编辑补录」。
-- **验收**：命名实例导出 → 清空 → 导入，仍走实例；连续导入两次不产生重复；结果返回 imported/skipped 明细。
+- **优先级/状态**：P1 / ✅（W-20261109-33）
+- **原问题**：`connection-export.ts` 的 mssql 分支没有读取 `instanceName`；导入逐条保存，没有按服务器/名称去重。
+- **修复**：导入保留合法 `instanceName`（非法值丢弃）；新增 `connectionProfileKey`（服务器 key + 名称），导入时跳过同服务器同名配置并返回 `duplicates`；导入提示「跳过 N 个重复」并继续提示密码需重新输入。
+- **验收**：命名实例导出再导入仍走实例；连续导入两次不产生重复；结果返回 imported/skipped/duplicates。
 
 #### H-05 关闭标签不会取消正在执行的查询
 
@@ -1494,6 +1491,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-30 M01-13 保存密码开关与已存密码测试**：诉求是实现「保存密码开关 / 清除已保存密码」，并让编辑连接测试时无需重输密码。变更：`ipc-contract.ts` 增加 `ConnectionSaveOptions.rememberPassword`，`connection.test` 增加可选连接 id；`schemas.ts` 增加 `connectionTestSchema` 与保存选项；`metadata.saveConnection` 在 `rememberPassword=false` 时清除 secret 并返回提示；`ConnectionManager.testConnection` 在密码为空且提供 id 时从主进程读取已存密码；`ConnectionDialog` 增加「保存到本地」开关、移除测试前必须重输密码的限制、保存时传递选项；`App.saveConnection` 透传选项。涉及文件：`src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`、`src/main/storage/metadata.ts`、`src/main/services/ConnectionManager.ts`、`src/renderer/src/features/connections/ConnectionDialog.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工点击。遗留：清除密码采用「取消勾选并保存」两步操作，没有单独的立即清除按钮；未补连接保存/密码读取的自动化测试。
 - **W-20261109-31 M01-02 SQLite 测试连接只读口径**：诉求是让 SQLite「测试连接」和真实会话一致处理只读/被占用文件。变更：`ConnectionTestResult` 增加 `readonly`；`testSqliteFile()` 在锁/权限错误时回退 `readonly: true` 重开并返回版本与只读标记；成功提示改为「只读模式（文件被占用或无写权限）」；不可读文件仍失败。涉及 `src/shared/ipc-contract.ts`、`src/main/services/ConnectionManager.ts`。验证：`npm run typecheck`、`npm run build` 通过；未构造只读文件做真机验证。遗留：只读测试尚未纳入 `e2e:sqlite`。
 - **W-20261109-32 M01-15 新建连接不再改绑当前标签**：诉求是让新建连接只保存配置，不影响当前 tab 的 SQL/结果/session。变更：`App.saveConnection` 新建分支删除改绑 tab、清空 runs/tableMetas/pending/undo/noPk、关闭旧 session、自动打开 browse session 的逻辑；保存后仅提示「双击连接打开对象树，右击查询创建标签」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工验收。遗留：新建连接暂不自动展开左侧树，需要用户双击；既有 `e2e:sqlite` 未覆盖「新建连接不影响当前 tab」。
+- **W-20261109-33 M01-10 连接导入导出命名实例与去重**：诉求是补上 MSSQL 命名实例往返和重复导入去重。变更：`connection-export.ts` 的 mssql 分支保留合法 `instanceName`（非法值丢弃）；`server-identity.ts` 新增 `connectionProfileKey`（服务器 key + 名称）；`ipc-contract.ts` 的导入结果增加 `duplicates`；`router.ts` 导入前读取现有连接并按 key 跳过重复，导入提示包含跳过数量。涉及 `src/shared/connection-export.ts`、`src/shared/server-identity.ts`、`src/shared/ipc-contract.ts`、`src/main/ipc/router.ts`、`src/renderer/src/App.tsx`、`scripts/test-connection-export.mjs`。验证：`npm run typecheck`、`npm run test:connection-export`、`npm run build` 通过。遗留：去重策略目前固定「跳过」，没有覆盖/新建选项；未在真实 Electron 中手工导入验证。
 
 ---
 

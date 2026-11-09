@@ -94,6 +94,7 @@ import {
   runAgentJobAction,
 } from '../services/mssql/agent';
 import { parseConnectionExport } from '../../shared/connection-export';
+import { connectionProfileKey } from '../../shared/server-identity';
 import {
   listConnections,
   removeAllConnections,
@@ -283,21 +284,41 @@ export function registerIpcHandlers(): void {
 
     const imported: ConnectionRecord[] = [];
     let skipped = 0;
+    let duplicates = 0;
+    const existing = listConnections();
+    const existingKeys = new Set(
+      existing.ok
+        ? existing.connections.map((connection) => connectionProfileKey(connection.input))
+        : [],
+    );
+
     for (const input of parsed.inputs) {
+      const key = connectionProfileKey(input);
+      if (existingKeys.has(key)) {
+        duplicates += 1;
+        continue;
+      }
       const saved = saveConnection(input);
       if (saved.ok) {
         imported.push(saved.connection);
+        existingKeys.add(key);
       } else {
         skipped += 1;
       }
     }
 
     if (imported.length === 0) {
-      return { ok: false, message: '没有连接被导入。' };
+      return {
+        ok: false,
+        message:
+          duplicates > 0
+            ? `${duplicates} 个连接已存在，未重复导入。`
+            : '没有连接被导入。',
+      };
     }
 
-    log.info('连接配置已导入', { imported: imported.length, skipped });
-    return { ok: true, imported, skipped };
+    log.info('连接配置已导入', { imported: imported.length, skipped, duplicates });
+    return { ok: true, imported, skipped, duplicates };
   });
 
   handle(IPC_CHANNELS.sessionClose, async (_event, rawInput: unknown): Promise<void> => {

@@ -3504,8 +3504,8 @@ export default function App() {
     showNotice(
       'info',
       `已导入 ${result.imported.length} 个连接${
-        result.skipped > 0 ? `，${result.skipped} 个失败` : ''
-      }；密码需重新输入。`,
+        result.duplicates ? `，跳过 ${result.duplicates} 个重复` : ''
+      }${result.skipped > 0 ? `，${result.skipped} 个失败` : ''}；密码需重新输入。`,
     );
   };
 
