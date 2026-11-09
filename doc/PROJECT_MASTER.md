@@ -1177,7 +1177,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出 | §3.6.4 | P2 | ❌ |
 | K-04 | 编辑器：版本感知补全、类型提示、光标所在语句执行、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、最近文件/另存为/拖入、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
 | K-05 | 历史：列表分页/加载更多（当前固定 200，`HistoryDialog.tsx:175`）、`.sql`/`.csv` 导出、复杂形式的敏感字段脱敏 | §3.4.3 | P1/P2 | 🟡 |
-| K-06 | Agent：30 秒自动刷新、运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
+| K-06 | Agent：运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
 | K-07 | 设置：跟随系统主题、字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
 | K-08 | 连接：SQLite 文件拖入、认证插件字段、独立「只读连接」标记、Percona 真实实例回归、全量错误码 | §3.4.1 | P2 | 🟡 |
 | K-09 | DDL/刷新后表子对象缓存不失效：`executeDdlScript`（`App.tsx:3477-3487`）未清 `tableExtrasByTab`，`loadTableExtras`（`App.tsx:1054`）命中缓存直接返回；`refreshSchema`（`App.tsx:2453-2459`）同样没清 | §5.1.2 | P1 | ❌ |
@@ -1483,6 +1483,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-43 M02-17 超长 SQL 保护**：诉求是 >1MB SQL 执行前给出明确提示。变更：`runQuery` 在空 SQL 检查后增加 `sql.length > 1_000_000` 拦截，提示拆分语句或保存为 `.sql` 文件。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未构造 1MB SQL 做真机验证。遗留：编辑器格式化/补全仍未对超长 SQL 做降级。
 - **W-20261109-44 M06-12 导出敏感数据提示**：诉求是导出前提示文件包含完整数据及敏感数据风险。变更：`ExportDialog` 顶部增加固定提示「导出文件将包含完整查询结果；如包含密码、令牌或个人数据，请妥善保管并在必要时脱敏」。涉及 `src/renderer/src/components/ExportDialog.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击。遗留：提示只是文本，没有按内容检测敏感列。
 - **W-20261109-45 M06-10 CSV 导出选项**：诉求是支持 CSV 分隔符、表头开关和 NULL `\N` 标记。变更：`toCsv` 增加 `CsvOptions`（delimiter/header/nullMarker），按分隔符正确引用；导出弹窗增加逗号/分号/Tab、包含表头、NULL 空字段/`\N` 选项；`test-export` 增加选项用例。涉及 `src/shared/export/formats.ts`、`src/renderer/src/components/ExportDialog.tsx`、`scripts/test-export.mjs`。验证：`npm run typecheck`、`npm run test:export`、`npm run build` 通过。遗留：CSV 公式注入防护仍未做；未真机点击。
+- **W-20261109-46 M08-08 Agent 30 秒自动刷新**：诉求是作业树与详情页定期刷新。变更：`Sidebar` 在作业树展开时每 30 秒调用 `onLoadAgentJobs`（用 ref 避免定时器被频繁重建）；`AgentJobDetailView` 每 30 秒重新加载当前作业详情。涉及 `src/renderer/src/components/Sidebar.tsx`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用真实 MSSQL Agent 观察 30 秒刷新。遗留：自动刷新未做开关；作业树无显式手动刷新按钮的问题仍在（M08-02）。
 
 ---
 

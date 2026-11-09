@@ -423,6 +423,13 @@ function AgentJobDetailView({
     void loadDetail(historyLimit);
   }, [ready, loadDetail, historyLimit, refreshKey]);
 
+  // 详情页每 30 秒自动刷新一次；手动刷新仍可用。
+  useEffect(() => {
+    if (!ready || !jobName) return;
+    const timer = window.setInterval(() => void loadDetail(historyLimit), 30_000);
+    return () => window.clearInterval(timer);
+  }, [ready, jobName, historyLimit, loadDetail]);
+
   const runAction = async (action: AgentJobAction) => {
     if (!jobName) return;
     if (action === 'stop' && !window.confirm('停止会中断当前运行，确定继续吗？')) return;

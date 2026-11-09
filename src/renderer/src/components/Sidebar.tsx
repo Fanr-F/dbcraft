@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DATABASE_TYPE_LABELS, ENVIRONMENT_LABELS } from '@shared/ipc-contract';
 import type {
   AgentJobSummary,
@@ -231,6 +231,19 @@ export function Sidebar({
     // onLoadAgentJobs 每次渲染都是新函数；仅依赖影响加载条件的状态。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentAvailable, expandedSections.jobs, agentJobs, agentJobsLoading, activeConnectionId]);
+
+  const loadAgentJobsRef = useRef(onLoadAgentJobs);
+  useEffect(() => {
+    loadAgentJobsRef.current = onLoadAgentJobs;
+  }, [onLoadAgentJobs]);
+
+  // 作业树展开时每 30 秒刷新一次，避免作业状态长期停留在旧值。
+  useEffect(() => {
+    if (!agentAvailable || !expandedSections.jobs) return;
+    const timer = window.setInterval(() => loadAgentJobsRef.current(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [agentAvailable, expandedSections.jobs, activeConnectionId]);
+
   const [treeQuery, setTreeQuery] = useState('');
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null);
   const [menu, setMenu] = useState<{
