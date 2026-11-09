@@ -1255,6 +1255,10 @@ export default function App() {
     if (sessions[id]?.status === 'ready') {
       void loadSchema(id, showSystemObjects[id] ?? false);
     }
+    // 对象树顶部的刷新按钮同时刷新当前 MSSQL 连接的 Agent 作业。
+    if (activeConnection?.input.type === 'mssql') {
+      void loadAgentJobs();
+    }
   };
 
   const selectBrowseDatabase = async (database: string): Promise<boolean> => {

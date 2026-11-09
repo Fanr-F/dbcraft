@@ -1300,7 +1300,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 
 ### 5.2 左侧对象树 / Agent（近期）
 
-- [ ] 作业树增加显式刷新入口（不要求收起再展开）
+- [~] 作业树增加显式刷新入口（对象树顶部刷新已联动作业；详情页有刷新按钮，待真机验收）
 - [ ] 作业树支持右键：启动/停止/启用/禁用、在编辑器中打开、复制作业名
 - [ ] SQL Server Agent 节点在未连接/非 MSSQL 时的空态与禁用态
 - [ ] 表/视图/作业的空态文案统一（“无表/无视图/没有作业”）
@@ -1484,6 +1484,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-44 M06-12 导出敏感数据提示**：诉求是导出前提示文件包含完整数据及敏感数据风险。变更：`ExportDialog` 顶部增加固定提示「导出文件将包含完整查询结果；如包含密码、令牌或个人数据，请妥善保管并在必要时脱敏」。涉及 `src/renderer/src/components/ExportDialog.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击。遗留：提示只是文本，没有按内容检测敏感列。
 - **W-20261109-45 M06-10 CSV 导出选项**：诉求是支持 CSV 分隔符、表头开关和 NULL `\N` 标记。变更：`toCsv` 增加 `CsvOptions`（delimiter/header/nullMarker），按分隔符正确引用；导出弹窗增加逗号/分号/Tab、包含表头、NULL 空字段/`\N` 选项；`test-export` 增加选项用例。涉及 `src/shared/export/formats.ts`、`src/renderer/src/components/ExportDialog.tsx`、`scripts/test-export.mjs`。验证：`npm run typecheck`、`npm run test:export`、`npm run build` 通过。遗留：CSV 公式注入防护仍未做；未真机点击。
 - **W-20261109-46 M08-08 Agent 30 秒自动刷新**：诉求是作业树与详情页定期刷新。变更：`Sidebar` 在作业树展开时每 30 秒调用 `onLoadAgentJobs`（用 ref 避免定时器被频繁重建）；`AgentJobDetailView` 每 30 秒重新加载当前作业详情。涉及 `src/renderer/src/components/Sidebar.tsx`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用真实 MSSQL Agent 观察 30 秒刷新。遗留：自动刷新未做开关；作业树无显式手动刷新按钮的问题仍在（M08-02）。
+- **W-20261109-47 M08-02 Agent 手动刷新**：诉求是补上作业列表/详情的手动刷新入口。变更：对象树顶部刷新按钮在 MSSQL 连接下同时调用 `loadAgentJobs`；作业详情工具栏增加「刷新」按钮。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL Agent 上点击。遗留：作业行本身仍没有独立刷新按钮；UI 清单只标「进行中」。
 
 ---
 

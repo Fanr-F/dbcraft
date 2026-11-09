@@ -496,6 +496,14 @@ function AgentJobDetailView({
         <span className="spacer" />
         <button
           type="button"
+          className="btn"
+          disabled={!ready || loading || busy}
+          onClick={() => void loadDetail(historyLimit)}
+        >
+          刷新
+        </button>
+        <button
+          type="button"
           className="btn btn-run"
           disabled={!detail || busy || multiServer || !detail.enabled}
           title={
