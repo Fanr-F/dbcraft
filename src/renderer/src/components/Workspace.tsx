@@ -702,7 +702,7 @@ export function Workspace({
               aria-label="每页行数"
               onChange={(event) => onTablePageSizeChange(Number(event.target.value))}
             >
-              {[50, 200, 500].map((size) => (
+              {[50, 200, 500, 1000].map((size) => (
                 <option key={size} value={size}>
                   {size}
                 </option>

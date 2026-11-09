@@ -1173,7 +1173,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | ID | 缺口 | 来源 | 优先级 | 状态 |
 |---|---|---|---|---|
 | K-01 | DDL：唯一约束/索引变更进设计页签、CHECK/外键编辑、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
-| K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid`；分页档位补 1000（`Workspace.tsx:704` 目前只有 50/200/500） | §5、§3.4.5 | P1 | 🟡 |
+| K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid` | §5、§3.4.5 | P1 | 🟡 |
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出、CSV 选项、导出敏感数据提示 | §3.6.4 | P2 | ❌ |
 | K-04 | 编辑器：版本感知补全、类型提示、光标所在语句执行、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、最近文件/另存为/拖入、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
 | K-05 | 历史：列表分页/加载更多（当前固定 200，`HistoryDialog.tsx:175`）、`.sql`/`.csv` 导出、复杂形式的敏感字段脱敏 | §3.4.3 | P1/P2 | 🟡 |
@@ -1479,6 +1479,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-39 H-11 清理死文件**：诉求是移除无引用 shim 与临时探针脚本。变更：确认 `AgentJobsDialog.tsx` 无引用后删除；当前工作区未发现 `scripts/tmp-probe-*.mjs`。涉及 `src/renderer/src/components/AgentJobsDialog.tsx`（删除）。验证：`npm run typecheck`、`npm run build` 通过。遗留：无。
 - **W-20261109-40 H-06 补齐历史来源**：诉求是让表数据浏览和导出重查在历史里显示真实来源，而不是一律「编辑器」。变更：`QuerySource` 增加 `table-page` / `export`，同步 zod、history-store、历史弹窗/详情标签；`runQuery` 对 `tab.table` 的内部查询自动用 `table-page`，导出重查用 `export`。涉及 `src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/storage/history-store.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/HistoryDialog.tsx`、`HistoryDetailDialog.tsx`。验证：`npm run typecheck`、`npm run test:history`、`npm run test:sql-mask`、`npm run build` 通过。遗留：内部表数据查询仍会写历史（只改来源，没有做「不记录」策略）；未做真机点击验收。
 - **W-20261109-41 功能表状态同步（H 组收口）**：诉求是把已完成的 H 组修复同步回功能表与模型文档。变更：M02-15 说明改为自定义标签名已持久化；X-10 改为 ✅；统计更新为 `✅88 / 🟡21 / ❌47 / ⏸8`；模型 §2.1 结论、连接导入/导出、断开 browse、标签自定义名、§4.1 建议顺序同步；H-01～H-11 均标记已修复。涉及 `doc/FEATURE_MATRIX.md`、`doc/PROJECT_MASTER.md`。验证：脚本按表格行统计，结果与 §0/§12 一致。遗留：H 组已收口，K/R/C 组仍有大量未完成项。
+- **W-20261109-42 M05-01 表数据分页补 1000**：诉求是支持 50/200/500/1000 四档分页。变更：`Workspace.tsx` 每页下拉增加 1000；`type` 仍为 number，无需改协议。涉及 `src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中切到 1000 行验收。遗留：分页 SQL 与后端未变；未补 E2E。
 
 ---
 
