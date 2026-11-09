@@ -1142,14 +1142,11 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 - **建议**：新增 `table-page` / `export` 来源，或约定 `internal` 查询不写历史（需产品拍板）；至少让 `source` 反映真实入口。
 - **验收**：连续翻 5 页后历史不新增，或新增记录标为「表数据」；编辑器执行仍记 `editor`；导出重查不产生重复历史。
 
-#### H-07 标签自定义名称不持久化
+#### H-07 标签自定义名称不持久化（已修复）
 
-- **优先级/状态**：P1 / ❌
-- **文档覆盖**：未提；UI 清单只列了标签右键菜单本身。
-- **证据**：`App.tsx` `persistDraftTabs()`（约 145-163）只存 `id/title/sql/connectionId/filePath/connectionSnapshot`，没有 `customTitle`；`renameTab()`（约 2420-2431）只改内存。
-- **现象**：重命名标签后重启应用，标题恢复成自动标题。
-- **影响**：用户整理过的标签名丢失；草稿与界面不一致。
-- **建议**：`DraftPayload` 增加 `customTitle` 并做长度限制；恢复时写回；补草稿恢复测试。
+- **优先级/状态**：P1 / ✅（W-20261109-35）
+- **原问题**：`persistDraftTabs()` 没有保存 `customTitle`，重命名只改内存，重启恢复自动标题。
+- **修复**：`DraftPayload` 增加 `customTitle`，保存/恢复均做 80 字符限制；`renameTab` 同步截断。
 - **验收**：重命名 → 关闭应用 → 重启，标题保持；清空自定义名后恢复自动标题。
 
 #### H-08 SQLite「测试连接」与实际只读回退口径不一致（已修复）
@@ -1490,6 +1487,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-32 M01-15 新建连接不再改绑当前标签**：诉求是让新建连接只保存配置，不影响当前 tab 的 SQL/结果/session。变更：`App.saveConnection` 新建分支删除改绑 tab、清空 runs/tableMetas/pending/undo/noPk、关闭旧 session、自动打开 browse session 的逻辑；保存后仅提示「双击连接打开对象树，右击查询创建标签」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工验收。遗留：新建连接暂不自动展开左侧树，需要用户双击；既有 `e2e:sqlite` 未覆盖「新建连接不影响当前 tab」。
 - **W-20261109-33 M01-10 连接导入导出命名实例与去重**：诉求是补上 MSSQL 命名实例往返和重复导入去重。变更：`connection-export.ts` 的 mssql 分支保留合法 `instanceName`（非法值丢弃）；`server-identity.ts` 新增 `connectionProfileKey`（服务器 key + 名称）；`ipc-contract.ts` 的导入结果增加 `duplicates`；`router.ts` 导入前读取现有连接并按 key 跳过重复，导入提示包含跳过数量。涉及 `src/shared/connection-export.ts`、`src/shared/server-identity.ts`、`src/shared/ipc-contract.ts`、`src/main/ipc/router.ts`、`src/renderer/src/App.tsx`、`scripts/test-connection-export.mjs`。验证：`npm run typecheck`、`npm run test:connection-export`、`npm run build` 通过。遗留：去重策略目前固定「跳过」，没有覆盖/新建选项；未在真实 Electron 中手工导入验证。
 - **W-20261109-34 H-03 断开连接同时关闭 browse session**：诉求是让「断开连接」同时关闭左侧对象树的独立 browse session。变更：`disconnectConnection` 在关闭 tab session 前先关闭 `browse-<connectionId>`、清 `browseConnectionId` 与按 session 的缓存；提示区分「已断开连接与对象树」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中点击验收。遗留：没有专门的单元测试；对象树折叠状态仍由 UI 自行处理。
+- **W-20261109-35 H-07 标签自定义名称持久化**：诉求是重命名标签后重启仍保留名称。变更：`DraftPayload` 的标签项增加 `customTitle`，`persistDraftTabs` 保存、`loadDraftTabs` 恢复，均限制 80 字符；`renameTab` 同步截断。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未做重启手工验收。遗留：草稿恢复仍只覆盖 SQL 标签，不恢复 session/结果。
 
 ---
 

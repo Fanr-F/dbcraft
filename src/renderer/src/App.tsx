@@ -98,6 +98,8 @@ interface DraftPayload {
     sql: string;
     connectionId: string | null;
     filePath?: string;
+    /** 用户自定义标签名；重启后恢复。 */
+    customTitle?: string;
     /** 保存连接被删除后，恢复时仍能识别原连接。 */
     connectionSnapshot?: SavedConnection;
   }>;
@@ -120,6 +122,9 @@ function loadDraftTabs(): { tabs: QueryTab[]; activeTabId: string } | null {
         sql: item.sql.slice(0, 1_000_000),
         connectionId: typeof item.connectionId === 'string' ? item.connectionId : null,
         ...(typeof item.filePath === 'string' ? { filePath: item.filePath } : {}),
+        ...(typeof item.customTitle === 'string' && item.customTitle.trim()
+          ? { customTitle: item.customTitle.trim().slice(0, 80) }
+          : {}),
         ...(item.connectionSnapshot &&
         typeof item.connectionSnapshot === 'object' &&
         typeof item.connectionSnapshot.id === 'string'
@@ -156,6 +161,7 @@ function persistDraftTabs(tabs: QueryTab[], activeTabId: string): boolean {
         sql: tab.sql,
         connectionId: tab.connectionId,
         ...(tab.filePath ? { filePath: tab.filePath } : {}),
+        ...(tab.customTitle ? { customTitle: tab.customTitle.slice(0, 80) } : {}),
         ...(tab.connectionSnapshot
           ? { connectionSnapshot: tab.connectionSnapshot }
           : {}),
@@ -2422,7 +2428,7 @@ export default function App() {
     if (!tab) return;
     const answer = window.prompt('标签名称（留空恢复自动标题）', tab.customTitle ?? tab.title);
     if (answer === null) return;
-    const customTitle = answer.trim();
+    const customTitle = answer.trim().slice(0, 80);
     setTabs((current) =>
       current.map((item) =>
         item.id === id ? { ...item, customTitle: customTitle || undefined } : item,
