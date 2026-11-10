@@ -58,6 +58,17 @@ assert(
 assert(rebuilt.statements[4].includes('CREATE UNIQUE INDEX "idx_users_name"'), 'index not recreated');
 assert(rebuilt.warnings.length >= 2, 'missing rebuild warnings');
 
+const change = { name: 'name', type: 'VARCHAR(100)', notNull: true };
+for (const [tableSql, label] of [
+  ['CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT) WITHOUT ROWID', 'WITHOUT ROWID'],
+  ['CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT) STRICT', 'STRICT'],
+  ['CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, upper TEXT AS (upper(name)))', 'generated column'],
+]) {
+  const blocked = buildSqliteRebuild({ ...detail, tableSql }, change);
+  assert(!blocked.ok, `${label} rebuild should be blocked`);
+  assert(blocked.message.includes('不支持安全重建'), `${label} message wrong`);
+}
+
 const composite = buildSqliteRebuild(
   {
     ...detail,

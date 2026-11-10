@@ -303,6 +303,7 @@ export class SqliteSession implements DatabaseSession {
       indexes,
       foreignKeys,
       checks: extractCheckExpressions(ddl),
+      tableSql: ddl,
       comment: null,
     };
   }

@@ -28,6 +28,29 @@ export function buildSqliteRebuild(
     return { ok: false, message: '只有表可以重建。', warnings };
   }
 
+  const tableSql = detail.tableSql ?? '';
+  if (/\bWITHOUT\s+ROWID\b/i.test(tableSql)) {
+    return {
+      ok: false,
+      message: '该表使用 WITHOUT ROWID，当前不支持安全重建；请使用 SQL 编辑器手工处理。',
+      warnings,
+    };
+  }
+  if (/\bSTRICT\b/i.test(tableSql)) {
+    return {
+      ok: false,
+      message: '该表是 STRICT 表，当前不支持安全重建；请使用 SQL 编辑器手工处理。',
+      warnings,
+    };
+  }
+  if (/\bGENERATED\b/i.test(tableSql) || /\bAS\s*\(/i.test(tableSql)) {
+    return {
+      ok: false,
+      message: '该表包含生成列，当前不支持安全重建；请使用 SQL 编辑器手工处理。',
+      warnings,
+    };
+  }
+
   const target = detail.columns.find((column) => column.name === change.name);
   if (!target) {
     return { ok: false, message: `列「${change.name}」不存在。`, warnings };
@@ -135,6 +158,29 @@ export function buildSqliteRebuildTable(
   const warnings: string[] = [];
   if (detail.kind !== 'table') {
     return { ok: false, message: '只有表可以重建。', warnings };
+  }
+
+  const tableSql = detail.tableSql ?? '';
+  if (/\bWITHOUT\s+ROWID\b/i.test(tableSql)) {
+    return {
+      ok: false,
+      message: '该表使用 WITHOUT ROWID，当前不支持安全重建；请使用 SQL 编辑器手工处理。',
+      warnings,
+    };
+  }
+  if (/\bSTRICT\b/i.test(tableSql)) {
+    return {
+      ok: false,
+      message: '该表是 STRICT 表，当前不支持安全重建；请使用 SQL 编辑器手工处理。',
+      warnings,
+    };
+  }
+  if (/\bGENERATED\b/i.test(tableSql) || /\bAS\s*\(/i.test(tableSql)) {
+    return {
+      ok: false,
+      message: '该表包含生成列，当前不支持安全重建；请使用 SQL 编辑器手工处理。',
+      warnings,
+    };
   }
 
   const targetName = tableName.trim();
