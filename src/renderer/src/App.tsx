@@ -22,6 +22,7 @@ import type {
   TableMeta,
 } from '@shared/ipc-contract';
 import { DEFAULT_APP_SETTINGS } from '@shared/settings';
+import { matchesShortcut } from './utils/shortcuts';
 import { SQL_KEYWORD_LIST } from './utils/sql-highlight';
 import {
   extractAttachedDatabases,
@@ -585,7 +586,7 @@ export default function App() {
   // PRD 4.3.2：Ctrl/Cmd+E 打开查询历史；弹窗已打开时不叠加。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'e') return;
+      if (!matchesShortcut(event, settings.shortcuts.history)) return;
       if (event.defaultPrevented) return;
       if (document.querySelector('.modal-backdrop')) return;
       event.preventDefault();
@@ -593,7 +594,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [settings.shortcuts.history]);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const connectionForTab = (tab: QueryTab): SavedConnection | null =>
@@ -4098,6 +4099,7 @@ export default function App() {
           insertRequest={insertRequest}
           completionItems={completionItems}
           completionDetails={completionDetails.current}
+          shortcuts={settings.shortcuts}
           onRequestCompletion={requestCompletion}
           onCancel={() => void cancelQuery()}
           onReconnect={() => void reconnectActive()}

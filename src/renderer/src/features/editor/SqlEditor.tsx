@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DatabaseType } from '@shared/ipc-contract';
+import type { DatabaseType, ShortcutMap } from '@shared/ipc-contract';
+import { DEFAULT_SHORTCUTS } from '@shared/settings';
+import { matchesShortcut } from '../../utils/shortcuts';
 import { tokenizeSql } from '../../utils/sql-highlight';
 import { statementAtCursor } from '../../utils/sql-script';
 import { findBracketMatch, type BracketMatch } from '../../utils/sql-brackets';
@@ -33,6 +35,7 @@ interface SqlEditorProps {
   onRequestCompletion?: (context: CompletionContext) => Promise<string[]>;
   /** 当前连接的方言；用于函数签名提示。 */
   dialect?: DatabaseType | null;
+  shortcuts?: ShortcutMap;
 }
 
 interface CompletionState {
@@ -53,6 +56,7 @@ export function SqlEditor({
   completionDetails,
   onRequestCompletion,
   dialect = null,
+  shortcuts = DEFAULT_SHORTCUTS,
 }: SqlEditorProps) {
   const highlightRef = useRef<HTMLPreElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -282,7 +286,7 @@ export function SqlEditor({
           setMenu({ x: event.clientX, y: event.clientY });
         }}
         onKeyDown={(event) => {
-          if ((event.ctrlKey || event.metaKey) && event.key === ' ') {
+          if (matchesShortcut(event, shortcuts.complete)) {
             event.preventDefault();
             openCompletion();
             return;
@@ -314,7 +318,7 @@ export function SqlEditor({
             }
           }
 
-          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          if (matchesShortcut(event, shortcuts.run)) {
             event.preventDefault();
             const target = event.currentTarget;
             const selected = target.value
@@ -325,14 +329,10 @@ export function SqlEditor({
                 ? selected
                 : statementAtCursor(target.value, target.selectionStart, dialect ?? undefined) ?? undefined,
             );
-          } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+          } else if (matchesShortcut(event, shortcuts.save)) {
             event.preventDefault();
             onSave?.();
-          } else if (
-            (event.ctrlKey || event.metaKey) &&
-            event.shiftKey &&
-            event.key.toLowerCase() === 'f'
-          ) {
+          } else if (matchesShortcut(event, shortcuts.format)) {
             event.preventDefault();
             onFormat?.();
           }

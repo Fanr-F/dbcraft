@@ -4,6 +4,7 @@ import type {
   DatabaseInfo,
   DatabaseType,
   QueryCell,
+  ShortcutMap,
   TableMeta,
 } from '@shared/ipc-contract';
 import type { QueryTab, RunState, SessionRuntime, TransactionRuntime } from '../types';
@@ -89,6 +90,7 @@ interface WorkspaceProps {
   insertRequest: { text: string; token: number } | null;
   completionItems: string[];
   completionDetails?: Record<string, string>;
+  shortcuts: ShortcutMap;
   onRequestCompletion: (context: CompletionContext) => Promise<string[]>;
   onCancel: () => void;
   onReconnect: () => void;
@@ -177,6 +179,7 @@ export function Workspace({
   insertRequest,
   completionItems,
   completionDetails,
+  shortcuts,
   onRequestCompletion,
   onCancel,
   onReconnect,
@@ -610,6 +613,7 @@ export function Workspace({
           insertRequest={insertRequest}
           completionItems={completionItems}
           completionDetails={completionDetails}
+          shortcuts={shortcuts}
           onRequestCompletion={onRequestCompletion}
           dialect={connectionType}
         />

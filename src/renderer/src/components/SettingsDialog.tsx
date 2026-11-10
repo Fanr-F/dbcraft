@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
-import type { AppSettings, LocalStats } from '@shared/ipc-contract';
+import type { AppSettings, LocalStats, ShortcutAction, ShortcutMap } from '@shared/ipc-contract';
 import {
   CONNECT_TIMEOUT_OPTIONS,
+  DEFAULT_SHORTCUTS,
   EDITOR_FONT_SIZE_OPTIONS,
   HISTORY_RETENTION_OPTIONS,
   QUERY_TIMEOUT_OPTIONS,
   RESULT_ROW_LIMIT_OPTIONS,
+  SHORTCUT_ACTIONS,
   DEFAULT_APP_SETTINGS,
 } from '@shared/settings';
+import { normalizeShortcut } from '../utils/shortcuts';
 import { Icon } from './Icon';
 
 interface SettingsDialogProps {
@@ -16,6 +19,14 @@ interface SettingsDialogProps {
   onClose: () => void;
   onSave: (settings: AppSettings) => Promise<{ ok: boolean; message?: string }>;
 }
+
+const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
+  run: '执行 SQL',
+  complete: '触发补全',
+  format: '格式化 SQL',
+  save: '保存 SQL 文件',
+  history: '打开查询历史',
+};
 
 export function SettingsDialog({
   settings,
@@ -32,6 +43,7 @@ export function SettingsDialog({
   const [historyEnabled, setHistoryEnabled] = useState(settings.historyEnabled);
   const [historyDedupe, setHistoryDedupe] = useState(settings.historyDedupe);
   const [historyMask, setHistoryMask] = useState(settings.historyMask);
+  const [shortcuts, setShortcuts] = useState<ShortcutMap>({ ...settings.shortcuts });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState<string | null>(null);
@@ -148,6 +160,7 @@ export function SettingsDialog({
     setHistoryEnabled(DEFAULT_APP_SETTINGS.historyEnabled);
     setHistoryDedupe(DEFAULT_APP_SETTINGS.historyDedupe);
     setHistoryMask(DEFAULT_APP_SETTINGS.historyMask);
+    setShortcuts({ ...DEFAULT_SHORTCUTS });
     setDiagnosticsMessage('已恢复默认值，点击「保存」后生效。');
   };
 
@@ -155,6 +168,18 @@ export function SettingsDialog({
     setBusy(true);
     setError(null);
     try {
+      const normalizedShortcuts = Object.fromEntries(
+        SHORTCUT_ACTIONS.map((action) => [action, normalizeShortcut(shortcuts[action])]),
+      ) as ShortcutMap;
+      const values = Object.values(normalizedShortcuts);
+      if (values.some((value) => value.length === 0)) {
+        setError('快捷键不能为空。');
+        return;
+      }
+      if (new Set(values).size !== values.length) {
+        setError('快捷键存在冲突，请为每个动作设置不同的组合。');
+        return;
+      }
       const result = await onSave({
         resultRowLimit,
         theme,
@@ -165,6 +190,7 @@ export function SettingsDialog({
         historyEnabled,
         historyDedupe,
         historyMask,
+        shortcuts: normalizedShortcuts,
       });
       if (result.ok) {
         onClose();
@@ -228,6 +254,25 @@ export function SettingsDialog({
               ))}
             </select>
           </label>
+
+          <div className="field shortcut-settings">
+            <span>快捷键</span>
+            {SHORTCUT_ACTIONS.map((action) => (
+              <label className="check shortcut-row" key={action}>
+                <span>{SHORTCUT_LABELS[action]}</span>
+                <input
+                  value={shortcuts[action]}
+                  onChange={(event) =>
+                    setShortcuts((current) => ({ ...current, [action]: event.target.value }))
+                  }
+                  placeholder="如 Ctrl+Enter"
+                />
+              </label>
+            ))}
+            <p className="form-note">
+              格式如「Ctrl+Enter」「Ctrl+Shift+F」；保存时会自动规范化并检测重复。
+            </p>
+          </div>
 
           <label className="field">
             <span>单次查询结果上限</span>
@@ -441,7 +486,8 @@ export function SettingsDialog({
                 connectTimeoutMs === settings.connectTimeoutMs &&
                 historyEnabled === settings.historyEnabled &&
                 historyDedupe === settings.historyDedupe &&
-                historyMask === settings.historyMask)
+                historyMask === settings.historyMask &&
+                JSON.stringify(shortcuts) === JSON.stringify(settings.shortcuts))
             }
             onClick={() => void save()}
           >

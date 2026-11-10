@@ -1008,6 +1008,17 @@ button:disabled {
   pointer-events: none;
 }
 
+.shortcut-settings .shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shortcut-settings .shortcut-row input {
+  width: 170px;
+}
+
 .sql-editor {
   position: absolute;
   inset: 0;

@@ -10,6 +10,7 @@ import {
   normalizeRowLimit,
   resolveRowLimit,
 } from '../src/shared/settings.ts';
+import { matchesShortcut, normalizeShortcut } from '../src/renderer/src/utils/shortcuts.ts';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -137,5 +138,48 @@ assert(normalizeRowLimit(10_001) === 2000, 'oversized should fall back');
 assert(normalizeRowLimit(undefined) === 2000, 'undefined should fall back');
 assert(normalizeRowLimit('abc') === 2000, 'NaN should fall back');
 assert(normalizeRowLimit(42.9) === 42, 'fraction should floor');
+
+assert(
+  normalizeAppSettings({ resultRowLimit: 500 }).shortcuts.run ===
+    DEFAULT_APP_SETTINGS.shortcuts.run,
+  'shortcuts should default',
+);
+assert(
+  normalizeAppSettings({
+    resultRowLimit: 500,
+    shortcuts: { run: 'Ctrl+R' },
+  }).shortcuts.run === 'Ctrl+R',
+  'custom shortcut rejected',
+);
+assert(
+  normalizeAppSettings({
+    resultRowLimit: 500,
+    shortcuts: { run: 123 },
+  }).shortcuts.run === DEFAULT_APP_SETTINGS.shortcuts.run,
+  'invalid shortcut should fall back',
+);
+assert(normalizeShortcut('ctrl+enter') === 'Ctrl+Enter', 'shortcut normalization failed');
+assert(normalizeShortcut('shift+ctrl+f') === 'Ctrl+Shift+F', 'shortcut modifier order wrong');
+assert(
+  matchesShortcut(
+    { key: 'Enter', ctrlKey: true, metaKey: false, shiftKey: false, altKey: false },
+    'Ctrl+Enter',
+  ),
+  'Ctrl+Enter should match',
+);
+assert(
+  !matchesShortcut(
+    { key: 'Enter', ctrlKey: false, metaKey: false, shiftKey: false, altKey: false },
+    'Ctrl+Enter',
+  ),
+  'Enter without Ctrl should not match',
+);
+assert(
+  matchesShortcut(
+    { key: ' ', ctrlKey: true, metaKey: false, shiftKey: false, altKey: false },
+    'Ctrl+Space',
+  ),
+  'Ctrl+Space should match',
+);
 
 console.log('settings check passed');

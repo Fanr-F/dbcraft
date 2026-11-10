@@ -560,6 +560,9 @@ export interface AppInfo {
   userDataPath: string;
 }
 
+export type ShortcutAction = 'run' | 'complete' | 'format' | 'save' | 'history';
+export type ShortcutMap = Record<ShortcutAction, string>;
+
 export interface AppSettings {
   /** 单次查询最多保留的结果行数。 */
   resultRowLimit: number;
@@ -578,6 +581,8 @@ export interface AppSettings {
   historyDedupe: boolean;
   /** 历史列表/详情默认脱敏显示。 */
   historyMask: boolean;
+  /** 可自定义快捷键；与设置面板共用同一映射。 */
+  shortcuts: ShortcutMap;
 }
 
 export type SettingsGetResult =

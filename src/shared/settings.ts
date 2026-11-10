@@ -1,4 +1,20 @@
-import type { AppSettings } from './ipc-contract';
+import type { AppSettings, ShortcutAction, ShortcutMap } from './ipc-contract';
+
+export const SHORTCUT_ACTIONS: ShortcutAction[] = [
+  'run',
+  'complete',
+  'format',
+  'save',
+  'history',
+];
+
+export const DEFAULT_SHORTCUTS: ShortcutMap = {
+  run: 'Ctrl+Enter',
+  complete: 'Ctrl+Space',
+  format: 'Ctrl+Shift+F',
+  save: 'Ctrl+S',
+  history: 'Ctrl+E',
+};
 
 /** 结果行数「不限制」哨兵值。 */
 export const RESULT_ROW_LIMIT_UNLIMITED = 0;
@@ -28,6 +44,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   historyEnabled: true,
   historyDedupe: true,
   historyMask: true,
+  shortcuts: { ...DEFAULT_SHORTCUTS },
 };
 
 /** 解析/校验单次查询行数；非法值回退默认，0 表示不限制。 */
@@ -85,5 +102,18 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
     historyEnabled: record.historyEnabled !== false,
     historyDedupe: record.historyDedupe !== false,
     historyMask: record.historyMask !== false,
+    shortcuts: normalizeShortcuts(record.shortcuts),
   };
+}
+
+function normalizeShortcuts(raw: unknown): ShortcutMap {
+  const source = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+  const result = { ...DEFAULT_SHORTCUTS };
+  for (const action of SHORTCUT_ACTIONS) {
+    const value = source[action];
+    if (typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 40) {
+      result[action] = value.trim();
+    }
+  }
+  return result;
 }
