@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, Menu, session } from 'electron';
-import { registerIpcHandlers, bindMainWindow, releaseMainWindow } from './ipc/router';
+import { registerIpcHandlers, bindMainWindow, releaseMainWindow, isMainWindowCloseApproved } from './ipc/router';
+import { IPC_CHANNELS } from '../shared/ipc-contract';
 import { closeAllSessions } from './services/ConnectionManager';
 import { closeMetadataDatabase, openMetadataDatabase } from './storage/metadata';
 import { createLogger, resolveLogDirectory, resolveLogLevel } from './logging/logger';
@@ -53,6 +54,12 @@ function createWindow(): BrowserWindow {
       reason: details.reason,
       exitCode: details.exitCode,
     });
+  });
+
+  window.on('close', (event) => {
+    if (quitting || isMainWindowCloseApproved()) return;
+    event.preventDefault();
+    window.webContents.send(IPC_CHANNELS.appCloseRequested);
   });
 
   window.on('closed', () => {

@@ -421,6 +421,13 @@ export default function App() {
   const [commitConfirmMode, setCommitConfirmMode] = useState<Record<string, boolean>>({});
   /** 冲突行跳过并继续提交，而不是整体回滚。 */
   const [skipConflictsMode, setSkipConflictsMode] = useState<Record<string, boolean>>({});
+  const [closePrompt, setClosePrompt] = useState<{ tabId: string } | null>(null);
+  const [exitPrompt, setExitPrompt] = useState<{
+    pendingTabs: number;
+    dirtySql: boolean;
+    activeTransaction: boolean;
+  } | null>(null);
+  const [closingApp, setClosingApp] = useState(false);
   const [focusedCells, setFocusedCells] = useState<
     Record<string, { rowIndex: number; columnIndex: number } | null>
   >({});
@@ -2167,11 +2174,19 @@ export default function App() {
     setPendingTableEdits((current) => ({ ...current, [tab.id]: state }));
   };
 
-  const commitTableEdits = async () => {
-    const tab = activeTab;
-    const state = pendingTableEdits[tab.id];
-    const connection = activeConnection;
-    if (!tab.table || !state) return;
+  const commitTableEdits = async (targetTabId: string = activeTab.id): Promise<boolean> => {
+    const tab = tabs.find((item) => item.id === targetTabId) ?? activeTab;
+    const state = pendingTableEdits[targetTabId];
+    const connection = connectionForTab(tab);
+    if (!tab.table || !state) return false;
+    const meta = tableMetas[targetTabId];
+    const targetNoPkMode =
+      meta?.reasonCode === 'no-primary-key' && noPkMode[targetTabId] === true;
+    const targetPkEdit =
+      (meta?.primaryKey.length ?? 0) > 0 && pkEditMode[targetTabId] === true;
+    const targetIdentityInsert =
+      (meta?.columns.some((column) => column.autoIncrement) ?? false) &&
+      identityInsertMode[targetTabId] === true;
 
     const edits: TableEdit[] = [
       ...Object.values(state.updates).map(
@@ -2189,16 +2204,15 @@ export default function App() {
         (keys): TableEdit => ({ kind: 'delete', keys }),
       ),
     ];
-    if (edits.length === 0) return;
+    if (edits.length === 0) return false;
 
     if (
-      commitConfirmMode[tab.id] &&
+      commitConfirmMode[targetTabId] &&
       !window.confirm(`提交 ${edits.length} 项表格修改？`)
     ) {
-      return;
+      return false;
     }
 
-    const meta = tableMetas[tab.id];
     const primaryKeyChanged =
       meta != null &&
       edits.some(
@@ -2213,18 +2227,18 @@ export default function App() {
         '本次提交会修改主键列。主键变化可能影响外键引用和已打开的其他标签，确定继续？',
       )
     ) {
-      return;
+      return false;
     }
 
     const api = window.dbcraft;
     if (!api) {
       showNotice('error', '未检测到 Electron IPC 桥接。');
-      return;
+      return false;
     }
 
     if (tab.table.database && connection && connection.input.type !== 'sqlite') {
       const switched = await ensureDatabase(tab.id, tab.table.database);
-      if (!switched) return;
+      if (!switched) return false;
     }
 
     setCommittingTabs((current) => ({ ...current, [tab.id]: true }));
@@ -2234,15 +2248,15 @@ export default function App() {
         sessionId: tab.id,
         table: tab.table.name,
         edits,
-        allowNoPrimaryKeyInsert: activeNoPkMode,
-        allowPrimaryKeyChange: activePkEditMode,
-        allowIdentityInsert: activeIdentityInsert,
-        skipConflicts: skipConflictsMode[tab.id] === true,
+        allowNoPrimaryKeyInsert: targetNoPkMode,
+        allowPrimaryKeyChange: targetPkEdit,
+        allowIdentityInsert: targetIdentityInsert,
+        skipConflicts: skipConflictsMode[targetTabId] === true,
         connectionId: connection?.id,
         connectionName: connection?.input.name,
         database:
           tab.table.database ??
-          currentDatabaseByTab[tab.id] ??
+          currentDatabaseByTab[targetTabId] ??
           (connection && connection.input.type !== 'sqlite' ? connection.input.database : ''),
       });
 
@@ -2253,7 +2267,7 @@ export default function App() {
             ? `${result.message} 请回滚后重新加载数据。`
             : result.message,
         );
-        return;
+        return false;
       }
 
       setPendingTableEdits((current) => {
@@ -2268,8 +2282,10 @@ export default function App() {
           : `已提交 ${result.applied} 行修改。`,
       );
       await runQuery(tab.sql, tab, tab.table.params, { internal: true });
+      return true;
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setCommittingTabs((current) => {
         const next = { ...current };
@@ -2542,17 +2558,12 @@ export default function App() {
     }
   };
 
-  const closeTab = async (id: string) => {
+  const closeTabNow = async (id: string) => {
     const closing = tabs.find((tab) => tab.id === id);
     if (!closing) return;
     if (tabs.length <= 1 && !closing.kind) {
       showNotice('info', '至少保留一个 SQL 标签；可先新建查询再关闭当前标签。');
       return;
-    }
-    if (countPendingEdits(pendingTableEdits[id]) > 0) {
-      if (!window.confirm('该标签有未提交的表格修改，关闭会丢弃。继续吗？')) {
-        return;
-      }
     }
     if (closing?.dirty) {
       if (
@@ -2638,6 +2649,92 @@ export default function App() {
       delete copy[id];
       return copy;
     });
+  };
+
+  const closeTab = async (id: string) => {
+    const closing = tabs.find((tab) => tab.id === id);
+    if (!closing) return;
+    if (tabs.length <= 1 && !closing.kind) {
+      showNotice('info', '至少保留一个 SQL 标签；可先新建查询再关闭当前标签。');
+      return;
+    }
+    if (countPendingEdits(pendingTableEdits[id]) > 0) {
+      setClosePrompt({ tabId: id });
+      return;
+    }
+    await closeTabNow(id);
+  };
+
+  const closeTabWithCommit = async () => {
+    if (!closePrompt) return;
+    const ok = await commitTableEdits(closePrompt.tabId);
+    if (!ok) {
+      showNotice('error', '提交失败，标签保持打开。');
+      return;
+    }
+    const id = closePrompt.tabId;
+    setClosePrompt(null);
+    await closeTabNow(id);
+  };
+
+  const closeTabWithDiscard = async () => {
+    if (!closePrompt) return;
+    const id = closePrompt.tabId;
+    setPendingTableEdits((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setClosePrompt(null);
+    await closeTabNow(id);
+  };
+
+  // 主进程拦截窗口关闭；有未提交修改时由渲染层提供提交/丢弃/取消。
+  useEffect(() => {
+    const api = window.dbcraft;
+    if (!api) return;
+    return api.app.onCloseRequested(() => {
+      const pendingTabs = tabs.filter(
+        (tab) => countPendingEdits(pendingTableEdits[tab.id]) > 0,
+      ).length;
+      const dirtySql = tabs.some((tab) => Boolean(tab.dirty));
+      const activeTransaction = Object.values(transactions).some(
+        (item) => item.state === 'active',
+      );
+      if (!pendingTabs && !dirtySql && !activeTransaction) {
+        void api.app.confirmClose();
+        return;
+      }
+      setExitPrompt({ pendingTabs, dirtySql, activeTransaction });
+    });
+  }, [tabs, pendingTableEdits, transactions]);
+
+  const commitAllAndExit = async () => {
+    const api = window.dbcraft;
+    if (!api) return;
+    setClosingApp(true);
+    try {
+      const ids = tabs
+        .filter((tab) => countPendingEdits(pendingTableEdits[tab.id]) > 0)
+        .map((tab) => tab.id);
+      for (const id of ids) {
+        const ok = await commitTableEdits(id);
+        if (!ok) {
+          showNotice('error', '仍有未提交的修改，已取消退出。');
+          setExitPrompt(null);
+          return;
+        }
+      }
+      setExitPrompt(null);
+      await api.app.confirmClose();
+    } finally {
+      setClosingApp(false);
+    }
+  };
+
+  const discardAllAndExit = async () => {
+    setExitPrompt(null);
+    await window.dbcraft?.app.confirmClose();
   };
 
   const clearTabRuntimeState = (id: string) => {
@@ -4672,6 +4769,78 @@ export default function App() {
               <span className="spacer" />
               <button type="button" className="btn btn-danger" onClick={() => void cancelMaintenance()}>
                 取消并断开
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {closePrompt && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h2>未提交的表格修改</h2>
+            <p>
+              标签「{tabs.find((tab) => tab.id === closePrompt.tabId)?.title ?? closePrompt.tabId}
+              」还有未提交的修改。关闭前要提交还是丢弃？
+            </p>
+            <footer className="modal-footer">
+              <button type="button" className="btn" onClick={() => setClosePrompt(null)}>
+                取消
+              </button>
+              <span className="spacer" />
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => void closeTabWithDiscard()}
+              >
+                丢弃并关闭
+              </button>
+              <button
+                type="button"
+                className="btn btn-run"
+                disabled={committing}
+                onClick={() => void closeTabWithCommit()}
+              >
+                提交并关闭
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {exitPrompt && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h2>退出 DBCraft</h2>
+            <p>
+              {exitPrompt.pendingTabs > 0
+                ? `有 ${exitPrompt.pendingTabs} 个标签存在未提交的表格修改。`
+                : ''}
+              {exitPrompt.dirtySql ? ' 有尚未写入自动草稿的 SQL。' : ''}
+              {exitPrompt.activeTransaction ? ' 有未提交的事务。' : ''}
+            </p>
+            <p className="pane-hint">
+              选择「提交并退出」会逐个提交表格修改，其他未保存内容将丢弃。
+            </p>
+            <footer className="modal-footer">
+              <button type="button" className="btn" onClick={() => setExitPrompt(null)}>
+                取消
+              </button>
+              <span className="spacer" />
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => void discardAllAndExit()}
+              >
+                丢弃并退出
+              </button>
+              <button
+                type="button"
+                className="btn btn-run"
+                disabled={closingApp || exitPrompt.pendingTabs === 0}
+                onClick={() => void commitAllAndExit()}
+              >
+                {closingApp ? '提交中…' : '提交并退出'}
               </button>
             </footer>
           </div>

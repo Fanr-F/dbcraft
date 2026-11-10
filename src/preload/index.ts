@@ -9,6 +9,12 @@ import {
 const api: DBCraftApi = {
   app: {
     getInfo: () => ipcRenderer.invoke(IPC_CHANNELS.appGetInfo),
+    onCloseRequested: (handler: () => void) => {
+      const listener = () => handler();
+      ipcRenderer.on(IPC_CHANNELS.appCloseRequested, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.appCloseRequested, listener);
+    },
+    confirmClose: () => ipcRenderer.invoke(IPC_CHANNELS.appConfirmClose),
   },
   dialog: {
     selectSqliteFile: () => ipcRenderer.invoke(IPC_CHANNELS.dialogSelectSqliteFile),

@@ -116,11 +116,18 @@ import { resolveLogDirectory } from '../logging/logger';
 import { buildXlsx } from '../export/xlsx';
 
 let mainWindow: BrowserWindow | null = null;
+let closeApproved = false;
 const log = createLogger('ipc');
 
 /** 只接受主窗口主框架发起的 IPC，避免子帧/其他 WebContents 触碰数据库。 */
 export function bindMainWindow(window: BrowserWindow): void {
   mainWindow = window;
+  closeApproved = false;
+}
+
+/** 渲染层处理完未提交修改后放行窗口关闭。 */
+export function isMainWindowCloseApproved(): boolean {
+  return closeApproved;
 }
 
 export function releaseMainWindow(window: BrowserWindow): void {
@@ -150,6 +157,11 @@ function handle(channel: string, handler: Handler): void {
 }
 
 export function registerIpcHandlers(): void {
+  handle(IPC_CHANNELS.appConfirmClose, (): void => {
+    closeApproved = true;
+    mainWindow?.close();
+  });
+
   handle(IPC_CHANNELS.appGetInfo, (): AppInfo => {
     return {
       name: app.getName(),

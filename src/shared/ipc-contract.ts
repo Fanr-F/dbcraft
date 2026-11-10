@@ -663,6 +663,10 @@ export type SqlFileSaveResult =
 export interface DBCraftApi {
   app: {
     getInfo: () => Promise<AppInfo>;
+    /** 主进程请求关闭窗口时触发；返回取消订阅函数。 */
+    onCloseRequested: (handler: () => void) => () => void;
+    /** 渲染层完成提交/丢弃后允许窗口关闭。 */
+    confirmClose: () => Promise<void>;
   };
   dialog: {
     selectSqliteFile: () => Promise<string | null>;
@@ -757,6 +761,8 @@ export interface DBCraftApi {
 
 export const IPC_CHANNELS = {
   appGetInfo: 'app:get-info',
+  appCloseRequested: 'app:close-requested',
+  appConfirmClose: 'app:confirm-close',
   dialogSelectSqliteFile: 'dialog:select-sqlite-file',
   connectionTest: 'connection:test',
   connectionList: 'connection:list',
