@@ -4,6 +4,7 @@
  * 运行：npm run test:export
  */
 import { toCsv, toJson, toSqlInsert } from '../src/shared/export/formats.ts';
+import { historyToCsv, historyToSql } from '../src/shared/history-export.ts';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -67,5 +68,30 @@ assert(
 
 const none = toSqlInsert('sqlite', 't', columns, []);
 assert(none === '', 'empty SQL export should be empty');
+
+const history = [
+  {
+    id: 1,
+    sqlText: 'SELECT 1;',
+    dialect: 'sqlite',
+    connectionId: 'c1',
+    connectionName: '本地',
+    databaseName: 'main',
+    status: 'success',
+    errorMessage: null,
+    durationMs: 3,
+    affectedRows: null,
+    returnedRows: 1,
+    source: 'editor',
+    execCount: 1,
+    lastExecutedAt: '2026-11-10T00:00:00.000Z',
+  },
+];
+const historySql = historyToSql(history);
+assert(historySql.includes('-- 2026-11-10T00:00:00.000Z'), 'history SQL header missing');
+assert(historySql.includes('SELECT 1;'), 'history SQL text missing');
+const historyCsv = historyToCsv(history);
+assert(historyCsv.startsWith('\uFEFFexecutedAt,dialect'), 'history CSV header wrong');
+assert(historyCsv.includes('SELECT 1;'), 'history CSV SQL missing');
 
 console.log('export formats check passed');

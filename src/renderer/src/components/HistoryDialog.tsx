@@ -7,6 +7,7 @@ import type {
   QueryStatus,
 } from '@shared/ipc-contract';
 import { DATABASE_TYPES, DATABASE_TYPE_LABELS } from '@shared/ipc-contract';
+import { historyToCsv, historyToSql } from '@shared/history-export';
 import type { SavedConnection } from '../types';
 import { maskSensitiveSql } from '../utils/sql-mask';
 import { HistoryDetailDialog } from './HistoryDetailDialog';
@@ -230,26 +231,30 @@ export function HistoryDialog({
       timeRange !== 'all',
   );
 
-  const exportHistory = async () => {
+  const exportHistory = async (format: 'json' | 'sql' | 'csv') => {
     if (records.length === 0) return;
+    const label = format === 'json' ? 'JSON' : format === 'sql' ? 'SQL' : 'CSV';
     if (
       !window.confirm(
-        '历史记录可能包含敏感 SQL 明文，将导出为 JSON 文件。确定继续吗？',
+        `历史记录可能包含敏感 SQL 明文，将导出为 ${label} 文件。确定继续吗？`,
       )
     ) {
       return;
     }
     const api = window.dbcraft;
     if (!api) return;
+    const exportRecords = masked
+      ? records.map((record) => ({ ...record, sqlText: maskSensitiveSql(record.sqlText) }))
+      : records;
+    const content =
+      format === 'json'
+        ? JSON.stringify(exportRecords, null, 2)
+        : format === 'sql'
+          ? historyToSql(exportRecords)
+          : historyToCsv(exportRecords);
     const result = await api.export.save({
-      suggestedName: 'dbcraft-history.json',
-      content: JSON.stringify(
-        masked
-          ? records.map((record) => ({ ...record, sqlText: maskSensitiveSql(record.sqlText) }))
-          : records,
-        null,
-        2,
-      ),
+      suggestedName: `dbcraft-history.${format}`,
+      content,
     });
     if (!result.ok && !result.canceled) {
       setError(result.message);
@@ -605,10 +610,26 @@ export function HistoryDialog({
           <button
             type="button"
             className="btn"
-            onClick={() => void exportHistory()}
+            onClick={() => void exportHistory('json')}
             disabled={records.length === 0}
           >
             导出 JSON
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void exportHistory('sql')}
+            disabled={records.length === 0}
+          >
+            导出 SQL
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void exportHistory('csv')}
+            disabled={records.length === 0}
+          >
+            导出 CSV
           </button>
           {connectionId && (
             <button
