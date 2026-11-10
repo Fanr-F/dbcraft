@@ -2481,6 +2481,7 @@ export default function App() {
   const refreshSchema = () => {
     columnCache.current = {};
     schemaObjectCache.current = {};
+    setTableExtrasByTab((current) => ({ ...current, [activeTab.id]: {} }));
     if (sessions[activeTab.id]?.status === 'ready') {
       void loadSchema(activeTab.id, showSystemObjects[activeTab.id] ?? false);
     }
@@ -2489,6 +2490,7 @@ export default function App() {
   const refreshBrowseSchema = () => {
     if (!browseConnectionId) return;
     const id = browseSessionId(browseConnectionId);
+    setTableExtrasByTab((current) => ({ ...current, [id]: {} }));
     if (sessions[id]?.status === 'ready') {
       void loadSchema(id, showSystemObjects[id] ?? false);
     }
@@ -3485,6 +3487,7 @@ export default function App() {
       delete next[activeTab.id];
       return next;
     });
+    setTableExtrasByTab((current) => ({ ...current, [activeTab.id]: {} }));
     clearEditHistory(activeTab.id);
     void loadSchema(activeTab.id, showSystemObjects[activeTab.id] ?? false);
     columnCache.current = {};

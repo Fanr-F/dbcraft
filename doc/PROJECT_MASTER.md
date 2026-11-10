@@ -1180,7 +1180,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | K-06 | Agent：运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
 | K-07 | 设置：跟随系统主题、字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
 | K-08 | 连接：SQLite 文件拖入、认证插件字段、独立「只读连接」标记、Percona 真实实例回归、全量错误码 | §3.4.1 | P2 | 🟡 |
-| K-09 | DDL/刷新后表子对象缓存不失效：`executeDdlScript`（`App.tsx:3477-3487`）未清 `tableExtrasByTab`，`loadTableExtras`（`App.tsx:1054`）命中缓存直接返回；`refreshSchema`（`App.tsx:2453-2459`）同样没清 | §5.1.2 | P1 | ❌ |
+| K-09 | DDL/刷新后表子对象缓存不失效 | ✅ 已修复（W-20261109-51）：执行 DDL 与刷新 schema 时清空该 tab/browse session 的 `tableExtras` | — | — |
 | K-10 | 非功能：打包/签名/安装包、性能基线、无障碍、CI 门禁、崩溃率与冷启动指标 | §3.6.2 / §3.9 | P2 | ❌ |
 
 ### 4.4 R：架构已就绪但缺入口/韧性
@@ -1488,6 +1488,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-48 M03-10 历史加载更多**：诉求是历史列表支持分页/加载更多。变更：`HistoryDialog` 增加 `limit` 状态（默认 200），查询带上 limit；底部在满页且未到 1000 时显示「加载更多」，每次 +200；说明文案显示当前上限。涉及 `src/renderer/src/components/HistoryDialog.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击。遗留：仍是「增大 limit 重查」，不是真正的 offset 分页；超过 1000 条无法继续加载。
 - **W-20261109-49 M01-07 跨库对象搜索**：诉求是搜索不再只覆盖当前库。变更：`ObjectTree` 在搜索词非空时展示所有数据库，并按需调用 `onLoadDatabase` 加载未缓存库；`Sidebar` 增加 `onLoadBrowseDatabase`，搜索时保留 browse 连接以便加载；`App` 用 browse session 调用 `loadDatabaseObjects`。涉及 `src/renderer/src/components/ObjectTree.tsx`、`Sidebar.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用真实多库实例搜索验收。遗留：搜索会一次性加载所有数据库对象，大库可能较慢；没有服务端搜索。
 - **W-20261109-50 M02-03 光标所在语句执行**：诉求是未选中时只执行光标所在语句。变更：`sql-script.ts` 新增 `statementAtCursor`（复用 `splitSqlStatements`，按顺序定位原始区间，语句间空白优先取前一条）；`SqlEditor` Ctrl/Cmd+Enter 在无选区时调用它，定位失败回退全文；`test-sql-script` 增加 SQLite/MSSQL GO 光标用例。涉及 `src/renderer/src/utils/sql-script.ts`、`src/renderer/src/features/editor/SqlEditor.tsx`、`scripts/test-sql-script.mjs`。验证：`npm run typecheck`、`npm run test:sql-script`、`npm run build` 通过。遗留：重复语句/注释中包含相同文本时按 `indexOf` 定位可能偏移，后续可改为区间切分器。
+- **W-20261109-51 K-09 DDL/刷新后清表子对象缓存**：诉求是 DDL 或手动刷新后重新展开表能看到最新约束/触发器/索引。变更：`executeDdlScript` 成功后清空当前 tab 的 `tableExtrasByTab`；`refreshSchema` 清当前 tab、`refreshBrowseSchema` 清 browse session 的缓存。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中执行 DDL 后展开表验收。遗留：大库分级加载仍未实现。
 
 ---
 
