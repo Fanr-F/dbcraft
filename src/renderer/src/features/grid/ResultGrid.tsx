@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { QueryCell, QueryColumn } from '@shared/ipc-contract';
 import { Icon } from '../../components/Icon';
+import { typedEditor } from './typed-editor';
 
 interface ResultGridProps {
   columns: QueryColumn[];
@@ -172,6 +173,7 @@ export function ResultGrid({
       const label = sorted ? `${column.name} ${sortLabel}` : column.name;
       const dateLike = /date|time|year/i.test(column.declaredType ?? '');
       const pinned = visibleIndex < layout.pinned;
+      const editor = typedEditor(column.declaredType);
       visibleIndex += 1;
 
       return [
@@ -181,6 +183,7 @@ export function ResultGrid({
           size,
           ...(pinned ? { pin: 'colPinStart' } : {}),
           filter: 'string',
+          ...(editor ? { editor } : {}),
           // 普通查询结果使用网格本地排序；表数据页由列头点击触发服务端 ORDER BY。
           sortable: !onHeaderClick,
           cellProperties: ((props: never) => cellProperties(props, dateLike)) as never,

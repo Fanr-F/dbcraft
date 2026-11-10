@@ -1278,6 +1278,23 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.grid-host revogr-edit textarea,
+.grid-host revogr-edit select,
+.grid-host .grid-typed-editor {
+  width: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 4px;
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.grid-host revogr-edit textarea {
+  resize: none;
+}
+
 .grid-host revo-grid {
   display: block;
   height: 100%;
