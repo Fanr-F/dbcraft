@@ -3822,7 +3822,7 @@ export default function App() {
 
       const api = window.dbcraft;
       if (!api) throw new Error('未检测到 Electron IPC 桥接。');
-      const result = await api.agent.list(sessionId, '');
+      const result = await api.agent.list(sessionId, '', 0, 1000);
       setAgentJobsByTab((current) => ({
         ...current,
         [sessionId]: result.ok
@@ -3846,6 +3846,26 @@ export default function App() {
     setAgentRefreshKey((value) => value + 1);
     setAgentJobsByTab({});
     void loadAgentJobs();
+  };
+
+  const runAgentJobActionFromTree = async (
+    jobName: string,
+    action: 'start' | 'stop' | 'enable' | 'disable',
+  ) => {
+    const connection = activeConnection;
+    const api = window.dbcraft;
+    if (!connection || connection.input.type !== 'mssql' || !api) return;
+    if (action === 'stop' && !window.confirm('停止会中断当前运行，确定继续吗？')) return;
+    if (action === 'disable' && !window.confirm('禁用后该作业的后续计划不再运行，确定继续吗？')) {
+      return;
+    }
+    const result = await api.agent.action(activeTab.id, jobName, action, {
+      connectionId: connection.id,
+      connectionName: connection.input.name,
+      database: connection.input.database,
+    });
+    showNotice(result.ok ? 'info' : 'error', result.message);
+    if (result.ok) onAgentChanged();
   };
 
   const openAgentJobDetail = (jobName: string) => {
@@ -4523,6 +4543,9 @@ export default function App() {
           activeAgentJob={activeAgentJob}
           onLoadAgentJobs={() => void loadAgentJobs()}
           onOpenAgentJob={openAgentJobDetail}
+          onAgentJobAction={(jobName, action) =>
+            void runAgentJobActionFromTree(jobName, action)
+          }
         />
 
         <Workspace

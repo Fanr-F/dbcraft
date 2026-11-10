@@ -110,6 +110,10 @@ interface SidebarProps {
   activeAgentJob: string | null;
   onLoadAgentJobs: () => void;
   onOpenAgentJob: (jobName: string) => void;
+  onAgentJobAction: (
+    jobName: string,
+    action: 'start' | 'stop' | 'enable' | 'disable',
+  ) => void;
 }
 
 function fileName(filePath: string): string {
@@ -201,6 +205,7 @@ export function Sidebar({
   activeAgentJob,
   onLoadAgentJobs,
   onOpenAgentJob,
+  onAgentJobAction,
 }: SidebarProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [collapsedServers, setCollapsedServers] = useState<Record<string, boolean>>({});
@@ -258,6 +263,11 @@ export function Sidebar({
     y: number;
     path: string;
     name: string;
+  } | null>(null);
+  const [jobMenu, setJobMenu] = useState<{
+    x: number;
+    y: number;
+    job: AgentJobSummary;
   } | null>(null);
   const [objectMenu, setObjectMenu] = useState<{
     x: number;
@@ -401,6 +411,11 @@ export function Sidebar({
                   }；单击选中，双击打开详情`}
                   onClick={() => setSelectedAgentJob(job.name)}
                   onDoubleClick={() => onOpenAgentJob(job.name)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setSelectedAgentJob(job.name);
+                    setJobMenu({ x: event.clientX, y: event.clientY, job });
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') onOpenAgentJob(job.name);
                   }}
@@ -968,6 +983,45 @@ export function Sidebar({
               label: '删除连接',
               danger: true,
               onSelect: () => onDeleteConnection(menu.connection.id),
+            },
+          ]}
+        />
+      )}
+
+      {jobMenu && (
+        <ContextMenu
+          x={jobMenu.x}
+          y={jobMenu.y}
+          onClose={() => setJobMenu(null)}
+          items={[
+            {
+              label: '打开详情',
+              onSelect: () => onOpenAgentJob(jobMenu.job.name),
+            },
+            {
+              label: '启动作业',
+              disabled: jobMenu.job.multiServer || !jobMenu.job.enabled || jobMenu.job.running,
+              onSelect: () => onAgentJobAction(jobMenu.job.name, 'start'),
+            },
+            {
+              label: '停止作业',
+              disabled: jobMenu.job.multiServer,
+              onSelect: () => onAgentJobAction(jobMenu.job.name, 'stop'),
+            },
+            {
+              label: jobMenu.job.enabled ? '禁用' : '启用',
+              disabled: jobMenu.job.multiServer,
+              onSelect: () =>
+                onAgentJobAction(
+                  jobMenu.job.name,
+                  jobMenu.job.enabled ? 'disable' : 'enable',
+                ),
+            },
+            {
+              label: '复制名称',
+              onSelect: () => {
+                void navigator.clipboard.writeText(jobMenu.job.name).catch(() => undefined);
+              },
             },
           ]}
         />
