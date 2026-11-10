@@ -16,7 +16,7 @@ interface ExportDialogProps {
   /** 多语句执行时可选的结果集；提供后对话框内可切换。 */
   datasets?: ExportDataset[];
   /** 表数据页可用：启用服务端流式 CSV（全部行）。 */
-  streamTable?: { sessionId: string; table: string };
+  streamTable?: { sessionId: string; table: string; database?: string };
   onClose: () => void;
   onSave: (
     content: string,
@@ -113,6 +113,7 @@ export function ExportDialog({
         requestId,
         sessionId: streamTable.sessionId,
         table: streamTable.table,
+        ...(streamTable.database ? { database: streamTable.database } : {}),
         suggestedName: 'result.csv',
         delimiter: csvDelimiter,
         header: csvHeader,

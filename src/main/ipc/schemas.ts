@@ -240,6 +240,7 @@ export const exportStreamSchema = z.object({
   requestId: z.string().min(1).max(128),
   sessionId: z.string().min(1).max(128),
   table: z.string().min(1).max(256),
+  database: z.string().max(128).optional(),
   suggestedName: z.string().trim().min(1).max(120),
   delimiter: z.string().min(1).max(4).optional(),
   header: z.boolean().optional(),

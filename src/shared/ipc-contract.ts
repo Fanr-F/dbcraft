@@ -572,6 +572,8 @@ export interface ExportStreamRequest {
   requestId: string;
   sessionId: string;
   table: string;
+  /** 表所属数据库；多库连接导出前需要切库。 */
+  database?: string;
   suggestedName: string;
   delimiter?: string;
   header?: boolean;

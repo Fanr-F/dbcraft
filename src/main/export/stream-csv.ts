@@ -67,6 +67,9 @@ export async function streamTableCsv(
   };
 
   try {
+    if (request.database && session.dialect !== 'sqlite') {
+      await session.useDatabase(request.database);
+    }
     await writeChunk(stream, '\uFEFF');
     bytes += 3;
     let columnsWritten = false;
