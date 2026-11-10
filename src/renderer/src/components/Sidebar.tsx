@@ -52,6 +52,7 @@ interface SidebarProps {
   onRefreshBrowse: () => void;
   onToggleBrowseSystemObjects: (next: boolean) => void;
   onSelectBrowseDatabase: (database: string) => void;
+  onLoadBrowseDatabase: (database: string) => void;
   onLoadBrowseTableExtras: (database: string, table: string) => void;
   onOpenTableInBrowse: (connectionId: string, name: string, database?: string) => void;
   onOpenTableDataInBrowse: (
@@ -157,6 +158,7 @@ export function Sidebar({
   onRefreshBrowse,
   onToggleBrowseSystemObjects,
   onSelectBrowseDatabase,
+  onLoadBrowseDatabase,
   onLoadBrowseTableExtras,
   onOpenTableInBrowse,
   onOpenTableDataInBrowse,
@@ -288,7 +290,8 @@ export function Sidebar({
         (connection) =>
           searchText(connection).includes(normalizedQuery) ||
           (connection.id === activeConnectionId && activeObjectMatches) ||
-          (connection.id === browseConnectionId && browseObjectMatches),
+          (connection.id === browseConnectionId &&
+            (browseObjectMatches || normalizedQuery.length > 0)),
       )
     : connections;
 
@@ -630,6 +633,7 @@ export function Sidebar({
               tableExtras={browseTableExtras}
               tableExtrasLoadingKey={browseTableExtrasLoadingKey}
               onSelectDatabase={onSelectBrowseDatabase}
+              onLoadDatabase={onLoadBrowseDatabase}
               onLoadTableExtras={onLoadBrowseTableExtras}
               onOpenTable={(name, database) =>
                 onOpenTableInBrowse(connection.id, name, database)

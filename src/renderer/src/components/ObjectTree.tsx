@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   DatabaseInfo,
   DatabaseType,
@@ -22,6 +22,8 @@ interface ObjectTreeProps {
   tableExtras: Record<string, TableExtras>;
   tableExtrasLoadingKey: string | null;
   onSelectDatabase: (database: string) => void;
+  /** 搜索时按需加载其他数据库的对象。 */
+  onLoadDatabase?: (database: string) => void;
   onLoadTableExtras: (database: string, table: string) => void;
   onOpenTable: (name: string, database?: string) => void;
   onOpenTableData: (name: string, kind: 'table' | 'view', database?: string) => void;
@@ -56,6 +58,7 @@ export function ObjectTree({
   tableExtras,
   tableExtrasLoadingKey,
   onSelectDatabase,
+  onLoadDatabase,
   onLoadTableExtras,
   onOpenTable,
   onOpenTableData,
@@ -64,6 +67,8 @@ export function ObjectTree({
 }: ObjectTreeProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const normalizedQuery = query.trim().toLowerCase();
+  const requestedDatabases = useRef(new Set<string>());
+
   const matches = (name: string) =>
     normalizedQuery.length === 0 || name.toLowerCase().includes(normalizedQuery);
 
@@ -74,6 +79,21 @@ export function ObjectTree({
 
   const showDatabaseLayer = isMultiDatabase(dialect);
   const current = currentDatabase ?? databases.find((item) => item.current)?.name ?? 'main';
+
+  useEffect(() => {
+    if (!normalizedQuery) {
+      requestedDatabases.current.clear();
+      return;
+    }
+    if (!onLoadDatabase) return;
+    for (const database of databases) {
+      if (database.name === current) continue;
+      if (objectsByDatabase[database.name]) continue;
+      if (requestedDatabases.current.has(database.name)) continue;
+      requestedDatabases.current.add(database.name);
+      onLoadDatabase(database.name);
+    }
+  }, [normalizedQuery, databases, objectsByDatabase, current, onLoadDatabase]);
 
   const objectsOf = (database: string): SchemaObject[] =>
     objectsByDatabase[database] ?? (database === current ? schemaObjects : []);
@@ -334,10 +354,8 @@ export function ObjectTree({
     return <div className="object-tree-body">{renderObjectFolders(current, objectsOf(current))}</div>;
   }
 
-  // 搜索时只展开当前库，避免为了搜索结果去加载所有数据库。
-  const visibleDatabases = normalizedQuery
-    ? databases.filter((database) => database.name === current)
-    : databases;
+  // 搜索时展示所有数据库；未加载的库按需加载后参与过滤。
+  const visibleDatabases = databases;
 
   return (
     <div className="object-tree-body">

@@ -1285,7 +1285,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] MSSQL「显示系统对象」可浏览 `master` / `msdb` 的 `is_ms_shipped` 表/视图
 - [~] MSSQL 的「表 / 视图 / 存储过程」下按 schema 分组（待人工真机验收）
 - [ ] 真实 MySQL / MariaDB 实例回归（当前只通过类型检查与 MSSQL 真机）
-- [ ] 跨库搜索（当前搜索只覆盖当前库）
+- [~] 跨库搜索（搜索时按需加载所有数据库对象；待真机验收）
 - [ ] 系统数据库过滤/分组（master、mysql、sys 等是否默认收起）
 - [ ] 表子对象缓存失效（DDL 后重新展开应刷新）
 - [ ] 右键 DDL 弹窗打开后若切换库，执行目标库的锁定/提示
@@ -1486,6 +1486,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-46 M08-08 Agent 30 秒自动刷新**：诉求是作业树与详情页定期刷新。变更：`Sidebar` 在作业树展开时每 30 秒调用 `onLoadAgentJobs`（用 ref 避免定时器被频繁重建）；`AgentJobDetailView` 每 30 秒重新加载当前作业详情。涉及 `src/renderer/src/components/Sidebar.tsx`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用真实 MSSQL Agent 观察 30 秒刷新。遗留：自动刷新未做开关；作业树无显式手动刷新按钮的问题仍在（M08-02）。
 - **W-20261109-47 M08-02 Agent 手动刷新**：诉求是补上作业列表/详情的手动刷新入口。变更：对象树顶部刷新按钮在 MSSQL 连接下同时调用 `loadAgentJobs`；作业详情工具栏增加「刷新」按钮。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL Agent 上点击。遗留：作业行本身仍没有独立刷新按钮；UI 清单只标「进行中」。
 - **W-20261109-48 M03-10 历史加载更多**：诉求是历史列表支持分页/加载更多。变更：`HistoryDialog` 增加 `limit` 状态（默认 200），查询带上 limit；底部在满页且未到 1000 时显示「加载更多」，每次 +200；说明文案显示当前上限。涉及 `src/renderer/src/components/HistoryDialog.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击。遗留：仍是「增大 limit 重查」，不是真正的 offset 分页；超过 1000 条无法继续加载。
+- **W-20261109-49 M01-07 跨库对象搜索**：诉求是搜索不再只覆盖当前库。变更：`ObjectTree` 在搜索词非空时展示所有数据库，并按需调用 `onLoadDatabase` 加载未缓存库；`Sidebar` 增加 `onLoadBrowseDatabase`，搜索时保留 browse 连接以便加载；`App` 用 browse session 调用 `loadDatabaseObjects`。涉及 `src/renderer/src/components/ObjectTree.tsx`、`Sidebar.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用真实多库实例搜索验收。遗留：搜索会一次性加载所有数据库对象，大库可能较慢；没有服务端搜索。
 
 ---
 

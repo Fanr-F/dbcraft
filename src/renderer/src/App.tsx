@@ -3844,6 +3844,11 @@ export default function App() {
           onRefreshBrowse={refreshBrowse}
           onToggleBrowseSystemObjects={toggleBrowseSystemObjects}
           onSelectBrowseDatabase={(database) => void selectBrowseDatabase(database)}
+          onLoadBrowseDatabase={(database) => {
+            if (browseConnectionId) {
+              void loadDatabaseObjects(browseSessionId(browseConnectionId), database);
+            }
+          }}
           onLoadBrowseTableExtras={loadBrowseTableExtras}
           onOpenTableInBrowse={(connectionId, name, database) =>
             openTableFromBrowse(connectionId, name, database)
