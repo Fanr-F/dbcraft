@@ -13,6 +13,7 @@ import {
   type AgentDetailResult,
   type AgentListResult,
   type AgentScriptResult,
+  type AppDataDirectoryResult,
   type AppInfo,
   type ConnectionDeleteResult,
   type ConnectionImportResult,
@@ -41,6 +42,11 @@ import {
   type TableDetailResult,
   type TableMetaResult,
 } from '../../shared/ipc-contract';
+import {
+  getDataLocation,
+  resetDataDirectory,
+  setDataDirectory,
+} from '../storage/data-location';
 import {
   agentActionSchema,
   agentDetailSchema,
@@ -160,6 +166,44 @@ export function registerIpcHandlers(): void {
   handle(IPC_CHANNELS.appConfirmClose, (): void => {
     closeApproved = true;
     mainWindow?.close();
+  });
+
+  handle(IPC_CHANNELS.appGetDataLocation, () => getDataLocation());
+  handle(
+    IPC_CHANNELS.appChooseDataDirectory,
+    async (): Promise<AppDataDirectoryResult> => {
+      const options: OpenDialogOptions = {
+        title: '选择 DBCraft 数据目录',
+        properties: ['openDirectory', 'createDirectory'],
+      };
+      const result = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false, canceled: true, message: '已取消选择。' };
+      }
+      try {
+        const location = setDataDirectory(result.filePaths[0]!);
+        return {
+          ok: true,
+          message: '已记录新目录；重启应用后复制元数据库与日志并切换。',
+          location,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+  handle(IPC_CHANNELS.appResetDataDirectory, (): AppDataDirectoryResult => {
+    const location = resetDataDirectory();
+    return {
+      ok: true,
+      message: '已恢复默认目录；重启应用后生效。',
+      location,
+    };
   });
 
   handle(IPC_CHANNELS.appGetInfo, (): AppInfo => {

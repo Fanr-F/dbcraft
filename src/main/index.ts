@@ -4,11 +4,20 @@ import { registerIpcHandlers, bindMainWindow, releaseMainWindow, isMainWindowClo
 import { IPC_CHANNELS } from '../shared/ipc-contract';
 import { closeAllSessions } from './services/ConnectionManager';
 import { closeMetadataDatabase, openMetadataDatabase } from './storage/metadata';
+import { resolveDataDirectory } from './storage/data-location';
 import { createLogger, resolveLogDirectory, resolveLogLevel } from './logging/logger';
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL']);
 const isSmoke = process.env['DBCRAFT_SMOKE'] === '1';
+const dataLocation = resolveDataDirectory();
 const log = createLogger('app');
+
+if (dataLocation.warning) {
+  log.warn('数据目录初始化异常', {
+    warning: dataLocation.warning,
+    current: dataLocation.current,
+  });
+}
 
 const PRODUCTION_CSP = [
   "default-src 'self'",

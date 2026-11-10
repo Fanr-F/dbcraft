@@ -584,6 +584,17 @@ export interface SchemaGetOptions {
   database?: string;
 }
 
+export interface AppDataLocation {
+  current: string;
+  defaultDir: string;
+  custom: boolean;
+  warning?: string;
+}
+
+export type AppDataDirectoryResult =
+  | { ok: true; canceled?: boolean; message: string; location: AppDataLocation }
+  | { ok: false; canceled?: boolean; message: string; location?: AppDataLocation };
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -687,6 +698,9 @@ export interface DBCraftApi {
     onCloseRequested: (handler: () => void) => () => void;
     /** 渲染层完成提交/丢弃后允许窗口关闭。 */
     confirmClose: () => Promise<void>;
+    getDataLocation: () => Promise<AppDataLocation>;
+    chooseDataDirectory: () => Promise<AppDataDirectoryResult>;
+    resetDataDirectory: () => Promise<AppDataDirectoryResult>;
   };
   dialog: {
     selectSqliteFile: () => Promise<string | null>;
@@ -788,6 +802,9 @@ export const IPC_CHANNELS = {
   appGetInfo: 'app:get-info',
   appCloseRequested: 'app:close-requested',
   appConfirmClose: 'app:confirm-close',
+  appGetDataLocation: 'app:get-data-location',
+  appChooseDataDirectory: 'app:choose-data-directory',
+  appResetDataDirectory: 'app:reset-data-directory',
   dialogSelectSqliteFile: 'dialog:select-sqlite-file',
   connectionTest: 'connection:test',
   connectionList: 'connection:list',

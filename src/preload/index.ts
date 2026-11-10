@@ -15,6 +15,10 @@ const api: DBCraftApi = {
       return () => ipcRenderer.removeListener(IPC_CHANNELS.appCloseRequested, listener);
     },
     confirmClose: () => ipcRenderer.invoke(IPC_CHANNELS.appConfirmClose),
+    getDataLocation: () => ipcRenderer.invoke(IPC_CHANNELS.appGetDataLocation),
+    chooseDataDirectory: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.appChooseDataDirectory),
+    resetDataDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.appResetDataDirectory),
   },
   dialog: {
     selectSqliteFile: () => ipcRenderer.invoke(IPC_CHANNELS.dialogSelectSqliteFile),

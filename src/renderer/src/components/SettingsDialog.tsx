@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { AppSettings, LocalStats, ShortcutAction, ShortcutMap } from '@shared/ipc-contract';
+import type {
+  AppDataLocation,
+  AppSettings,
+  LocalStats,
+  ShortcutAction,
+  ShortcutMap,
+} from '@shared/ipc-contract';
 import {
   COMPLETION_DELAY_OPTIONS,
   CONNECT_TIMEOUT_OPTIONS,
@@ -58,6 +64,8 @@ export function SettingsDialog({
   const [error, setError] = useState<string | null>(null);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState<string | null>(null);
   const [stats, setStats] = useState<LocalStats | null>(null);
+  const [dataLocation, setDataLocation] = useState<AppDataLocation | null>(null);
+  const [dataDirectoryMessage, setDataDirectoryMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const api = window.dbcraft;
@@ -67,6 +75,12 @@ export function SettingsDialog({
       .get()
       .then((result) => {
         if (!cancelled && result.ok) setStats(result.stats);
+      })
+      .catch(() => undefined);
+    api.app
+      .getDataLocation()
+      .then((location) => {
+        if (!cancelled) setDataLocation(location);
       })
       .catch(() => undefined);
     return () => {
@@ -179,6 +193,22 @@ export function SettingsDialog({
     setGridConfirmCommit(DEFAULT_APP_SETTINGS.gridConfirmCommit);
     setShortcuts({ ...DEFAULT_SHORTCUTS });
     setDiagnosticsMessage('已恢复默认值，点击「保存」后生效。');
+  };
+
+  const chooseDataDirectory = async () => {
+    const api = window.dbcraft;
+    if (!api) return;
+    const result = await api.app.chooseDataDirectory();
+    setDataDirectoryMessage(result.message);
+    if (result.location) setDataLocation(result.location);
+  };
+
+  const resetDataDirectory = async () => {
+    const api = window.dbcraft;
+    if (!api) return;
+    const result = await api.app.resetDataDirectory();
+    setDataDirectoryMessage(result.message);
+    if (result.location) setDataLocation(result.location);
   };
 
   const save = async () => {
@@ -535,9 +565,31 @@ export function SettingsDialog({
           {userDataPath && (
             <label className="field">
               <span>本地数据目录</span>
-              <input value={userDataPath} readOnly title={userDataPath} />
+              <input
+                value={dataLocation?.current ?? userDataPath}
+                readOnly
+                title={dataLocation?.current ?? userDataPath}
+              />
             </label>
           )}
+          <div className="field check-group">
+            <span>数据目录迁移</span>
+            <button type="button" className="btn" onClick={() => void chooseDataDirectory()}>
+              选择目录并迁移
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!dataLocation?.custom}
+              onClick={() => void resetDataDirectory()}
+            >
+              恢复默认目录
+            </button>
+          </div>
+          <p className="form-note">
+            新目录在下次启动时复制元数据库与日志，然后切换；原目录不会被删除。
+            {dataDirectoryMessage ? ` ${dataDirectoryMessage}` : ''}
+          </p>
 
           <div className="field check-group">
             <span>诊断</span>
