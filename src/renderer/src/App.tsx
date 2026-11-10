@@ -1182,13 +1182,13 @@ export default function App() {
   };
 
   /** 表数据页需要主键/列信息才能开启编辑；视图或无主键表保持只读。 */
-  const loadTableMeta = async (tab: QueryTab) => {
+  const loadTableMeta = async (tab: QueryTab): Promise<TableMeta | null> => {
     const api = window.dbcraft;
-    if (!api || !tab.table) return;
+    if (!api || !tab.table) return null;
 
     if (tab.table.database) {
       const switched = await ensureDatabase(tab.id, tab.table.database);
-      if (!switched) return;
+      if (!switched) return null;
     }
 
     try {
@@ -1200,13 +1200,16 @@ export default function App() {
       setTableMetas((current) => ({ ...current, [tab.id]: result.ok ? result.meta : null }));
       if (!result.ok) {
         showNotice('error', `读取表结构失败：${result.message}`);
+        return null;
       }
+      return result.meta;
     } catch (error) {
       setTableMetas((current) => ({ ...current, [tab.id]: null }));
       showNotice(
         'error',
         error instanceof Error ? error.message : '读取表结构失败。',
       );
+      return null;
     }
   };
 
@@ -1447,11 +1450,10 @@ export default function App() {
     const pageSize = 200;
     const number = tabCounter.current;
     tabCounter.current += 1;
-    const query = buildTablePageQuery(connection.input.type, name, pageSize, 0);
     const tab: QueryTab = {
       id: `query-${number}`,
       title: `表 · ${database ? `${database}.` : ''}${name}`,
-      sql: query.sql,
+      sql: '',
       connectionId,
       table: {
         name,
@@ -1459,7 +1461,6 @@ export default function App() {
         ...(database ? { database } : {}),
         page: 0,
         pageSize,
-        params: query.params,
       },
     };
     setTabs((current) => [...current, tab]);
@@ -1475,8 +1476,25 @@ export default function App() {
       connection.input.type === 'sqlite' ? undefined : database,
     );
     if (!ready) return;
-    await loadTableMeta(tab);
-    await runQuery(query.sql, tab, query.params, { internal: true });
+    const meta = await loadTableMeta(tab);
+    const query = buildTablePageQuery(
+      connection.input.type,
+      name,
+      pageSize,
+      0,
+      null,
+      null,
+      meta?.rowidAlias ? { rowidAlias: meta.rowidAlias } : undefined,
+    );
+    const finalTab: QueryTab = {
+      ...tab,
+      sql: query.sql,
+      table: { ...tab.table!, params: query.params },
+    };
+    setTabs((current) =>
+      current.map((item) => (item.id === tab.id ? finalTab : item)),
+    );
+    await runQuery(query.sql, finalTab, query.params, { internal: true });
   };
 
   /**
@@ -2986,11 +3004,10 @@ export default function App() {
     const pageSize = 200;
     const number = tabCounter.current;
     tabCounter.current += 1;
-    const query = buildTablePageQuery(connection.input.type, name, pageSize, 0);
     const tab: QueryTab = {
       id: `query-${number}`,
       title: `表 · ${database ? `${database}.` : ''}${name}`,
-      sql: query.sql,
+      sql: '',
       connectionId: connection.id,
       table: {
         name,
@@ -2998,7 +3015,6 @@ export default function App() {
         ...(database ? { database } : {}),
         page: 0,
         pageSize,
-        params: query.params,
       },
     };
 
@@ -3016,8 +3032,25 @@ export default function App() {
       connection.input.type === 'sqlite' ? undefined : database,
     );
     if (!ready) return;
-    await loadTableMeta(tab);
-    await runQuery(query.sql, tab, query.params, { internal: true });
+    const meta = await loadTableMeta(tab);
+    const query = buildTablePageQuery(
+      connection.input.type,
+      name,
+      pageSize,
+      0,
+      null,
+      null,
+      meta?.rowidAlias ? { rowidAlias: meta.rowidAlias } : undefined,
+    );
+    const finalTab: QueryTab = {
+      ...tab,
+      sql: query.sql,
+      table: { ...tab.table!, params: query.params },
+    };
+    setTabs((current) =>
+      current.map((item) => (item.id === tab.id ? finalTab : item)),
+    );
+    await runQuery(query.sql, finalTab, query.params, { internal: true });
   };
 
   const openProcedure = async (name: string, database?: string) => {
@@ -3052,6 +3085,9 @@ export default function App() {
       page * tab.table.pageSize,
       tableSorts(tab.table),
       tableFilters(tab.table),
+      tableMetas[tab.id]?.rowidAlias
+        ? { rowidAlias: tableMetas[tab.id]!.rowidAlias! }
+        : undefined,
     );
     const nextTab: QueryTab = {
       ...tab,
@@ -3079,6 +3115,9 @@ export default function App() {
       0,
       tableSorts(tab.table),
       tableFilters(tab.table),
+      tableMetas[tab.id]?.rowidAlias
+        ? { rowidAlias: tableMetas[tab.id]!.rowidAlias! }
+        : undefined,
     );
     const nextTab: QueryTab = {
       ...tab,
@@ -3126,6 +3165,9 @@ export default function App() {
       0,
       sorts,
       tableFilters(tab.table),
+      tableMetas[tab.id]?.rowidAlias
+        ? { rowidAlias: tableMetas[tab.id]!.rowidAlias! }
+        : undefined,
     );
     const nextTab: QueryTab = {
       ...tab,
@@ -4051,6 +4093,9 @@ export default function App() {
         0,
         tableSorts(tab.table),
         tableFilters(tab.table),
+        tableMetas[tab.id]?.rowidAlias
+          ? { rowidAlias: tableMetas[tab.id]!.rowidAlias! }
+          : undefined,
       );
       sql = query.sql;
       params = query.params;

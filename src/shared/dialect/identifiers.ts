@@ -74,6 +74,11 @@ export interface TablePageQuery {
   params: QueryCell[];
 }
 
+export interface TablePageQueryOptions {
+  /** SQLite 无主键表：把 rowid 别名一并选出，供乐观锁定位。 */
+  rowidAlias?: string;
+}
+
 /** 单列排序与多列排序共用；数组顺序就是 ORDER BY 的优先级。 */
 export function normalizeTableSorts(sort?: TableSort | TableSort[] | null): TableSort[] {
   if (!sort) return [];
@@ -149,8 +154,16 @@ export function buildTablePageQuery(
   offset: number,
   sort?: TableSort | TableSort[] | null,
   filter?: TableFilter | TableFilter[] | null,
+  options?: TablePageQueryOptions,
 ): TablePageQuery {
   const target = quoteIdent(type, name);
+  const selectList =
+    type === 'sqlite' && options?.rowidAlias
+      ? `${quoteIdent(type, options.rowidAlias)} AS ${quoteIdent(
+          type,
+          options.rowidAlias,
+        )}, *`
+      : '*';
   const params: QueryCell[] = [];
   const conditions = normalizeTableFilters(filter)
     .map((item) => buildFilterClause(type, item, params))
@@ -170,13 +183,13 @@ export function buildTablePageQuery(
   if (type === 'mssql') {
     const mssqlOrder = order || ' ORDER BY (SELECT NULL)';
     return {
-      sql: `SELECT * FROM ${target}${where}${mssqlOrder} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`,
+      sql: `SELECT ${selectList} FROM ${target}${where}${mssqlOrder} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`,
       params,
     };
   }
 
   return {
-    sql: `SELECT * FROM ${target}${where}${order} LIMIT ${limit} OFFSET ${offset};`,
+    sql: `SELECT ${selectList} FROM ${target}${where}${order} LIMIT ${limit} OFFSET ${offset};`,
     params,
   };
 }
@@ -189,6 +202,7 @@ export function buildTablePageSql(
   offset: number,
   sort?: TableSort | TableSort[] | null,
   filter?: TableFilter | TableFilter[] | null,
+  options?: TablePageQueryOptions,
 ): string {
-  return buildTablePageQuery(type, name, limit, offset, sort, filter).sql;
+  return buildTablePageQuery(type, name, limit, offset, sort, filter, options).sql;
 }

@@ -202,6 +202,46 @@ expectThrows(
   '第 2 项编辑无效',
 );
 
+// SQLite rowid 表：隐式键不在 columns 中，但允许出现在 keys/original。
+const rowidMeta = {
+  name: 'logs',
+  kind: 'table',
+  editable: true,
+  primaryKey: ['rowid'],
+  rowidAlias: 'rowid',
+  columns: [
+    {
+      name: 'message',
+      declaredType: 'TEXT',
+      notNull: false,
+      primaryKey: false,
+      autoIncrement: false,
+      defaultValue: null,
+      readOnly: false,
+    },
+  ],
+};
+expectSql(
+  buildUpdateStatement('sqlite', 'logs', rowidMeta, {
+    kind: 'update',
+    keys: { rowid: 3 },
+    values: { message: 'hi' },
+    original: { message: 'old' },
+  }),
+  'UPDATE "logs" SET "message" = ? WHERE "rowid" = ? AND "message" IS ?',
+  ['hi', 3, 'old'],
+);
+expectThrows(
+  () =>
+    buildUpdateStatement('sqlite', 'logs', rowidMeta, {
+      kind: 'update',
+      keys: { rowid: 3 },
+      values: { rowid: 9 },
+      original: { message: 'old' },
+    }),
+  '未知列',
+);
+
 // MSSQL rowversion 不是普通更新值，但可作为乐观锁条件。
 const rowversionMeta = {
   ...meta,

@@ -1277,7 +1277,8 @@ export function Workspace({
                     !(allowPrimaryKeyEdit && column.primaryKey) &&
                     !(allowIdentityInsert && column.autoIncrement),
                 )
-                .map((column) => column.name) ?? []
+                .map((column) => column.name)
+                .concat(tableMeta?.rowidAlias ? [tableMeta.rowidAlias] : []) ?? []
             }
             requiredColumns={
               tableMeta?.columns

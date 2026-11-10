@@ -218,7 +218,18 @@ export class SqliteSession implements DatabaseSession {
 
     const primaryKey = columns.filter((column) => column.primaryKey).map((column) => column.name);
     const isView = kind === 'view' || object.rows[0]?.[1] === 'view';
-    const editable = !isView && primaryKey.length > 0 && !this.isReadOnly;
+    const tableSql = String(object.rows[0]?.[2] ?? '');
+    const withoutRowid = /WITHOUT\s+ROWID/i.test(tableSql);
+    const columnNames = new Set(columns.map((column) => column.name.toLowerCase()));
+    const rowidAlias =
+      !isView && !withoutRowid && primaryKey.length === 0
+        ? ['rowid', '_rowid_', 'oid'].find(
+            (alias) => !columnNames.has(alias.toLowerCase()),
+          )
+        : undefined;
+    const effectiveKey = rowidAlias ? [rowidAlias] : primaryKey;
+    const editable =
+      !isView && effectiveKey.length > 0 && !this.isReadOnly;
 
     let reason: string | undefined;
     let reasonCode: TableMeta['reasonCode'];
@@ -228,7 +239,7 @@ export class SqliteSession implements DatabaseSession {
     } else if (this.isReadOnly) {
       reason = '当前会话为只读模式';
       reasonCode = 'readonly-session';
-    } else if (primaryKey.length === 0) {
+    } else if (effectiveKey.length === 0) {
       reason = '表没有主键，无法安全定位行';
       reasonCode = 'no-primary-key';
     }
@@ -237,7 +248,8 @@ export class SqliteSession implements DatabaseSession {
       name,
       kind: isView ? 'view' : 'table',
       columns,
-      primaryKey,
+      primaryKey: effectiveKey,
+      ...(rowidAlias ? { rowidAlias } : {}),
       editable,
       ...(reasonCode ? { reasonCode } : {}),
       ...(reason ? { reason } : {}),
@@ -246,6 +258,8 @@ export class SqliteSession implements DatabaseSession {
 
   async getTableDetail(name: string): Promise<TableDetail> {
     const meta = await this.getTableMeta(name, 'table');
+    // rowid 是编辑用的隐式键，不应出现在表设计器的“真实主键”里。
+    const displayMeta = meta.rowidAlias ? { ...meta, primaryKey: [] } : meta;
     const quoted = quoteIdent('sqlite', name);
 
     const indexes: TableDetail['indexes'] = [];
@@ -321,7 +335,7 @@ export class SqliteSession implements DatabaseSession {
       .filter((view) => view.name.length > 0 && view.sql.length > 0);
 
     return {
-      ...meta,
+      ...displayMeta,
       indexes,
       foreignKeys,
       checks: extractCheckExpressions(ddl),

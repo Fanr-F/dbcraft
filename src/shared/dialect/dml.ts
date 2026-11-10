@@ -42,13 +42,22 @@ function requirePlainObject(
   return value;
 }
 
-function assertKnownColumns(meta: TableMeta, columns: string[], label: string): void {
-  const known = new Set(meta.columns.map((column) => column.name));
+function assertKnownColumns(
+  meta: TableMeta,
+  columns: string[],
+  label: string,
+  extra: string[] = [],
+): void {
+  const known = new Set([...meta.columns.map((column) => column.name), ...extra]);
   for (const name of columns) {
     if (!known.has(name)) {
       throw new Error(`${label}包含未知列「${name}」。`);
     }
   }
+}
+
+function rowidKeys(meta: TableMeta): string[] {
+  return meta.rowidAlias ? [meta.rowidAlias] : [];
 }
 
 function assertPrimaryKey(meta: TableMeta, keys: Record<string, QueryCell>): void {
@@ -100,7 +109,13 @@ export function buildUpdateStatement(
   const keyColumns = Object.keys(keys);
   const originalColumns = Object.keys(original);
 
-  assertKnownColumns(meta, [...valueColumns, ...keyColumns, ...originalColumns], '更新');
+  assertKnownColumns(meta, valueColumns, '更新');
+  assertKnownColumns(
+    meta,
+    [...keyColumns, ...originalColumns],
+    '更新',
+    rowidKeys(meta),
+  );
   assertPrimaryKey(meta, keys);
   writableColumns(meta, valueColumns, options);
 
@@ -145,7 +160,7 @@ export function buildConflictCheckStatement(
 ): BuiltStatement | null {
   if (edit.kind === 'insert') return null;
   const keys = requirePlainObject(edit.keys, '主键');
-  assertKnownColumns(meta, Object.keys(keys), '冲突预检');
+  assertKnownColumns(meta, Object.keys(keys), '冲突预检', rowidKeys(meta));
   assertPrimaryKey(meta, keys);
 
   const params: QueryCell[] = [];
@@ -156,7 +171,7 @@ export function buildConflictCheckStatement(
 
   if (edit.kind === 'update') {
     const original = requirePlainObject(edit.original, '原始值');
-    assertKnownColumns(meta, Object.keys(original), '冲突预检');
+    assertKnownColumns(meta, Object.keys(original), '冲突预检', rowidKeys(meta));
     for (const name of Object.keys(original)) {
       if (!(name in (edit.values ?? {}))) {
         const column = meta.columns.find((item) => item.name === name);
@@ -182,7 +197,7 @@ export function buildDeleteStatement(
   edit: TableEdit,
 ): BuiltStatement {
   const keys = requirePlainObject(edit.keys, '主键');
-  assertKnownColumns(meta, Object.keys(keys), '删除');
+  assertKnownColumns(meta, Object.keys(keys), '删除', rowidKeys(meta));
   assertPrimaryKey(meta, keys);
 
   const params: QueryCell[] = [];

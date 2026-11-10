@@ -83,6 +83,11 @@ assert(
   buildTablePreviewSql('mssql', 'users', 100) === 'SELECT TOP (100) * FROM [users];',
   'mssql preview SQL wrong',
 );
+assert(
+  buildTablePageSql('sqlite', 'logs', 50, 0, null, null, { rowidAlias: 'rowid' }) ===
+    'SELECT "rowid" AS "rowid", * FROM "logs" LIMIT 50 OFFSET 0;',
+  'sqlite rowid page SQL wrong',
+);
 
 const filtered = buildTablePageQuery('sqlite', 'users', 200, 0, null, {
   column: 'name',

@@ -328,6 +328,8 @@ export interface TableMeta {
   kind: DdlObjectKind;
   columns: TableColumnMeta[];
   primaryKey: string[];
+  /** SQLite 无显式主键但可用的 rowid 别名（rowid/_rowid_/oid）。 */
+  rowidAlias?: string;
   /** 视图、无主键表、只读会话均为 false。 */
   editable: boolean;
   /** editable 为 false 的机器可读原因，UI 据此决定是否提供高风险开关。 */
