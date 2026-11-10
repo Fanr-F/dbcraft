@@ -298,11 +298,21 @@ export class SqliteSession implements DatabaseSession {
     );
     const ddl = typeof ddlRow.rows[0]?.[0] === 'string' ? String(ddlRow.rows[0][0]) : '';
 
+    const triggerRows = await this.query(
+      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`,
+      [name],
+    );
+    const triggers = triggerRows.rows
+      .map((row) => String(row[0] ?? ''))
+      .filter(Boolean)
+      .map((trigger) => ({ name: trigger, disabled: false }));
+
     return {
       ...meta,
       indexes,
       foreignKeys,
       checks: extractCheckExpressions(ddl),
+      triggers,
       tableSql: ddl,
       comment: null,
     };

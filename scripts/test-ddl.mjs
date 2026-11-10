@@ -16,6 +16,7 @@ import {
   buildDropForeignKey,
   buildDropIndex,
   buildDropObject,
+  buildDropTrigger,
   buildModifyColumn,
   buildRenameColumn,
   buildRenameTable,
@@ -471,6 +472,13 @@ assert(
 );
 
 console.log('ddl check constraint check passed');
+
+// TRIGGER
+expectSql(buildDropTrigger('mysql', 'trg_orders'), 'DROP TRIGGER IF EXISTS `trg_orders`;');
+expectSql(buildDropTrigger('sqlite', 'trg_orders'), 'DROP TRIGGER IF EXISTS "trg_orders";');
+expectSql(buildDropTrigger('mssql', 'trg_orders'), 'DROP TRIGGER [trg_orders];');
+
+console.log('ddl trigger check passed');
 
 // TABLE DESIGN：新建与编辑差异
 const detail = {

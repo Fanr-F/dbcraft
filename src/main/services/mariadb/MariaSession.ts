@@ -566,11 +566,31 @@ export class MariaSession implements DatabaseSession {
       checks = [];
     }
 
+    let triggers: NonNullable<TableDetail['triggers']> = [];
+    try {
+      const triggerRows = (await this.connection.query(
+        {
+          sql: `SELECT TRIGGER_NAME FROM information_schema.TRIGGERS
+                WHERE EVENT_OBJECT_SCHEMA = DATABASE() AND EVENT_OBJECT_TABLE = ?
+                ORDER BY TRIGGER_NAME`,
+          rowsAsArray: true,
+        },
+        [name],
+      )) as unknown[][];
+      triggers = triggerRows.map((row) => ({
+        name: String(row[0] ?? ''),
+        disabled: false,
+      }));
+    } catch {
+      triggers = [];
+    }
+
     return {
       ...meta,
       indexes: [...indexMap].map(([indexName, group]) => ({ name: indexName, ...group })),
       foreignKeys: [...fkMap].map(([name2, group]) => ({ name: name2, ...group })),
       checks,
+      triggers,
       comment: commentRaw.length > 0 ? commentRaw : null,
     };
   }

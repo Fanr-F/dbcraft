@@ -358,6 +358,8 @@ export interface TableDetail extends TableMeta {
   indexes: TableIndexInfo[];
   foreignKeys: TableForeignKeyInfo[];
   checks: TableCheckInfo[];
+  /** 表上的触发器；部分驱动可能不返回。 */
+  triggers?: TableTriggerInfo[];
   /** 原始 CREATE TABLE 文本（SQLite 用于识别 WITHOUT ROWID/STRICT/生成列等）。 */
   tableSql?: string;
   /** MySQL 系表注释；SQLite 没有表注释，固定为 null。 */

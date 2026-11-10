@@ -589,12 +589,23 @@ export class MssqlSession implements DatabaseSession {
       expression: asString(row[1]?.value),
     }));
 
+    const triggerRows = await this.run(
+      `SELECT name, is_disabled FROM sys.triggers
+       WHERE parent_id = OBJECT_ID(@p1) ORDER BY name`,
+      [name],
+    );
+    const triggers = triggerRows.rows.map((row) => ({
+      name: asString(row[0]?.value),
+      disabled: Boolean(row[1]?.value),
+    }));
+
     const comment = commentRows.rows[0]?.[0]?.value;
     return {
       ...meta,
       indexes: [...indexMap.values()],
       foreignKeys: [...foreignKeyMap.values()],
       checks,
+      triggers,
       comment: comment === null || comment === undefined ? null : asString(comment),
     };
   }

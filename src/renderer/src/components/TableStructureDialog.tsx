@@ -1,13 +1,24 @@
 import { useState } from 'react';
 import type { DatabaseType, TableDetail } from '@shared/ipc-contract';
-import { buildAddCheck, buildAddForeignKey, buildCreateIndex, buildDropCheck, buildDropForeignKey, buildDropIndex, buildTableComment } from '@shared/dialect/ddl';
+import { buildAddCheck, buildAddForeignKey, buildCreateIndex, buildDropCheck, buildDropForeignKey, buildDropIndex, buildDropTrigger, buildTableComment } from '@shared/dialect/ddl';
 import { Icon } from './Icon';
 
 interface TableStructureDialogProps {
   detail: TableDetail;
   dialect: DatabaseType;
   onExecute?: (sql: string) => Promise<{ ok: boolean; message: string }>;
+  onOpenEditor?: (sql: string, title: string) => void;
   onClose: () => void;
+}
+
+function triggerTemplate(dialect: DatabaseType, table: string): string {
+  if (dialect === 'sqlite') {
+    return `CREATE TRIGGER trg_${table}_after_insert\nAFTER INSERT ON "${table}"\nBEGIN\n  -- 在这里编写触发器逻辑\nEND;`;
+  }
+  if (dialect === 'mssql') {
+    return `CREATE TRIGGER [trg_${table}_after_insert]\nON ${table}\nAFTER INSERT\nAS\nBEGIN\n  SET NOCOUNT ON;\n  -- 在这里编写触发器逻辑\nEND;`;
+  }
+  return `DELIMITER $$\nCREATE TRIGGER trg_${table}_after_insert\nAFTER INSERT ON \`${table}\`\nFOR EACH ROW\nBEGIN\n  -- 在这里编写触发器逻辑\nEND$$\nDELIMITER ;`;
 }
 
 function orDash(value: string | null | undefined): string {
@@ -18,6 +29,7 @@ export function TableStructureDialog({
   detail,
   dialect,
   onExecute,
+  onOpenEditor,
   onClose,
 }: TableStructureDialogProps) {
   const [comment, setComment] = useState(detail.comment ?? '');
@@ -131,6 +143,15 @@ export function TableStructureDialog({
     await executeConstraint(
       buildDropCheck(dialect, detail.name, name),
       'CHECK 约束已删除；请关闭后重新打开查看最新结构。',
+      true,
+    );
+  };
+
+  const dropTrigger = async (name: string) => {
+    if (!window.confirm(`删除触发器「${name}」？`)) return;
+    await executeConstraint(
+      buildDropTrigger(dialect, name),
+      '触发器已删除；请关闭后重新打开查看最新结构。',
       true,
     );
   };
@@ -333,6 +354,38 @@ export function TableStructureDialog({
               ))}
             </ul>
           )}
+
+          <h3>触发器（{(detail.triggers ?? []).length}）</h3>
+          {(detail.triggers ?? []).length === 0 ? (
+            <p className="pane-hint">没有触发器。</p>
+          ) : (
+            <ul className="structure-list">
+              {(detail.triggers ?? []).map((trigger) => (
+                <li key={trigger.name}>
+                  <strong>{trigger.name}</strong>
+                  <span>{trigger.disabled ? '已禁用' : '已启用'}</span>
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    disabled={busy || !onExecute}
+                    onClick={() => void dropTrigger(trigger.name)}
+                  >
+                    删除
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            className="btn"
+            disabled={!onOpenEditor}
+            onClick={() =>
+              onOpenEditor?.(triggerTemplate(dialect, detail.name), `触发器 · ${detail.name}`)
+            }
+          >
+            在编辑器中新建触发器
+          </button>
 
           <h3>添加外键</h3>
           <div className="structure-constraint-form">

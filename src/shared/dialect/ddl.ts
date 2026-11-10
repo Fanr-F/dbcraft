@@ -490,6 +490,19 @@ export function buildDropCheck(
   };
 }
 
+export function buildDropTrigger(
+  dialect: DatabaseType,
+  name: string,
+): DdlGenerateResult {
+  const trigger = requireName(name, '触发器名');
+  if (!trigger.ok) return { ok: false, message: trigger.message, warnings: [] };
+  const quoted = quoteIdent(dialect, trigger.name);
+  if (dialect === 'mssql') {
+    return { ok: true, sql: `DROP TRIGGER ${quoted};`, warnings: [] };
+  }
+  return { ok: true, sql: `DROP TRIGGER IF EXISTS ${quoted};`, warnings: [] };
+}
+
 /** ALTER TABLE ... COMMENT（MySQL 系）或扩展属性（MSSQL）；SQLite 不支持。 */
 export function buildTableComment(
   dialect: DatabaseType,
