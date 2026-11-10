@@ -3269,8 +3269,6 @@ export default function App() {
     let failed = 0;
 
     for (const object of schema.objects) {
-      // 库级 DDL 目前只覆盖表和视图；存储过程留给后续。
-      if (object.type === 'procedure') continue;
       const result = await api.ddl.get(activeTab.id, object.name, object.type);
       if (result.ok) {
         parts.push(

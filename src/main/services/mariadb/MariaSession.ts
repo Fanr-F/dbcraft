@@ -385,12 +385,17 @@ export class MariaSession implements DatabaseSession {
   async getDdl(name: string, kind: DdlObjectKind): Promise<string> {
     const target = quoteIdent(this.dialect, name);
     const sql =
-      kind === 'view' ? `SHOW CREATE VIEW ${target}` : `SHOW CREATE TABLE ${target}`;
+      kind === 'view'
+        ? `SHOW CREATE VIEW ${target}`
+        : kind === 'procedure'
+          ? `SHOW CREATE PROCEDURE ${target}`
+          : `SHOW CREATE TABLE ${target}`;
     const rows = (await this.connection.query({ sql, rowsAsArray: true })) as unknown[][];
-    const ddl = rows[0]?.[1];
+    const ddl = rows[0]?.[kind === 'procedure' ? 2 : 1];
 
     if (typeof ddl !== 'string' || ddl.trim().length === 0) {
-      throw new Error(`未找到${kind === 'view' ? '视图' : '表'}「${name}」的 DDL。`);
+      const label = kind === 'view' ? '视图' : kind === 'procedure' ? '存储过程' : '表';
+      throw new Error(`未找到${label}「${name}」的 DDL。`);
     }
     return ddl;
   }

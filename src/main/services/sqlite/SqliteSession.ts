@@ -175,6 +175,7 @@ export class SqliteSession implements DatabaseSession {
   }
 
   async getDdl(name: string, kind: DdlObjectKind): Promise<string> {
+    if (kind === 'procedure') throw new Error('SQLite 不支持存储过程。');
     const escaped = name.replace(/'/g, "''");
     const type = kind === 'view' ? 'view' : 'table';
     const result = await this.query(

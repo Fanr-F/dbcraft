@@ -392,13 +392,13 @@ export class MssqlSession implements DatabaseSession {
     const object = await this.objectInfo(name);
     if (!object) throw new Error(`对象「${name}」不存在。`);
 
-    if (object.type === 'V') {
+    if (object.type === 'V' || object.type === 'P') {
       const definition = await this.run(
         'SELECT definition FROM sys.sql_modules WHERE object_id = OBJECT_ID(@p1)',
         [name],
       );
       const ddl = asString(definition.rows[0]?.[0]?.value).trim();
-      if (!ddl) throw new Error(`无法读取视图「${name}」的定义（可能已加密）。`);
+      if (!ddl) throw new Error(`无法读取对象「${name}」的定义（可能已加密）。`);
       return ddl;
     }
 

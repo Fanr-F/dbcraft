@@ -303,7 +303,7 @@ export type SchemaGetResult =
   | { ok: true; objects: SchemaObject[] }
   | { ok: false; message: string };
 
-export type DdlObjectKind = 'table' | 'view';
+export type DdlObjectKind = 'table' | 'view' | 'procedure';
 
 /** 表数据编辑所需的列信息（来自 information_schema / PRAGMA）。 */
 export interface TableColumnMeta {
