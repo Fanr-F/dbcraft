@@ -2635,6 +2635,11 @@ button:disabled {
   font-size: 11px;
 }
 
+.agent-tag-running {
+  background: rgba(34, 197, 94, 0.16);
+  color: var(--ok, #22c55e);
+}
+
 .agent-failed {
   color: var(--danger);
 }

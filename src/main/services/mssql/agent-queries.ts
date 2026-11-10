@@ -43,7 +43,11 @@ const JOB_COLUMNS = `j.job_id, j.name, j.enabled, ISNULL(c.name, '') AS category
        CASE WHEN EXISTS (
          SELECT 1 FROM msdb.dbo.sysjobservers o
          WHERE o.job_id = j.job_id AND o.server_id <> 0
-       ) THEN 1 ELSE 0 END AS multi_server`;
+       ) THEN 1 ELSE 0 END AS multi_server,
+       CASE WHEN EXISTS (
+         SELECT 1 FROM msdb.dbo.sysjobactivity a
+         WHERE a.job_id = j.job_id AND a.stop_execution_date IS NULL
+       ) THEN 1 ELSE 0 END AS is_running`;
 
 const JOB_FROM = `FROM msdb.dbo.sysjobs j
   LEFT JOIN msdb.dbo.syscategories c ON c.category_id = j.category_id
@@ -72,6 +76,7 @@ function mapSummary(row: readonly unknown[]): AgentJobSummary {
     lastRunDurationSeconds: agentDurationSeconds(nullableNumber(row[8])),
     nextRunAt: formatAgentRunTimestamp(nullableNumber(row[9]), nullableNumber(row[10])),
     multiServer: flag(row[11]),
+    running: flag(row[12]),
   };
 }
 

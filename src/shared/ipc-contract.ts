@@ -494,6 +494,8 @@ export interface AgentJobSummary {
   nextRunAt: string | null;
   /** 多服务器作业只读展示，禁用启停按钮。 */
   multiServer: boolean;
+  /** 当前是否有未结束的执行（sysjobactivity.stop_execution_date IS NULL）。 */
+  running?: boolean;
 }
 
 export interface AgentJobStep {

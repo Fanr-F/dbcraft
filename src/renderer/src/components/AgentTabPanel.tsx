@@ -332,6 +332,7 @@ function AgentJobListView({
                   <td title={job.name}>
                     {job.name}
                     {job.multiServer && <span className="agent-tag">[多服务器]</span>}
+                    {job.running && <span className="agent-tag agent-tag-running">[运行中]</span>}
                   </td>
                   <td>{job.enabled ? '是' : '否'}</td>
                   <td>{job.category || '—'}</td>
@@ -576,6 +577,8 @@ function AgentJobDetailView({
             <dd>
               {detail.createdAt ?? '—'} / {detail.modifiedAt ?? '—'}
             </dd>
+            <dt>状态</dt>
+            <dd>{detail.running ? '运行中' : '空闲'}</dd>
             <dt>上次运行</dt>
             <dd>
               {detail.lastRunAt ?? '从未运行'} · {agentRunStatusLabel(detail.lastRunStatus)} ·{' '}
