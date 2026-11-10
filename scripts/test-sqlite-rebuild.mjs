@@ -98,6 +98,25 @@ assert(
   'check constraint not preserved',
 );
 
+const withTrigger = buildSqliteRebuild(
+  {
+    ...detail,
+    triggers: [
+      {
+        name: 'trg_users_insert',
+        disabled: false,
+        sql: 'CREATE TRIGGER trg_users_insert AFTER INSERT ON users BEGIN SELECT 1; END;',
+      },
+    ],
+  },
+  change,
+);
+assert(withTrigger.ok, 'trigger rebuild failed');
+assert(
+  withTrigger.statements.some((sql) => sql.includes('CREATE TRIGGER trg_users_insert')),
+  'trigger not preserved',
+);
+
 const composite = buildSqliteRebuild(
   {
     ...detail,

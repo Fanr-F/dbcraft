@@ -119,7 +119,7 @@
 | M04-13 | 删除列/表/视图输入对象名确认 | ✅ | 满足 AGENTS 约束 |
 | M04-14 | 多语句 DDL 逐条结果 | ✅ | SQLite 事务包裹、失败回滚；MySQL 逐条汇报 |
 | M04-15 | SQLite 重建表保留显式索引 | ✅ | `sqlite-rebuild.ts`；真实 SQLite 回放测试 |
-| M04-16 | SQLite 重建表保留外键/CHECK/触发器/视图 | 🟡 | 外键与 CHECK 已重建（W-20261109-69）；触发器、视图仍不保留并警告 |
+| M04-16 | SQLite 重建表保留外键/CHECK/触发器/视图 | 🟡 | 外键、CHECK、触发器已保留（W-20261109-69/76）；视图仍不保留并警告 |
 | M04-17 | SQLite 维护锁、进度、取消 | ✅ | DDL 执行时显示维护遮罩与不确定进度；取消会终止 Worker 并提示重连（W-20261109-71） |
 | M04-18 | `WITHOUT ROWID` / STRICT / 生成列安全重建 | ✅ | `TableDetail.tableSql` 传入重建器；识别到 `WITHOUT ROWID`/STRICT/生成列时阻止重建并提示用 SQL（W-20261109-68） |
 | M04-19 | 列顺序调整 | ✅ | 表设计支持上移/下移；SQLite 重建、MySQL/MariaDB 逐列 MODIFY…AFTER；MSSQL 提示用 SQL（W-20261109-72） |

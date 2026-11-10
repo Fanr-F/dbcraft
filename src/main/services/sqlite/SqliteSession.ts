@@ -299,13 +299,16 @@ export class SqliteSession implements DatabaseSession {
     const ddl = typeof ddlRow.rows[0]?.[0] === 'string' ? String(ddlRow.rows[0][0]) : '';
 
     const triggerRows = await this.query(
-      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`,
+      `SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`,
       [name],
     );
     const triggers = triggerRows.rows
-      .map((row) => String(row[0] ?? ''))
-      .filter(Boolean)
-      .map((trigger) => ({ name: trigger, disabled: false }));
+      .map((row) => ({
+        name: String(row[0] ?? ''),
+        disabled: false,
+        ...(typeof row[1] === 'string' ? { sql: row[1] } : {}),
+      }))
+      .filter((trigger) => trigger.name.length > 0);
 
     return {
       ...meta,

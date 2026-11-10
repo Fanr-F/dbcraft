@@ -286,6 +286,8 @@ export interface TableConstraintInfo {
 export interface TableTriggerInfo {
   name: string;
   disabled: boolean;
+  /** 原始创建语句；SQLite 重建时用于恢复触发器。 */
+  sql?: string;
 }
 
 /** 对象树表节点展开时按需加载的子对象。 */

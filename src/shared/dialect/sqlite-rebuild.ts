@@ -133,10 +133,14 @@ export function buildSqliteRebuild(
     statements.push(built.sql);
   }
 
+  for (const trigger of detail.triggers ?? []) {
+    if (trigger.sql?.trim()) statements.push(trigger.sql.trim());
+  }
+
   if (detail.foreignKeys.length > 0) {
     warnings.push(`已保留 ${detail.foreignKeys.length} 个外键定义。`);
   }
-  warnings.push('重建会保留外键与 CHECK；触发器、视图和表注释不会保留，请在预览中核对这些差异。');
+  warnings.push('重建会保留外键、CHECK 与触发器；视图和表注释不会保留，请在预览中核对这些差异。');
   warnings.push('外键检查通过后才会提交；失败会整体回滚。');
 
   return { ok: true, statements, warnings };
@@ -277,13 +281,21 @@ export function buildSqliteRebuildTable(
     statements.push(built.sql);
   }
 
+  if (detail.name === targetName) {
+    for (const trigger of detail.triggers ?? []) {
+      if (trigger.sql?.trim()) statements.push(trigger.sql.trim());
+    }
+  } else if ((detail.triggers ?? []).length > 0) {
+    warnings.push('表已重命名，触发器定义仍引用旧表名，重建后不会自动恢复。');
+  }
+
   if (columns.some((column) => column.notNull && !column.defaultValue?.trim() && !column.originalName)) {
     warnings.push('新增的非空列没有默认值：迁移已有数据可能失败。');
   }
   if (detail.foreignKeys.length > 0) {
     warnings.push(`已保留 ${detail.foreignKeys.length} 个外键定义。`);
   }
-  warnings.push('重建会保留外键与 CHECK；触发器、视图和表注释不会保留，请在预览中核对这些差异。');
+  warnings.push('重建会保留外键、CHECK 与触发器；视图和表注释不会保留，请在预览中核对这些差异。');
   warnings.push('外键检查通过后才会提交；失败会整体回滚。');
 
   return { ok: true, statements, warnings };
