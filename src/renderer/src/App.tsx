@@ -117,6 +117,8 @@ interface DraftPayload {
     filePath?: string;
     /** 用户自定义标签名；重启后恢复。 */
     customTitle?: string;
+    /** 表数据页上下文（分页/排序/过滤/所属库）。 */
+    table?: QueryTab['table'];
     /** 保存连接被删除后，恢复时仍能识别原连接。 */
     connectionSnapshot?: SavedConnection;
   }>;
@@ -141,6 +143,13 @@ function loadDraftTabs(): { tabs: QueryTab[]; activeTabId: string } | null {
         ...(typeof item.filePath === 'string' ? { filePath: item.filePath } : {}),
         ...(typeof item.customTitle === 'string' && item.customTitle.trim()
           ? { customTitle: item.customTitle.trim().slice(0, 80) }
+          : {}),
+        ...(item.table &&
+        typeof item.table === 'object' &&
+        typeof item.table.name === 'string' &&
+        typeof item.table.page === 'number' &&
+        typeof item.table.pageSize === 'number'
+          ? { table: item.table }
           : {}),
         ...(item.connectionSnapshot &&
         typeof item.connectionSnapshot === 'object' &&
@@ -179,6 +188,7 @@ function persistDraftTabs(tabs: QueryTab[], activeTabId: string): boolean {
         connectionId: tab.connectionId,
         ...(tab.filePath ? { filePath: tab.filePath } : {}),
         ...(tab.customTitle ? { customTitle: tab.customTitle.slice(0, 80) } : {}),
+        ...(tab.table ? { table: tab.table } : {}),
         ...(tab.connectionSnapshot
           ? { connectionSnapshot: tab.connectionSnapshot }
           : {}),
@@ -509,6 +519,7 @@ export default function App() {
   const completionDetails = useRef<Record<string, string>>({});
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
+  const restoredSessions = useRef(false);
 
   useEffect(() => {
     tabsRef.current = tabs;
@@ -626,6 +637,37 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // 重启后恢复标签会话与结果：重新打开保存连接并执行草稿 SQL（不缓存旧结果）。
+  useEffect(() => {
+    if (restoredSessions.current || connections.length === 0) return;
+    restoredSessions.current = true;
+    const candidates = tabs
+      .filter(
+        (tab) =>
+          !tab.kind &&
+          tab.connectionId !== null &&
+          tab.sql.trim().length > 0 &&
+          connections.some((connection) => connection.id === tab.connectionId),
+      )
+      .slice(0, 5);
+    if (candidates.length === 0) return;
+
+    void (async () => {
+      for (const tab of candidates) {
+        const connection = connections.find((item) => item.id === tab.connectionId);
+        if (!connection) continue;
+        const ready = await openTabSession(
+          tab,
+          connection.id,
+          connection.input.type === 'sqlite' ? undefined : tab.table?.database,
+        );
+        if (!ready) continue;
+        await loadTableMeta(tab);
+        await runQuery(tab.sql, tab, tab.table?.params, { internal: true });
+      }
+    })();
+  }, [connections]);
 
   useEffect(() => {
     return () => {
