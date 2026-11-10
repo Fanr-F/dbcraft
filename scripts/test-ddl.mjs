@@ -6,10 +6,12 @@
 import { buildTableDesign } from '../src/shared/dialect/table-diff.ts';
 import {
   buildAddColumn,
+  buildAddForeignKey,
   buildCreateIndex,
   buildCreateTable,
   buildCreateView,
   buildDropColumn,
+  buildDropForeignKey,
   buildDropIndex,
   buildDropObject,
   buildModifyColumn,
@@ -403,6 +405,46 @@ assert(
 );
 
 console.log('ddl table comment check passed');
+
+// FOREIGN KEY
+expectSql(
+  buildAddForeignKey('mysql', 'orders', {
+    name: 'fk_orders_user_id',
+    columns: ['user_id'],
+    referencedTable: 'users',
+    referencedColumns: ['id'],
+    onDelete: 'CASCADE',
+  }),
+  'ALTER TABLE `orders` ADD CONSTRAINT `fk_orders_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;',
+);
+expectSql(
+  buildAddForeignKey('mssql', 'dbo.orders', {
+    name: 'fk_orders_user_id',
+    columns: ['user_id'],
+    referencedTable: 'dbo.users',
+    referencedColumns: ['id'],
+    onDelete: 'CASCADE',
+  }),
+  'ALTER TABLE [dbo].[orders] ADD CONSTRAINT [fk_orders_user_id] FOREIGN KEY ([user_id]) REFERENCES [dbo].[users] ([id]) ON DELETE CASCADE;',
+);
+expectSql(
+  buildDropForeignKey('mysql', 'orders', 'fk_orders_user_id'),
+  'ALTER TABLE `orders` DROP FOREIGN KEY `fk_orders_user_id`;',
+);
+expectSql(
+  buildDropForeignKey('mssql', 'dbo.orders', 'fk_orders_user_id'),
+  'ALTER TABLE [dbo].[orders] DROP CONSTRAINT [fk_orders_user_id];',
+);
+assert(
+  !buildAddForeignKey('sqlite', 'orders', {
+    columns: ['user_id'],
+    referencedTable: 'users',
+    referencedColumns: ['id'],
+  }).ok,
+  'sqlite foreign key should require rebuild',
+);
+
+console.log('ddl foreign key check passed');
 
 // TABLE DESIGN：新建与编辑差异
 const detail = {

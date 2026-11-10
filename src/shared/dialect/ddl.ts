@@ -308,8 +308,7 @@ export function buildCreateIndex(
 export function buildDropIndex(  dialect: DatabaseType,
   indexName: string,
   tableName?: string,
-): DdlGenerateResult {
-  const index = requireName(indexName, '索引名');
+): DdlGenerateResult {  const index = requireName(indexName, '索引名');
   if (!index.ok) {
     return { ok: false, message: index.message, warnings: [] };
   }
@@ -330,6 +329,111 @@ export function buildDropIndex(  dialect: DatabaseType,
   return {
     ok: true,
     sql: `DROP INDEX ${quoteIdent(dialect, index.name)} ON ${quoteIdent(dialect, table.name)};`,
+    warnings: [],
+  };
+}
+
+export interface ForeignKeyDefinition {
+  name?: string;
+  columns: string[];
+  referencedTable: string;
+  referencedColumns: string[];
+  onDelete?: string;
+  onUpdate?: string;
+}
+
+function quoteQualified(dialect: DatabaseType, name: string): string {
+  return name
+    .split('.')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => quoteIdent(dialect, part))
+    .join('.');
+}
+
+function defaultForeignKeyName(table: string, columns: string[]): string {
+  const base = `fk_${table}_${columns.join('_')}`
+    .replace(/[^\w]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return (base || 'fk_constraint').slice(0, 60);
+}
+
+/** 添加外键；SQLite 需要重建表，返回明确错误。 */
+export function buildAddForeignKey(
+  dialect: DatabaseType,
+  tableName: string,
+  foreignKey: ForeignKeyDefinition,
+): DdlGenerateResult {
+  if (dialect === 'sqlite') {
+    return {
+      ok: false,
+      message: 'SQLite 添加外键需要重建表；请使用表设计页签或 SQL 编辑器。',
+      warnings: [],
+    };
+  }
+  const table = requireName(tableName, '表名');
+  if (!table.ok) return { ok: false, message: table.message, warnings: [] };
+  const columns = foreignKey.columns.map((column) => column.trim()).filter(Boolean);
+  const referencedColumns = foreignKey.referencedColumns
+    .map((column) => column.trim())
+    .filter(Boolean);
+  const referencedTable = foreignKey.referencedTable.trim();
+  if (columns.length === 0 || referencedColumns.length === 0) {
+    return { ok: false, message: '外键列和引用列都不能为空。', warnings: [] };
+  }
+  if (!referencedTable) {
+    return { ok: false, message: '请填写引用表。', warnings: [] };
+  }
+  if (columns.length !== referencedColumns.length) {
+    return { ok: false, message: '外键列与引用列数量必须一致。', warnings: [] };
+  }
+
+  const name =
+    foreignKey.name?.trim() || defaultForeignKeyName(table.name, columns);
+  const onDelete = foreignKey.onDelete?.trim().toUpperCase();
+  const onUpdate = foreignKey.onUpdate?.trim().toUpperCase();
+  const actions = [
+    onDelete ? `ON DELETE ${onDelete}` : '',
+    onUpdate ? `ON UPDATE ${onUpdate}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return {
+    ok: true,
+    sql: `ALTER TABLE ${quoteQualified(dialect, table.name)} ADD CONSTRAINT ${quoteIdent(dialect, name)} FOREIGN KEY (${columns
+      .map((column) => quoteIdent(dialect, column))
+      .join(', ')}) REFERENCES ${quoteQualified(dialect, referencedTable)} (${referencedColumns
+      .map((column) => quoteIdent(dialect, column))
+      .join(', ')})${actions ? ` ${actions}` : ''};`,
+    warnings: [],
+  };
+}
+
+/** 删除外键；SQLite 需要重建表，返回明确错误。 */
+export function buildDropForeignKey(
+  dialect: DatabaseType,
+  tableName: string,
+  name: string,
+): DdlGenerateResult {
+  if (dialect === 'sqlite') {
+    return {
+      ok: false,
+      message: 'SQLite 删除外键需要重建表；请使用表设计页签或 SQL 编辑器。',
+      warnings: [],
+    };
+  }
+  const table = requireName(tableName, '表名');
+  if (!table.ok) return { ok: false, message: table.message, warnings: [] };
+  const constraint = requireName(name, '外键名');
+  if (!constraint.ok) return { ok: false, message: constraint.message, warnings: [] };
+
+  return {
+    ok: true,
+    sql:
+      dialect === 'mysql' || dialect === 'percona' || dialect === 'mariadb'
+        ? `ALTER TABLE ${quoteQualified(dialect, table.name)} DROP FOREIGN KEY ${quoteIdent(dialect, constraint.name)};`
+        : `ALTER TABLE ${quoteQualified(dialect, table.name)} DROP CONSTRAINT ${quoteIdent(dialect, constraint.name)};`,
     warnings: [],
   };
 }

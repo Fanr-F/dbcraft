@@ -1019,6 +1019,17 @@ button:disabled {
   width: 170px;
 }
 
+.structure-constraint-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.structure-constraint-form .btn {
+  justify-self: start;
+}
+
 .sql-editor {
   position: absolute;
   inset: 0;
