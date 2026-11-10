@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { DatabaseType } from '@shared/ipc-contract';
-import { buildAddColumn } from '@shared/dialect/ddl';
+import { buildAddColumn, ddlTransactionHint } from '@shared/dialect/ddl';
 import { Icon } from './Icon';
 
 interface AddColumnDialogProps {
@@ -140,6 +140,7 @@ export function AddColumnDialog({
               ))}
             </div>
           )}
+          <p className="form-note">{ddlTransactionHint(dialect)}</p>
 
           {error && <div className="form-error">{error}</div>}
         </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { DatabaseType } from '@shared/ipc-contract';
-import { buildCreateView } from '@shared/dialect/ddl';
+import { buildCreateView, ddlTransactionHint } from '@shared/dialect/ddl';
 import { Icon } from './Icon';
 
 interface CreateViewDialogProps {
@@ -96,6 +96,7 @@ export function CreateViewDialog({ dialect, onClose, onExecute }: CreateViewDial
               ))}
             </div>
           )}
+          <p className="form-note">{ddlTransactionHint(dialect)}</p>
 
           {error && <div className="form-error">{error}</div>}
         </div>

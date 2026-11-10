@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { DatabaseType } from '@shared/ipc-contract';
-import { buildDropObject, buildRenameTable } from '@shared/dialect/ddl';
+import { buildDropObject, buildRenameTable, ddlTransactionHint } from '@shared/dialect/ddl';
 import { Icon } from './Icon';
 
 export type TableActionMode = 'rename' | 'drop-table' | 'drop-view';
@@ -117,6 +117,7 @@ export function TableActionDialog({
               ))}
             </div>
           )}
+          <p className="form-note">{ddlTransactionHint(dialect)}</p>
 
           {mode !== 'rename' && (
             <p className="form-note">

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { DatabaseType } from '@shared/ipc-contract';
-import { buildCreateIndex, buildDropIndex } from '@shared/dialect/ddl';
+import { buildCreateIndex, buildDropIndex, ddlTransactionHint } from '@shared/dialect/ddl';
 import { Icon } from './Icon';
 
 export type IndexMode = 'create' | 'drop';
@@ -126,6 +126,7 @@ export function IndexDialog({
               <div className="form-error">{generated.message}</div>
             )
           )}
+          <p className="form-note">{ddlTransactionHint(dialect)}</p>
 
           {error && <div className="form-error">{error}</div>}
         </div>

@@ -5,6 +5,17 @@ export type DdlGenerateResult =
   | { ok: true; sql: string; warnings: string[] }
   | { ok: false; message: string; warnings: string[] };
 
+/** 预览弹窗统一展示的方言 DDL 事务能力说明。 */
+export function ddlTransactionHint(dialect: DatabaseType): string {
+  if (dialect === 'sqlite') {
+    return 'SQLite DDL 支持事务：多语句失败时整体回滚（重建表由 DBCraft 事务包裹）。';
+  }
+  if (dialect === 'mssql') {
+    return 'SQL Server 多数 DDL 可放在事务中；GO 分批时逐批处理，失败后的批次不会执行。';
+  }
+  return 'MySQL / MariaDB DDL 会隐式提交：失败无法整体回滚，请逐条检查已执行语句。';
+}
+
 /** 校验并生成单条 CREATE TABLE。 */
 export function buildCreateTable(
   dialect: DatabaseType,

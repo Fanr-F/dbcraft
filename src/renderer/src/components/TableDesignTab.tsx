@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { DatabaseInfo, DatabaseType, TableDetail } from '@shared/ipc-contract';
 import { buildTableDesign, type TableDesignColumn } from '@shared/dialect/table-diff';
+import { ddlTransactionHint } from '@shared/dialect/ddl';
 import { Icon } from './Icon';
 
 interface TableDesignTabProps {
@@ -431,6 +432,7 @@ export function TableDesignTab({
                 ))}
               </div>
             )}
+            <p className="form-note">{ddlTransactionHint(dialect)}</p>
             {error && <div className="form-error">{error}</div>}
           </div>
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DatabaseType, TableColumnMeta, TableDetail } from '@shared/ipc-contract';
-import { buildModifyColumn, buildRenameColumn } from '@shared/dialect/ddl';
+import { buildModifyColumn, buildRenameColumn, ddlTransactionHint } from '@shared/dialect/ddl';
 import { buildSqliteRebuild } from '@shared/dialect/sqlite-rebuild';
 import { Icon } from './Icon';
 
@@ -250,6 +250,7 @@ export function AlterColumnDialog({
                   ))}
                 </div>
               )}
+              <p className="form-note">{ddlTransactionHint(dialect)}</p>
             </>
           )}
 
