@@ -49,8 +49,22 @@ assert(
 
 assert(
   maskSensitiveSql("INSERT INTO t(password) VALUES ('x')") ===
-    "INSERT INTO t(password) VALUES ('x')",
-  'insert form is intentionally not handled',
+    "INSERT INTO t(password) VALUES ('***')",
+  'insert form should be masked',
+);
+
+assert(
+  maskSensitiveSql(
+    "INSERT INTO t(name, password, token) VALUES ('a', 'secret', 123), ('b', 'other', 456)",
+  ) ===
+    "INSERT INTO t(name, password, token) VALUES ('a', '***', '***'), ('b', '***', '***')",
+  'multi-row insert masking failed',
+);
+
+assert(
+  maskSensitiveSql("INSERT INTO t(name) VALUES ('x')") ===
+    "INSERT INTO t(name) VALUES ('x')",
+  'non-sensitive insert should not be masked',
 );
 
 console.log('sql mask check passed');
