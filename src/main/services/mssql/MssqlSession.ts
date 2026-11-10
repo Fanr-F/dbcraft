@@ -193,6 +193,13 @@ export class MssqlSession implements DatabaseSession {
       });
     });
 
+    // 与 SSMS 默认会话选项对齐，避免 DDL/索引依赖 ANSI_NULLS / QUOTED_IDENTIFIER。
+    try {
+      await execOn(connection, 'SET ANSI_NULLS ON; SET QUOTED_IDENTIFIER ON;');
+    } catch {
+      // 设置失败不阻塞连接；后续 DDL 执行会暴露真实错误。
+    }
+
     let version = 'unknown';
     try {
       const result = await execOn(connection, 'SELECT @@VERSION AS version');

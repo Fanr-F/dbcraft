@@ -1192,7 +1192,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | R-03 | 渲染层错误边界与恢复入口 | `main.tsx:11-29` 只有 `window.error` / `unhandledrejection` 日志；没有 React `ErrorBoundary` | 组件渲染异常会白屏，用户只能杀进程 | 增加错误边界、错误页与「重新加载」；关键页面单独兜底 |
 | R-04 | 元数据库逐版本迁移与升级前备份 | `metadata.ts:155-172` 直接写 `user_version = 5`，靠 `ensureLastOpenedColumn` / `ensureServerColumn` 补列；没有按版本分支，也没有升级前自动备份 | 后续 schema 变更缺少统一升级路径；升级失败回滚依赖手工备份 | 引入 `migrations` 表/版本分支；升级前自动 `backup()`；失败回滚并在 UI 提示 |
 | R-05 | SQL 文件外部变更检测、另存为、最近文件 | `App.tsx:3687-3746` 只有打开/覆盖保存；保存对话框用已有 `path` 直接覆盖 | 外部编辑后保存会覆盖；没有「另存为」和最近列表 | 保存前比对 mtime/内容；增加「另存为」；最近文件存本地设置 |
-| R-06 | MSSQL DDL 会话 SET | 全仓未找到 `ANSI_NULLS` / `QUOTED_IDENTIFIER` 设置；PRD C15 有要求 | 依赖会话选项的 DDL/索引行为可能和 SSMS 不一致 | 在 `ddl:execute` 前按需设置并恢复；补真机用例 |
+| R-06 | MSSQL DDL 会话 SET | ✅ 已修复（W-20261109-52）：连接建立后设置 `ANSI_NULLS ON; QUOTED_IDENTIFIER ON` | — | — |
 | R-07 | 库级 DDL 跳过存储过程 | `App.tsx:3250` 注释：「库级 DDL 目前只覆盖表和视图；存储过程留给后续」 | 生成的库级脚本不完整 | 按方言补 `sys.sql_modules` / `SHOW CREATE PROCEDURE` / `sqlite_master` 的适用对象 |
 | R-08 | 服务器实体的操作与孤儿清理 | `servers` 表、`server_id`、树形分组已实现（`metadata.ts:127-149`）；`removeConnection` 会清孤儿（563-575），但 `saveConnection` 换 host 时旧 server 行不会清；重命名/删除/健康状态按决策不做 | 数据库里可能积累不可见 server 行；服务器级操作缺失但已明确不做 | 更新连接后清理无引用 server；其余保持 ⏸，不扩大 v1.0 |
 | R-09 | `ConnectionTestStatus 'not-implemented'` 与样式残留 | `ipc-contract.ts:45` 定义了该状态，但 `testConnection()` 从不返回；`styles.css:1717` 仍有 `.test-not-implemented` | 类型与样式是早期占位，容易误导 | 删除该状态与样式，或明确保留原因并注释 |
@@ -1489,6 +1489,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-49 M01-07 跨库对象搜索**：诉求是搜索不再只覆盖当前库。变更：`ObjectTree` 在搜索词非空时展示所有数据库，并按需调用 `onLoadDatabase` 加载未缓存库；`Sidebar` 增加 `onLoadBrowseDatabase`，搜索时保留 browse 连接以便加载；`App` 用 browse session 调用 `loadDatabaseObjects`。涉及 `src/renderer/src/components/ObjectTree.tsx`、`Sidebar.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用真实多库实例搜索验收。遗留：搜索会一次性加载所有数据库对象，大库可能较慢；没有服务端搜索。
 - **W-20261109-50 M02-03 光标所在语句执行**：诉求是未选中时只执行光标所在语句。变更：`sql-script.ts` 新增 `statementAtCursor`（复用 `splitSqlStatements`，按顺序定位原始区间，语句间空白优先取前一条）；`SqlEditor` Ctrl/Cmd+Enter 在无选区时调用它，定位失败回退全文；`test-sql-script` 增加 SQLite/MSSQL GO 光标用例。涉及 `src/renderer/src/utils/sql-script.ts`、`src/renderer/src/features/editor/SqlEditor.tsx`、`scripts/test-sql-script.mjs`。验证：`npm run typecheck`、`npm run test:sql-script`、`npm run build` 通过。遗留：重复语句/注释中包含相同文本时按 `indexOf` 定位可能偏移，后续可改为区间切分器。
 - **W-20261109-51 K-09 DDL/刷新后清表子对象缓存**：诉求是 DDL 或手动刷新后重新展开表能看到最新约束/触发器/索引。变更：`executeDdlScript` 成功后清空当前 tab 的 `tableExtrasByTab`；`refreshSchema` 清当前 tab、`refreshBrowseSchema` 清 browse session 的缓存。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中执行 DDL 后展开表验收。遗留：大库分级加载仍未实现。
+- **W-20261109-52 R-06/M04-23 MSSQL 会话 SET**：诉求是让 DDL/索引行为与 SSMS 默认会话选项一致。变更：`MssqlSession.create` 连接成功后执行 `SET ANSI_NULLS ON; SET QUOTED_IDENTIFIER ON;`，失败不阻塞连接。涉及 `src/main/services/mssql/MssqlSession.ts`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 SQL Server 上跑 DDL 回归。遗留：未逐会话验证设置值；`SET` 失败被静默忽略。
 
 ---
 
