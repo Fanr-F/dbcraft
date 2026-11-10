@@ -63,6 +63,8 @@ export function SqlEditor({
   const [completion, setCompletion] = useState<CompletionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
+  const [cursorLine, setCursorLine] = useState(0);
+  const [lineHeight, setLineHeight] = useState(20);
   const [bracketMatch, setBracketMatch] = useState<BracketMatch | null>(null);
   const [signatureHelp, setSignatureHelp] = useState<SignatureHelp | null>(null);
   const tokens = useMemo(() => tokenizeSql(value), [value]);
@@ -96,6 +98,14 @@ export function SqlEditor({
     setSignatureHelp(
       extractSignatureHelp(element.value, element.selectionStart, dialect),
     );
+  };
+
+  const updateCursorLine = (element: HTMLTextAreaElement) => {
+    const line = element.value.slice(0, element.selectionStart).split('\n').length - 1;
+    setCursorLine(line);
+    const measured = Number.parseFloat(getComputedStyle(element).lineHeight);
+    if (Number.isFinite(measured) && measured > 0) setLineHeight(measured);
+    setScrollTop(element.scrollTop);
   };
 
   const openCompletion = async () => {
@@ -190,6 +200,14 @@ export function SqlEditor({
           ))}
         </div>
       </div>
+      <div
+        className="sql-current-line"
+        aria-hidden="true"
+        style={{
+          top: 12 + cursorLine * lineHeight - scrollTop,
+          height: lineHeight,
+        }}
+      />
       <pre ref={highlightRef} className="sql-highlight" aria-hidden="true">
         {tokens.map((token, index) => {
           const offset = tokenOffsets[index] ?? 0;
@@ -220,6 +238,7 @@ export function SqlEditor({
           setBracketMatch(null);
           const next = event.target.value;
           onChange(next);
+          updateCursorLine(event.currentTarget);
           requestAnimationFrame(() => {
             const element = textareaRef.current;
             if (element) updateSignatureHelp(element);
@@ -239,14 +258,17 @@ export function SqlEditor({
         onSelect={(event) => {
           updateBracketMatch(event.currentTarget);
           updateSignatureHelp(event.currentTarget);
+          updateCursorLine(event.currentTarget);
         }}
         onKeyUp={(event) => {
           updateBracketMatch(event.currentTarget);
           updateSignatureHelp(event.currentTarget);
+          updateCursorLine(event.currentTarget);
         }}
         onClick={(event) => {
           updateBracketMatch(event.currentTarget);
           updateSignatureHelp(event.currentTarget);
+          updateCursorLine(event.currentTarget);
         }}
         onCompositionStart={() => setComposing(true)}
         onCompositionEnd={() => setComposing(false)}

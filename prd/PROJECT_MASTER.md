@@ -1175,7 +1175,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | K-01 | DDL：唯一约束/索引变更进设计页签、CHECK/外键编辑、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
 | K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid` | §5、§3.4.5 | P1 | 🟡 |
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出 | §3.6.4 | P2 | ❌ |
-| K-04 | 编辑器：SQLite ATTACH 库内对象、MySQL 跨库列、错误波浪线、`GO 5`、驱动级多结果集、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
+| K-04 | 编辑器：SQLite ATTACH 库内对象、MySQL 跨库列、错误波浪线、代码折叠、`GO 5`、驱动级多结果集、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
 | K-05 | 历史：更复杂的敏感字段形式（如嵌套函数、JSON 文本） | §3.4.3 | P2 | 🟡 |
 | K-06 | Agent：运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
 | K-07 | 设置：字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
@@ -1498,6 +1498,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-58 M02-11 补全增强**：诉求是补版本感知、类型提示和 `SELECT *` 展开。变更：`completionItems` 按连接版本过滤 `WITH/OVER/PARTITION/RETURNING`；列补全加载时记录 `declaredType`，补全弹层右侧显示类型；`SELECT *` 后手动补全展开当前表/别名列；`SqlEditor`/`Workspace` 增加 `completionDetails`。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/styles.css`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击补全。遗留：SQLite ATTACH 库内对象和 MySQL 跨库列仍未做；版本过滤只按主/次版本粗筛。
 - **W-20261109-59 M03-11 INSERT 值脱敏**：诉求是历史脱敏覆盖 INSERT 列值。变更：`maskSensitiveSql` 改为 token 替换模型，覆盖赋值型与 `INSERT INTO t(cols) VALUES (...)`（含多行值）；只有敏感列对应的字符串/数字值替换为 `'***'`；`test-sql-mask` 增加单行/多行/非敏感 INSERT 用例。涉及 `src/renderer/src/utils/sql-mask.ts`、`scripts/test-sql-mask.mjs`。验证：`npm run typecheck`、`npm run test:sql-mask`、`npm run build` 通过。遗留：嵌套函数、JSON 文本中的密钥仍不识别。
 - **W-20261109-60 文档目录 doc → prd**：诉求是把文档目录改名为 `prd/`。变更：`git mv doc prd`；更新 `README.md`、`AGENTS.md` 与四份文档中的 `prd/` 路径引用及历史记录中的目录文字。涉及 `prd/PRD.md`、`prd/FEATURE_MATRIX.md`、`prd/TECH_DESIGN.md`、`prd/PROJECT_MASTER.md`、`README.md`、`AGENTS.md`。验证：`grep` 无残留 `doc/` 路径；纯文档改动，未运行构建/测试。遗留：Git 历史中的旧路径仍为 `doc/`。
+- **W-20261109-61 M02-18 当前行高亮**：诉求是编辑器显示当前行。变更：`SqlEditor` 跟踪光标行与滚动位置，按计算出的行高在文本层下方渲染 `.sql-current-line`；光标移动/输入/滚动时更新。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/styles.css`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中检查对齐。遗留：错误波浪线与代码折叠未做；当前行高亮未覆盖 IME 组合态。
 
 ---
 
