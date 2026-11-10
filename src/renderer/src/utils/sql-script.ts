@@ -15,8 +15,7 @@ export function splitSqlStatements(
   sql: string,
   limit = 50,
   dialect?: DatabaseType,
-): SplitStatementsResult {
-  const isMssql = dialect === 'mssql';
+): SplitStatementsResult {  const isMssql = dialect === 'mssql';
   const isMysqlFamily =
     dialect === 'mysql' || dialect === 'percona' || dialect === 'mariadb';
   const statements: string[] = [];
@@ -215,4 +214,31 @@ export function splitSqlStatements(
     return { ok: false, message: `单次最多执行 ${limit} 条语句，当前为 ${statements.length} 条。` };
   }
   return { ok: true, statements };
+}
+
+/**
+ * 返回光标所在语句；用于「未选中时执行当前语句」。
+ * 语句边界复用 splitSqlStatements，按出现顺序定位原始区间。
+ */
+export function statementAtCursor(
+  sql: string,
+  cursor: number,
+  dialect?: DatabaseType,
+): string | null {
+  const result = splitSqlStatements(sql, 1000, dialect);
+  if (!result.ok) return null;
+
+  const position = Math.max(0, Math.min(sql.length, cursor));
+  let searchFrom = 0;
+  let nearest: { text: string; start: number; end: number } | null = null;
+  for (const text of result.statements) {
+    const start = sql.indexOf(text, searchFrom);
+    if (start < 0) continue;
+    const end = start + text.length;
+    searchFrom = end;
+    if (position >= start && position <= end) return text;
+    // 光标停在语句之间（空白/分号后）时，优先取前一条。
+    if (position > end) nearest = { text, start, end };
+  }
+  return nearest?.text ?? result.statements[0] ?? null;
 }

@@ -3,7 +3,7 @@
  *
  * 运行：npm run test:sql-script
  */
-import { splitSqlStatements } from '../src/renderer/src/utils/sql-script.ts';
+import { splitSqlStatements, statementAtCursor } from '../src/renderer/src/utils/sql-script.ts';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -60,5 +60,22 @@ assert(
   'DELIMITER body wrong',
 );
 assert(delimiter.ok && delimiter.statements[1] === 'SELECT 3;', 'DELIMITER reset wrong');
+
+// 光标所在语句。
+const cursorSql = 'SELECT 1;\nSELECT 2;\nSELECT 3;';
+assert(statementAtCursor(cursorSql, 2) === 'SELECT 1;', 'cursor first statement wrong');
+assert(
+  statementAtCursor(cursorSql, cursorSql.indexOf('SELECT 2') + 3) === 'SELECT 2;',
+  'cursor second statement wrong',
+);
+assert(
+  statementAtCursor(cursorSql, cursorSql.indexOf('SELECT 3') + 3) === 'SELECT 3;',
+  'cursor third statement wrong',
+);
+const cursorGo = 'SELECT 1\nGO\nSELECT 2\nGO';
+assert(
+  statementAtCursor(cursorGo, cursorGo.indexOf('SELECT 2') + 2, 'mssql') === 'SELECT 2',
+  'cursor GO statement wrong',
+);
 
 console.log('sql script check passed');

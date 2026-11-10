@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DatabaseType } from '@shared/ipc-contract';
 import { tokenizeSql } from '../../utils/sql-highlight';
+import { statementAtCursor } from '../../utils/sql-script';
 import { findBracketMatch, type BracketMatch } from '../../utils/sql-brackets';
 import {
   applyCompletion,
@@ -16,7 +17,7 @@ import { ContextMenu } from '../../components/ContextMenu';
 interface SqlEditorProps {
   value: string;
   onChange: (value: string) => void;
-  /** 传入选中的 SQL 片段；没有选区时为 undefined（执行全文）。 */
+  /** 传入选中的 SQL 片段；没有选区时传光标所在语句，定位失败时 undefined（执行全文）。 */
   onRun: (sql?: string) => void;
   onSave?: () => void;
   onFormat?: () => void;
@@ -294,7 +295,11 @@ export function SqlEditor({
             const selected = target.value
               .slice(target.selectionStart, target.selectionEnd)
               .trim();
-            onRun(selected.length > 0 ? selected : undefined);
+            onRun(
+              selected.length > 0
+                ? selected
+                : statementAtCursor(target.value, target.selectionStart, dialect ?? undefined) ?? undefined,
+            );
           } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
             event.preventDefault();
             onSave?.();

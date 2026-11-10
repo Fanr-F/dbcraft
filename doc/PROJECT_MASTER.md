@@ -1175,7 +1175,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | K-01 | DDL：唯一约束/索引变更进设计页签、CHECK/外键编辑、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
 | K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid` | §5、§3.4.5 | P1 | 🟡 |
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出 | §3.6.4 | P2 | ❌ |
-| K-04 | 编辑器：版本感知补全、类型提示、光标所在语句执行、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、最近文件/另存为/拖入、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
+| K-04 | 编辑器：版本感知补全、类型提示、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、最近文件/另存为/拖入、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
 | K-05 | 历史：`.sql`/`.csv` 导出、复杂形式的敏感字段脱敏 | §3.4.3 | P1/P2 | 🟡 |
 | K-06 | Agent：运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
 | K-07 | 设置：跟随系统主题、字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
@@ -1487,6 +1487,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-47 M08-02 Agent 手动刷新**：诉求是补上作业列表/详情的手动刷新入口。变更：对象树顶部刷新按钮在 MSSQL 连接下同时调用 `loadAgentJobs`；作业详情工具栏增加「刷新」按钮。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL Agent 上点击。遗留：作业行本身仍没有独立刷新按钮；UI 清单只标「进行中」。
 - **W-20261109-48 M03-10 历史加载更多**：诉求是历史列表支持分页/加载更多。变更：`HistoryDialog` 增加 `limit` 状态（默认 200），查询带上 limit；底部在满页且未到 1000 时显示「加载更多」，每次 +200；说明文案显示当前上限。涉及 `src/renderer/src/components/HistoryDialog.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击。遗留：仍是「增大 limit 重查」，不是真正的 offset 分页；超过 1000 条无法继续加载。
 - **W-20261109-49 M01-07 跨库对象搜索**：诉求是搜索不再只覆盖当前库。变更：`ObjectTree` 在搜索词非空时展示所有数据库，并按需调用 `onLoadDatabase` 加载未缓存库；`Sidebar` 增加 `onLoadBrowseDatabase`，搜索时保留 browse 连接以便加载；`App` 用 browse session 调用 `loadDatabaseObjects`。涉及 `src/renderer/src/components/ObjectTree.tsx`、`Sidebar.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用真实多库实例搜索验收。遗留：搜索会一次性加载所有数据库对象，大库可能较慢；没有服务端搜索。
+- **W-20261109-50 M02-03 光标所在语句执行**：诉求是未选中时只执行光标所在语句。变更：`sql-script.ts` 新增 `statementAtCursor`（复用 `splitSqlStatements`，按顺序定位原始区间，语句间空白优先取前一条）；`SqlEditor` Ctrl/Cmd+Enter 在无选区时调用它，定位失败回退全文；`test-sql-script` 增加 SQLite/MSSQL GO 光标用例。涉及 `src/renderer/src/utils/sql-script.ts`、`src/renderer/src/features/editor/SqlEditor.tsx`、`scripts/test-sql-script.mjs`。验证：`npm run typecheck`、`npm run test:sql-script`、`npm run build` 通过。遗留：重复语句/注释中包含相同文本时按 `indexOf` 定位可能偏移，后续可改为区间切分器。
 
 ---
 
