@@ -1171,7 +1171,9 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
     if (!meta.editable && !insertOnly) {
       return failed(meta.reason ?? '该表不可编辑。');
     }
-    statements = buildTableEditStatements(session.dialect, request.table, meta, request.edits);
+    statements = buildTableEditStatements(session.dialect, request.table, meta, request.edits, {
+      allowPrimaryKeyChange: request.allowPrimaryKeyChange === true,
+    });
   } catch (error) {
     return failed(error instanceof Error ? error.message : String(error));
   }

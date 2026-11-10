@@ -397,6 +397,8 @@ export interface TableApplyRequest {
   edits: TableEdit[];
   /** 无主键表的高风险模式：仅允许 INSERT，由主进程再次校验。 */
   allowNoPrimaryKeyInsert?: boolean;
+  /** 允许显式修改/插入主键列；UI 需二次确认。 */
+  allowPrimaryKeyChange?: boolean;
   connectionId?: string;
   connectionName?: string;
   database?: string;

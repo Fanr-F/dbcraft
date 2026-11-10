@@ -201,6 +201,36 @@ expectThrows(
   '第 2 项编辑无效',
 );
 
+// 主键默认只读；显式开启后才允许 UPDATE 主键。
+expectThrows(
+  () =>
+    buildTableEditStatements('sqlite', 'users', meta, [
+      {
+        kind: 'update',
+        keys: { id: 1 },
+        values: { id: 5 },
+        original: { id: 1 },
+      },
+    ]),
+  '不可编辑',
+);
+expectSql(
+  buildUpdateStatement(
+    'sqlite',
+    'users',
+    meta,
+    {
+      kind: 'update',
+      keys: { id: 1 },
+      values: { id: 5 },
+      original: { id: 1 },
+    },
+    { allowPrimaryKeyChange: true },
+  ),
+  'UPDATE "users" SET "id" = ? WHERE "id" = ? AND "id" IS ?',
+  [5, 1, 1],
+);
+
 // 带引号的标识符正确转义。
 const weirdMeta = {
   ...meta,

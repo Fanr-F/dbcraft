@@ -422,6 +422,8 @@ export default function App() {
   } | null>(null);
   const [editHistory, setEditHistory] = useState<Record<string, EditSnapshot[]>>({});
   const [noPkMode, setNoPkMode] = useState<Record<string, boolean>>({});
+  /** 主键修改是高风险操作，必须为每个标签显式开启。 */
+  const [pkEditMode, setPkEditMode] = useState<Record<string, boolean>>({});
   const [transactions, setTransactions] = useState<Record<string, TransactionRuntime>>({});
   const [treeCollapseSignal, setTreeCollapseSignal] = useState<{
     connectionId: string;
@@ -952,6 +954,8 @@ export default function App() {
   const canUndoEdit = (editHistory[activeTab.id]?.length ?? 0) > 0;
   const canEnableNoPk = activeTableMeta?.reasonCode === 'no-primary-key';
   const activeNoPkMode = canEnableNoPk && noPkMode[activeTab.id] === true;
+  const activePkEditMode =
+    (activeTableMeta?.primaryKey.length ?? 0) > 0 && pkEditMode[activeTab.id] === true;
   const tableEditable = activeTableMeta?.editable === true || activeNoPkMode;
   const activeInsertCount = Object.keys(
     pendingTableEdits[activeTab.id]?.inserts ?? {},
@@ -1976,7 +1980,12 @@ export default function App() {
         ? meta.columns.find((item) => item.name === column.name)
         : undefined;
       const row = rows[rowIndex];
-      if (!column || !columnMeta || columnMeta.readOnly || !row) continue;
+      const existing = state.updates[rowIndex];
+      const readOnly =
+        columnMeta !== undefined &&
+        columnMeta.readOnly &&
+        !(activePkEditMode && columnMeta.primaryKey);
+      if (!column || !columnMeta || readOnly || !row) continue;
 
       const isInsert = state.inserts[rowIndex] !== undefined;
       // 无主键高风险模式只允许新增行，已有行一律不可改。
@@ -1987,8 +1996,8 @@ export default function App() {
       const next: QueryCell = change.value === '' && previous === null ? null : change.value;
       if (previous === next) continue;
 
-      const keys: Record<string, QueryCell> = {};
-      if (!isInsert) {
+      const keys: Record<string, QueryCell> = existing ? { ...existing.keys } : {};
+      if (!isInsert && !existing) {
         const keyIndexes = meta.primaryKey.map((name) =>
           run.columns.findIndex((item) => item.name === name),
         );
@@ -2012,7 +2021,6 @@ export default function App() {
         continue;
       }
 
-      const existing = state.updates[rowIndex];
       const original: Record<string, QueryCell> = { ...(existing?.original ?? {}) };
       if (!(columnMeta.name in original)) {
         original[columnMeta.name] = previous;
@@ -2072,6 +2080,24 @@ export default function App() {
     ];
     if (edits.length === 0) return;
 
+    const meta = tableMetas[tab.id];
+    const primaryKeyChanged =
+      meta != null &&
+      edits.some(
+        (edit) =>
+          edit.kind !== 'delete' &&
+          edit.values !== undefined &&
+          meta.primaryKey.some((name) => name in edit.values!),
+      );
+    if (
+      primaryKeyChanged &&
+      !window.confirm(
+        '本次提交会修改主键列。主键变化可能影响外键引用和已打开的其他标签，确定继续？',
+      )
+    ) {
+      return;
+    }
+
     const api = window.dbcraft;
     if (!api) {
       showNotice('error', '未检测到 Electron IPC 桥接。');
@@ -2091,6 +2117,7 @@ export default function App() {
         table: tab.table.name,
         edits,
         allowNoPrimaryKeyInsert: activeNoPkMode,
+        allowPrimaryKeyChange: activePkEditMode,
         connectionId: connection?.id,
         connectionName: connection?.input.name,
         database:
@@ -2270,6 +2297,29 @@ export default function App() {
         '已开启高风险模式：无主键表只允许新增行，已有行保持只读。',
       );
     }
+  };
+
+  const togglePkEditMode = (next: boolean) => {
+    const tab = activeTab;
+    if (countPendingEdits(pendingTableEdits[tab.id]) > 0) {
+      showNotice('error', '请先提交或回滚当前修改，再切换主键编辑模式。');
+      return;
+    }
+    if (
+      next &&
+      !window.confirm(
+        '允许修改主键列？主键变化可能破坏外键引用和依赖对象，提交时还会再次确认。',
+      )
+    ) {
+      return;
+    }
+    setPkEditMode((current) => ({ ...current, [tab.id]: next }));
+    showNotice(
+      'info',
+      next
+        ? '已允许修改主键列；双击主键单元格可编辑，提交前会再次确认。'
+        : '已恢复主键只读。',
+    );
   };
 
   const addTab = (connectionId?: string) => {
@@ -4130,6 +4180,8 @@ export default function App() {
           tableEditable={tableEditable}
           canEnableNoPk={canEnableNoPk}
           noPkMode={activeNoPkMode}
+          allowPrimaryKeyEdit={activePkEditMode}
+          onTogglePrimaryKeyEdit={togglePkEditMode}
           editableFromRow={editableFromRow}
           onToggleNoPk={toggleNoPkMode}
           pendingEdits={pendingEditCount}

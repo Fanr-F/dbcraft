@@ -62,11 +62,31 @@ function assertPrimaryKey(meta: TableMeta, keys: Record<string, QueryCell>): voi
   }
 }
 
+export interface BuildEditOptions {
+  /** 允许显式修改主键列；UI 需二次确认。 */
+  allowPrimaryKeyChange?: boolean;
+}
+
+function writableColumns(
+  meta: TableMeta,
+  columns: string[],
+  options: BuildEditOptions,
+): void {
+  const byName = new Map(meta.columns.map((column) => [column.name, column]));
+  for (const name of columns) {
+    const column = byName.get(name);
+    if (!column || !column.readOnly) continue;
+    if (options.allowPrimaryKeyChange && column.primaryKey) continue;
+    throw new Error(`列「${name}」不可编辑（主键或生成列）。`);
+  }
+}
+
 export function buildUpdateStatement(
   type: DatabaseType,
   table: string,
   meta: TableMeta,
   edit: TableEdit,
+  options: BuildEditOptions = {},
 ): BuiltStatement {
   const values = requirePlainObject(edit.values, '更新值');
   const keys = requirePlainObject(edit.keys, '主键');
@@ -78,15 +98,8 @@ export function buildUpdateStatement(
 
   assertKnownColumns(meta, [...valueColumns, ...keyColumns, ...originalColumns], '更新');
   assertPrimaryKey(meta, keys);
+  writableColumns(meta, valueColumns, options);
 
-  const readOnly = new Set(
-    meta.columns.filter((column) => column.readOnly).map((column) => column.name),
-  );
-  for (const name of valueColumns) {
-    if (readOnly.has(name)) {
-      throw new Error(`列「${name}」不可编辑（主键或生成列）。`);
-    }
-  }
   for (const name of originalColumns) {
     if (!(name in values)) {
       throw new Error(`原始值列「${name}」不在本次更新范围内。`);
@@ -143,19 +156,12 @@ export function buildInsertStatement(
   table: string,
   meta: TableMeta,
   edit: TableEdit,
+  options: BuildEditOptions = {},
 ): BuiltStatement {
   const values = edit.values ?? {};
   const columns = Object.keys(values);
   assertKnownColumns(meta, columns, '新增');
-
-  const readOnly = new Set(
-    meta.columns.filter((column) => column.readOnly).map((column) => column.name),
-  );
-  for (const name of columns) {
-    if (readOnly.has(name)) {
-      throw new Error(`列「${name}」不可编辑（主键或生成列）。`);
-    }
-  }
+  writableColumns(meta, columns, options);
 
   if (columns.length === 0) {
     const sql =
@@ -185,6 +191,7 @@ export function buildTableEditStatements(
   table: string,
   meta: TableMeta,
   edits: TableEdit[],
+  options: BuildEditOptions = {},
 ): BuiltStatement[] {
   if (table !== meta.name) {
     throw new Error('表名与元数据不一致，请刷新后重试。');
@@ -194,11 +201,11 @@ export function buildTableEditStatements(
     try {
       switch (edit.kind) {
         case 'update':
-          return buildUpdateStatement(type, table, meta, edit);
+          return buildUpdateStatement(type, table, meta, edit, options);
         case 'delete':
           return buildDeleteStatement(type, table, meta, edit);
         case 'insert':
-          return buildInsertStatement(type, table, meta, edit);
+          return buildInsertStatement(type, table, meta, edit, options);
         default:
           throw new Error(`未知的编辑类型「${String((edit as { kind?: unknown }).kind)}」。`);
       }

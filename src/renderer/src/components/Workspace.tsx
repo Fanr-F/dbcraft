@@ -114,6 +114,8 @@ interface WorkspaceProps {
   tableEditable: boolean;
   canEnableNoPk: boolean;
   noPkMode: boolean;
+  allowPrimaryKeyEdit: boolean;
+  onTogglePrimaryKeyEdit: (next: boolean) => void;
   editableFromRow?: number;
   onToggleNoPk: (next: boolean) => void;
   pendingEdits: number;
@@ -207,6 +209,8 @@ export function Workspace({
   tableEditable,
   canEnableNoPk,
   noPkMode,
+  allowPrimaryKeyEdit,
+  onTogglePrimaryKeyEdit,
   editableFromRow,
   onToggleNoPk,
   pendingEdits,
@@ -1058,8 +1062,21 @@ export function Workspace({
                   删除选中行
                 </button>
                 <span className="pane-hint">
-                  双击单元格编辑，主键列不可改
+                  {allowPrimaryKeyEdit
+                    ? '双击单元格编辑；主键修改会在提交前再次确认'
+                    : '双击单元格编辑，主键列不可改'}
                 </span>
+                {tableMeta && tableMeta.primaryKey.length > 0 && (
+                  <button
+                    type="button"
+                    className={allowPrimaryKeyEdit ? 'btn btn-danger' : 'btn'}
+                    disabled={running}
+                    title="允许修改主键列（提交时会再次确认）"
+                    onClick={() => onTogglePrimaryKeyEdit(!allowPrimaryKeyEdit)}
+                  >
+                    {allowPrimaryKeyEdit ? '主键可改（谨慎）' : '允许修改主键'}
+                  </button>
+                )}
               </>
             )}
             {lockedByEdits && (
@@ -1180,8 +1197,12 @@ export function Workspace({
             editable={editable}
             editableFromRow={editableFromRow}
             readOnlyColumns={
-              tableMeta?.columns.filter((column) => column.readOnly).map((column) => column.name) ??
-              []
+              tableMeta?.columns
+                .filter(
+                  (column) =>
+                    column.readOnly && !(allowPrimaryKeyEdit && column.primaryKey),
+                )
+                .map((column) => column.name) ?? []
             }
             sorts={activeSorts}
             layoutKey={
