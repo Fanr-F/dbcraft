@@ -37,6 +37,7 @@
     "test:sqlite-rebuild": "node --no-warnings --experimental-strip-types scripts/test-sqlite-rebuild.mjs",
     "test:checks": "node --no-warnings --experimental-strip-types scripts/test-checks.mjs",
     "test:mssql": "node --no-warnings --experimental-strip-types scripts/test-mssql.mjs",
+    "perf:baseline": "node --no-warnings --experimental-strip-types scripts/perf-baseline.mjs",
     "check:mssql": "node --no-warnings --env-file=.env.local scripts/check-mssql-session.mjs",
     "check:mssql-agent": "node --no-warnings --env-file=.env.local scripts/check-mssql-agent.mjs",
     "check:mssql-multidb": "node --no-warnings --env-file=.env.local scripts/check-mssql-multidb.mjs",

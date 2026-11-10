@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Pure logic tests
+        run: |
+          npm run test:safety
+          npm run test:groups
+          npm run test:ddl
+          npm run test:dml
+          npm run test:export
+          npm run test:history
+          npm run test:errors
+          npm run test:connection-export
+          npm run test:timeouts
+          npm run test:pagination
+          npm run test:settings
+          npm run test:sql-highlight
+          npm run test:sql-format
+          npm run test:sql-completion
+          npm run test:sql-brackets
+          npm run test:sql-mask
+          npm run test:sql-script
+          npm run test:xlsx
+          npm run test:sqlite-rebuild
+          npm run test:checks
+          npm run test:mssql
+      - run: npm run build
