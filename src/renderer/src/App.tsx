@@ -412,6 +412,11 @@ export default function App() {
   } | null>(null);
   const [browseConnectionId, setBrowseConnectionId] = useState<string | null>(null);
   const [connectionDialog, setConnectionDialog] = useState<ConnectionDialogState | null>(null);
+  const [maintenance, setMaintenance] = useState<{
+    tabId: string;
+    startedAt: number;
+    message: string;
+  } | null>(null);
   const [recentSqlFiles, setRecentSqlFiles] = useState<string[]>(loadRecentSqlFiles);
   const [pendingDanger, setPendingDanger] = useState<{
     sql: string;
@@ -3522,14 +3527,27 @@ export default function App() {
     }
     if (!ready) return { ok: false, message: '会话未就绪，请检查连接。' };
 
-    const result = await api.ddl.execute(activeTab.id, statements, {
-      ...options,
-      connectionId: connection.id,
-      connectionName: connection.input.name,
-      database:
-        currentDatabaseByTab[activeTab.id] ??
-        (connection.input.type === 'sqlite' ? '' : connection.input.database),
-    });
+    const showMaintenance = connection.input.type === 'sqlite';
+    if (showMaintenance) {
+      setMaintenance({
+        tabId: activeTab.id,
+        startedAt: Date.now(),
+        message: '正在执行 SQLite DDL；重建表期间请勿关闭应用或执行其他写入。',
+      });
+    }
+    let result;
+    try {
+      result = await api.ddl.execute(activeTab.id, statements, {
+        ...options,
+        connectionId: connection.id,
+        connectionName: connection.input.name,
+        database:
+          currentDatabaseByTab[activeTab.id] ??
+          (connection.input.type === 'sqlite' ? '' : connection.input.database),
+      });
+    } finally {
+      if (showMaintenance) setMaintenance(null);
+    }
     if (!result.ok) {
       return { ok: false, message: result.message, results: result.results };
     }
@@ -3547,6 +3565,14 @@ export default function App() {
     schemaObjectCache.current = {};
     refreshBrowseSchema();
     return { ok: true, message: 'ok', results: result.results };
+  };
+
+  const cancelMaintenance = async () => {
+    if (!maintenance) return;
+    const tabId = maintenance.tabId;
+    setMaintenance(null);
+    await closeTabSession(tabId);
+    showNotice('error', '已取消 SQLite 维护；会话已断开，请在该标签重连。');
   };
 
   /** 导出连接配置（永不含密码）；传 id 导出单个，否则导出全部。 */
@@ -4323,6 +4349,26 @@ export default function App() {
           onClose={() => setDropColumnTarget(null)}
           onExecute={executeDdlSql}
         />
+      )}
+
+      {maintenance && (
+        <div className="modal-backdrop" role="alertdialog" aria-modal="true">
+          <div className="modal maintenance-modal">
+            <h2>SQLite DDL 维护中…</h2>
+            <p>{maintenance.message}</p>
+            <p className="pane-hint">
+              已运行 {Math.max(0, Math.round((Date.now() - maintenance.startedAt) / 1000))} 秒。
+              取消会终止 Worker 并断开当前标签会话。
+            </p>
+            <div className="maintenance-progress" aria-hidden="true" />
+            <footer className="modal-footer">
+              <span className="spacer" />
+              <button type="button" className="btn btn-danger" onClick={() => void cancelMaintenance()}>
+                取消并断开
+              </button>
+            </footer>
+          </div>
+        </div>
       )}
 
       {notice && (
