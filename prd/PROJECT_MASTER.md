@@ -1524,6 +1524,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-84 M05-10 NULL 与默认值**：诉求是区分新增行的「未填写=默认值」和显式 NULL。变更：新增行中被编辑过的列即使为 NULL 也写入 INSERT；网格右键菜单增加「设为 NULL」「使用默认值」；「使用默认值」从新增行值中移除该列；设置 NULL 绕过编辑器空串归一化，已有行也可右键置 NULL；`ResultGrid` 接收聚焦单元格和新增行号。涉及 `src/renderer/src/features/grid/ResultGrid.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中右键验证。
 - **W-20261109-85 M05-13 多行删除**：诉求是选择多行后一次删除。变更：`ResultGrid` 监听 `beforerange` 上报行区间；表标签保存选区范围，单击行同步收缩为单行；`deleteSelectedRow` 支持按范围批量删除，倒序移除行并逐次平移待提交编辑，新增行只删本地插入、已有行生成 DELETE 主键；多行时先确认。涉及 `src/renderer/src/features/grid/ResultGrid.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中拖选验证。
 - **W-20261109-86 M05-14 必填列标记**：诉求是提示哪些列必须填写。变更：`ResultGrid` 增加 `requiredColumns`，列头追加 `*` 并在列类型提示中标注「必填」；表数据页传入 `notNull && !autoIncrement` 的列。涉及 `src/renderer/src/features/grid/ResultGrid.tsx`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中查看列头。
+- **W-20261109-87 M05-17 自动提交与确认**：诉求是支持自动提交模式和提交前确认。变更：表标签增加「自动提交」「提交前确认」两个开关；自动提交在编辑停止 800ms 后提交，存在新增行时不自动提交；`commitTableEdits` 在确认开关开启时先弹确认；主键修改确认仍独立保留。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中验证自动提交时序。
 
 ---
 

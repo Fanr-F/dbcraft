@@ -415,6 +415,10 @@ export default function App() {
   const [tableSelectionRange, setTableSelectionRange] = useState<
     Record<string, { start: number; end: number } | null>
   >({});
+  /** 表格编辑自动提交；新增行不自动提交，避免半填行落库。 */
+  const [autoCommitMode, setAutoCommitMode] = useState<Record<string, boolean>>({});
+  /** 提交前二次确认（对自动提交尤其重要）。 */
+  const [commitConfirmMode, setCommitConfirmMode] = useState<Record<string, boolean>>({});
   const [focusedCells, setFocusedCells] = useState<
     Record<string, { rowIndex: number; columnIndex: number } | null>
   >({});
@@ -2185,6 +2189,13 @@ export default function App() {
     ];
     if (edits.length === 0) return;
 
+    if (
+      commitConfirmMode[tab.id] &&
+      !window.confirm(`提交 ${edits.length} 项表格修改？`)
+    ) {
+      return;
+    }
+
     const meta = tableMetas[tab.id];
     const primaryKeyChanged =
       meta != null &&
@@ -2273,6 +2284,27 @@ export default function App() {
     showNotice('info', '已丢弃未提交的修改。');
     await runQuery(tab.sql, tab, tab.table.params, { internal: true });
   };
+
+  // 自动提交：编辑停止 800ms 后提交；有新增行时等待用户手动提交。
+  useEffect(() => {
+    const tab = activeTab;
+    if (!tab.table || !autoCommitMode[tab.id]) return;
+    const state = pendingTableEdits[tab.id];
+    if (!state || countPendingEdits(state) === 0) return;
+    if (Object.keys(state.inserts).length > 0) return;
+    if (runningTabs[tab.id] || committingTabs[tab.id]) return;
+
+    const timer = window.setTimeout(() => {
+      void commitTableEdits();
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeTabId,
+    autoCommitMode,
+    pendingTableEdits,
+    runningTabs,
+    committingTabs,
+  ]);
 
   const addTableRow = () => {
     const tab = activeTab;
@@ -4340,6 +4372,14 @@ export default function App() {
           onToggleNoPk={toggleNoPkMode}
           pendingEdits={pendingEditCount}
           committing={committing}
+          autoCommit={autoCommitMode[activeTab.id] === true}
+          confirmCommit={commitConfirmMode[activeTab.id] === true}
+          onToggleAutoCommit={(next) =>
+            setAutoCommitMode((current) => ({ ...current, [activeTab.id]: next }))
+          }
+          onToggleConfirmCommit={(next) =>
+            setCommitConfirmMode((current) => ({ ...current, [activeTab.id]: next }))
+          }
           selectedRow={tableSelection[activeTab.id] ?? null}
           selectedRowRange={tableSelectionRange[activeTab.id] ?? null}
           onRowRangeChange={(start, end) =>

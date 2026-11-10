@@ -123,6 +123,10 @@ interface WorkspaceProps {
   onToggleNoPk: (next: boolean) => void;
   pendingEdits: number;
   committing: boolean;
+  autoCommit: boolean;
+  confirmCommit: boolean;
+  onToggleAutoCommit: (next: boolean) => void;
+  onToggleConfirmCommit: (next: boolean) => void;
   selectedRow: number | null;
   selectedRowRange?: { start: number; end: number } | null;
   onRowRangeChange: (start: number, end: number) => void;
@@ -227,6 +231,10 @@ export function Workspace({
   onToggleNoPk,
   pendingEdits,
   committing,
+  autoCommit,
+  confirmCommit,
+  onToggleAutoCommit,
+  onToggleConfirmCommit,
   selectedRow,
   selectedRowRange,
   onRowRangeChange,
@@ -1116,6 +1124,24 @@ export function Workspace({
             {lockedByEdits && (
               <span className="badge badge-warn">待提交 {pendingEdits} 项</span>
             )}
+            <label className="pane-hint" title="编辑停止 800ms 后自动提交；新增行仍需手动提交">
+              <input
+                type="checkbox"
+                checked={autoCommit}
+                disabled={running}
+                onChange={(event) => onToggleAutoCommit(event.target.checked)}
+              />
+              自动提交
+            </label>
+            <label className="pane-hint" title="提交前再次确认">
+              <input
+                type="checkbox"
+                checked={confirmCommit}
+                disabled={running}
+                onChange={(event) => onToggleConfirmCommit(event.target.checked)}
+              />
+              提交前确认
+            </label>
             <button
               type="button"
               className="btn btn-run"
