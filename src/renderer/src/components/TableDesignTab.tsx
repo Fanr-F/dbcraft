@@ -116,6 +116,25 @@ export function TableDesignTab({
   );
   const [phase, setPhase] = useState<'edit' | 'preview'>('edit');
   const [editedSql, setEditedSql] = useState<string | null>(null);
+  const [wizardIndexes, setWizardIndexes] = useState<
+    Array<{ name: string; columns: string; unique: boolean }>
+  >([]);
+  const [wizardForeignKeys, setWizardForeignKeys] = useState<
+    Array<{
+      name: string;
+      columns: string;
+      referencedTable: string;
+      referencedColumns: string;
+      onDelete: string;
+      onUpdate: string;
+    }>
+  >([]);
+  const [wizardChecks, setWizardChecks] = useState<Array<{ name: string; expression: string }>>(
+    [],
+  );
+  const [tableComment, setTableComment] = useState('');
+  const [engine, setEngine] = useState('');
+  const [charset, setCharset] = useState('');
   const [preview, setPreview] = useState<{
     statements: string[];
     warnings: string[];
@@ -192,6 +211,35 @@ export function TableDesignTab({
       schema: dialect === 'mssql' ? schemaName : undefined,
       detail,
       columns,
+      ...(mode === 'create'
+        ? {
+            indexes: wizardIndexes
+              .filter((index) => index.columns.trim())
+              .map((index) => ({
+                name: index.name.trim() || undefined,
+                columns: index.columns.split(','),
+                unique: index.unique,
+              })),
+            foreignKeys: wizardForeignKeys
+              .filter((foreignKey) => foreignKey.columns.trim() && foreignKey.referencedTable.trim())
+              .map((foreignKey) => ({
+                name: foreignKey.name.trim() || undefined,
+                columns: foreignKey.columns.split(','),
+                referencedTable: foreignKey.referencedTable,
+                referencedColumns: foreignKey.referencedColumns.split(','),
+                onDelete: foreignKey.onDelete,
+                onUpdate: foreignKey.onUpdate,
+              })),
+            checks: wizardChecks
+              .filter((check) => check.expression.trim())
+              .map((check) => ({
+                name: check.name.trim() || undefined,
+                expression: check.expression,
+              })),
+            comment: tableComment,
+            options: { engine, charset },
+          }
+        : {}),
     });
     if (!result.ok) {
       setPreview(null);
@@ -406,6 +454,244 @@ export function TableDesignTab({
                 </div>
               ))}
             </div>
+
+            {mode === 'create' && (
+              <div className="table-design-extras">
+                <h3>索引</h3>
+                {wizardIndexes.map((index, position) => (
+                  <div className="structure-constraint-form" key={`idx-${position}`}>
+                    <label className="field">
+                      <span>索引名（可留空）</span>
+                      <input
+                        value={index.name}
+                        onChange={(event) =>
+                          setWizardIndexes((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, name: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>列（逗号分隔）</span>
+                      <input
+                        value={index.columns}
+                        onChange={(event) =>
+                          setWizardIndexes((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, columns: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={index.unique}
+                        onChange={(event) =>
+                          setWizardIndexes((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, unique: event.target.checked } : item,
+                            ),
+                          )
+                        }
+                      />
+                      唯一
+                    </label>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    setWizardIndexes((current) => [...current, { name: '', columns: '', unique: false }])
+                  }
+                >
+                  添加索引
+                </button>
+
+                <h3>外键</h3>
+                {wizardForeignKeys.map((foreignKey, position) => (
+                  <div className="structure-constraint-form" key={`fk-${position}`}>
+                    <label className="field">
+                      <span>约束名（可留空）</span>
+                      <input
+                        value={foreignKey.name}
+                        onChange={(event) =>
+                          setWizardForeignKeys((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, name: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>本表列（逗号分隔）</span>
+                      <input
+                        value={foreignKey.columns}
+                        onChange={(event) =>
+                          setWizardForeignKeys((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, columns: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>引用表</span>
+                      <input
+                        value={foreignKey.referencedTable}
+                        onChange={(event) =>
+                          setWizardForeignKeys((current) =>
+                            current.map((item, i) =>
+                              i === position
+                                ? { ...item, referencedTable: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>引用列（逗号分隔）</span>
+                      <input
+                        value={foreignKey.referencedColumns}
+                        onChange={(event) =>
+                          setWizardForeignKeys((current) =>
+                            current.map((item, i) =>
+                              i === position
+                                ? { ...item, referencedColumns: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>ON DELETE</span>
+                      <select
+                        value={foreignKey.onDelete}
+                        onChange={(event) =>
+                          setWizardForeignKeys((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, onDelete: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      >
+                        {['NO ACTION', 'CASCADE', 'SET NULL', 'RESTRICT'].map((action) => (
+                          <option key={action} value={action}>{action}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>ON UPDATE</span>
+                      <select
+                        value={foreignKey.onUpdate}
+                        onChange={(event) =>
+                          setWizardForeignKeys((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, onUpdate: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      >
+                        {['NO ACTION', 'CASCADE', 'SET NULL', 'RESTRICT'].map((action) => (
+                          <option key={action} value={action}>{action}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    setWizardForeignKeys((current) => [
+                      ...current,
+                      {
+                        name: '',
+                        columns: '',
+                        referencedTable: '',
+                        referencedColumns: '',
+                        onDelete: 'NO ACTION',
+                        onUpdate: 'NO ACTION',
+                      },
+                    ])
+                  }
+                >
+                  添加外键
+                </button>
+
+                <h3>CHECK</h3>
+                {wizardChecks.map((check, position) => (
+                  <div className="structure-constraint-form" key={`check-${position}`}>
+                    <label className="field">
+                      <span>约束名（可留空）</span>
+                      <input
+                        value={check.name}
+                        onChange={(event) =>
+                          setWizardChecks((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, name: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>表达式</span>
+                      <input
+                        value={check.expression}
+                        onChange={(event) =>
+                          setWizardChecks((current) =>
+                            current.map((item, i) =>
+                              i === position ? { ...item, expression: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    setWizardChecks((current) => [...current, { name: '', expression: '' }])
+                  }
+                >
+                  添加 CHECK
+                </button>
+
+                <h3>注释与选项</h3>
+                <div className="structure-constraint-form">
+                  <label className="field">
+                    <span>表注释</span>
+                    <input
+                      value={tableComment}
+                      onChange={(event) => setTableComment(event.target.value)}
+                    />
+                  </label>
+                  {dialect !== 'sqlite' && dialect !== 'mssql' && (
+                    <>
+                      <label className="field">
+                        <span>引擎</span>
+                        <input value={engine} onChange={(event) => setEngine(event.target.value)} />
+                      </label>
+                      <label className="field">
+                        <span>字符集</span>
+                        <input value={charset} onChange={(event) => setCharset(event.target.value)} />
+                      </label>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             <datalist id="table-design-type-suggestions">
               {suggestions.map((type) => (

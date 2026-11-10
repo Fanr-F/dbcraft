@@ -1,11 +1,13 @@
 import type { DatabaseType, TableDetail } from '../ipc-contract';
 import {
   buildAddColumn,
+  buildCreateIndex,
   buildCreateTable,
   buildDropColumn,
   buildModifyColumn,
   buildRenameColumn,
   buildRenameTable,
+  buildTableComment,
   type DdlGenerateResult,
 } from './ddl.ts';
 import { buildSqliteRebuildTable, type RebuildTableColumn } from './sqlite-rebuild.ts';
@@ -25,6 +27,23 @@ export interface TableDesignInput {
   columns: TableDesignColumn[];
   /** 编辑模式必传，用于计算差异。 */
   detail?: TableDetail;
+  /** 新建表时附加的索引。 */
+  indexes?: Array<{ name?: string; columns: string[]; unique?: boolean }>;
+  /** 新建表时附加的外键。 */
+  foreignKeys?: Array<{
+    name?: string;
+    columns: string[];
+    referencedTable: string;
+    referencedColumns: string[];
+    onDelete?: string;
+    onUpdate?: string;
+  }>;
+  /** 新建表时附加的 CHECK。 */
+  checks?: Array<{ name?: string; expression: string }>;
+  /** 新建表时表注释（MySQL 系/MSSQL）。 */
+  comment?: string;
+  /** 新建表时 MySQL 系选项。 */
+  options?: { engine?: string; charset?: string };
 }
 
 export type TableDesignResult =
@@ -88,11 +107,36 @@ export function buildTableDesign(input: TableDesignInput): TableDesignResult {
         unique: column.unique,
         defaultValue: optionValue(column) || undefined,
       })),
+      foreignKeys: input.foreignKeys,
+      checks: input.checks,
+      options: input.options,
     });
     if (!created.ok) return { ok: false, message: created.message, warnings: created.warnings };
+    const statements = [created.sql];
+    for (const index of input.indexes ?? []) {
+      const built = buildCreateIndex(input.dialect, tableName, index.columns, {
+        name: index.name,
+        unique: index.unique,
+      });
+      if (!built.ok) {
+        return { ok: false, message: built.message, warnings: [...created.warnings, ...built.warnings] };
+      }
+      statements.push(built.sql);
+    }
+    if (input.comment?.trim()) {
+      const comment = buildTableComment(input.dialect, tableName, input.comment);
+      if (!comment.ok) {
+        return {
+          ok: false,
+          message: comment.message,
+          warnings: [...created.warnings, ...comment.warnings],
+        };
+      }
+      statements.push(comment.sql);
+    }
     return {
       ok: true,
-      statements: [created.sql],
+      statements,
       warnings: created.warnings,
       sqliteForeignKeysOff: false,
     };

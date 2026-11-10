@@ -425,6 +425,17 @@ export interface DdlTableDefinition {
   columns: DdlColumnDefinition[];
   /** MSSQL 的 schema；其他方言忽略。 */
   schema?: string;
+  foreignKeys?: Array<{
+    name?: string;
+    columns: string[];
+    referencedTable: string;
+    referencedColumns: string[];
+    onDelete?: string;
+    onUpdate?: string;
+  }>;
+  checks?: Array<{ name?: string; expression: string }>;
+  /** MySQL 系的表选项；其他方言忽略。 */
+  options?: { engine?: string; charset?: string };
 }
 
 export interface DdlStatementResult {

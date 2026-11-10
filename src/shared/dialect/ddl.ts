@@ -88,12 +88,66 @@ export function buildCreateTable(
   }
 
   const lines = definition.columns.map((column) => `  ${renderColumn(dialect, column)}`);
+
+  for (const foreignKey of definition.foreignKeys ?? []) {
+    const columns = foreignKey.columns.map((column) => column.trim()).filter(Boolean);
+    const referencedColumns = foreignKey.referencedColumns
+      .map((column) => column.trim())
+      .filter(Boolean);
+    if (columns.length === 0 || referencedColumns.length === 0) {
+      return { ok: false, message: '外键列和引用列都不能为空。', warnings };
+    }
+    if (columns.length !== referencedColumns.length) {
+      return { ok: false, message: '外键列与引用列数量必须一致。', warnings };
+    }
+    if (!foreignKey.referencedTable.trim()) {
+      return { ok: false, message: '请填写外键引用表。', warnings };
+    }
+    const name = foreignKey.name?.trim()
+      ? `CONSTRAINT ${quoteIdent(dialect, foreignKey.name.trim())} `
+      : '';
+    const actions = [
+      foreignKey.onDelete?.trim() ? `ON DELETE ${foreignKey.onDelete.trim().toUpperCase()}` : '',
+      foreignKey.onUpdate?.trim() ? `ON UPDATE ${foreignKey.onUpdate.trim().toUpperCase()}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    lines.push(
+      `  ${name}FOREIGN KEY (${columns
+        .map((column) => quoteIdent(dialect, column))
+        .join(', ')}) REFERENCES ${quoteQualified(dialect, foreignKey.referencedTable)} (${referencedColumns
+        .map((column) => quoteIdent(dialect, column))
+        .join(', ')})${actions ? ` ${actions}` : ''}`,
+    );
+  }
+  for (const check of definition.checks ?? []) {
+    const expression = check.expression.trim();
+    if (!expression) return { ok: false, message: 'CHECK 表达式不能为空。', warnings };
+    const name = check.name?.trim()
+      ? `CONSTRAINT ${quoteIdent(dialect, check.name.trim())} `
+      : '';
+    lines.push(`  ${name}CHECK (${expression})`);
+  }
+
   const target =
     dialect === 'mssql'
       ? quoteIdent('mssql', qualifyMssqlName(tableName, definition.schema))
       : quoteIdent(dialect, tableName);
+  const options =
+    dialect === 'sqlite' || dialect === 'mssql'
+      ? ''
+      : [
+          definition.options?.engine?.trim()
+            ? `ENGINE=${definition.options.engine.trim()}`
+            : '',
+          definition.options?.charset?.trim()
+            ? `DEFAULT CHARSET=${definition.options.charset.trim()}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
 
-  const sql = `CREATE TABLE ${target} (\n${lines.join(',\n')}\n);`;
+  const sql = `CREATE TABLE ${target} (\n${lines.join(',\n')}\n)${options ? ` ${options}` : ''};`;
   return { ok: true, sql, warnings };
 }
 

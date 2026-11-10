@@ -545,6 +545,50 @@ assert(
   'create design SQL missing',
 );
 
+const wizardDesign = buildTableDesign({
+  dialect: 'mysql',
+  mode: 'create',
+  tableName: 'orders_wizard',
+  columns: [
+    { name: 'id', type: 'INTEGER', primaryKey: true, autoIncrement: true },
+    { name: 'amount', type: 'DECIMAL(10,2)', notNull: true },
+  ],
+  indexes: [{ name: 'idx_amount', columns: ['amount'], unique: true }],
+  foreignKeys: [
+    {
+      name: 'fk_orders_wizard_user',
+      columns: ['id'],
+      referencedTable: 'users',
+      referencedColumns: ['id'],
+      onDelete: 'CASCADE',
+    },
+  ],
+  checks: [{ name: 'ck_amount', expression: 'amount > 0' }],
+  comment: '订单',
+  options: { engine: 'InnoDB', charset: 'utf8mb4' },
+});
+assert(wizardDesign.ok, `wizard design failed: ${wizardDesign.ok ? '' : wizardDesign.message}`);
+assert(
+  wizardDesign.ok && wizardDesign.statements[0].includes('CONSTRAINT `fk_orders_wizard_user` FOREIGN KEY'),
+  'wizard foreign key missing',
+);
+assert(
+  wizardDesign.ok && wizardDesign.statements[0].includes('CONSTRAINT `ck_amount` CHECK (amount > 0)'),
+  'wizard check missing',
+);
+assert(
+  wizardDesign.ok && wizardDesign.statements[0].includes('ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'),
+  'wizard options missing',
+);
+assert(
+  wizardDesign.ok && wizardDesign.statements[1].includes('CREATE UNIQUE INDEX `idx_amount`'),
+  'wizard index missing',
+);
+assert(
+  wizardDesign.ok && wizardDesign.statements[2].includes('COMMENT = \'订单\''),
+  'wizard comment missing',
+);
+
 const editDesign = buildTableDesign({
   dialect: 'mysql',
   mode: 'edit',
