@@ -58,7 +58,7 @@ export function TableStructureDialog({
         <header className="modal-header">
           <div>
             <h2 id="structure-title">表结构 · {detail.name}</h2>
-            <p>只读展示；修改请使用 DDL 预览或查询编辑器。</p>
+            <p>结构展示；表注释可直接编辑，其他修改请使用 DDL 预览或查询编辑器。</p>
           </div>
           <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
             <Icon name="close" />

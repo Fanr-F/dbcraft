@@ -334,16 +334,46 @@ export function buildDropIndex(  dialect: DatabaseType,
   };
 }
 
-/** ALTER TABLE ... COMMENT；仅 MySQL 系支持表注释。 */
+/** ALTER TABLE ... COMMENT（MySQL 系）或扩展属性（MSSQL）；SQLite 不支持。 */
 export function buildTableComment(
   dialect: DatabaseType,
   tableName: string,
   comment: string,
 ): DdlGenerateResult {
   if (dialect === 'mssql') {
+    const name = requireName(tableName, '表名');
+    if (!name.ok) return { ok: false, message: name.message, warnings: [] };
+    const parts = name.name.split('.');
+    const table = parts.pop() ?? name.name;
+    const schema = parts.pop() || 'dbo';
+    const escapedSchema = schema.replace(/'/g, "''");
+    const escapedTable = table.replace(/'/g, "''");
+    const escapedComment = comment.trim().replace(/'/g, "''");
+    const exists = `IF EXISTS (
+  SELECT 1
+  FROM sys.extended_properties ep
+  JOIN sys.tables t ON t.object_id = ep.major_id
+  JOIN sys.schemas s ON s.schema_id = t.schema_id
+  WHERE ep.name = N'MS_Description' AND ep.minor_id = 0
+    AND s.name = N'${escapedSchema}' AND t.name = N'${escapedTable}'
+)`;
+    const levels = `@level0type = N'SCHEMA', @level0name = N'${escapedSchema}', @level1type = N'TABLE', @level1name = N'${escapedTable}'`;
+
+    if (!escapedComment) {
+      return {
+        ok: true,
+        sql: `${exists}
+  EXEC sys.sp_dropextendedproperty @name = N'MS_Description', ${levels};`,
+        warnings: [],
+      };
+    }
+
     return {
-      ok: false,
-      message: 'MSSQL 表注释使用扩展属性（MS_Description），暂不支持 UI 编辑。',
+      ok: true,
+      sql: `${exists}
+  EXEC sys.sp_updateextendedproperty @name = N'MS_Description', @value = N'${escapedComment}', ${levels};
+ELSE
+  EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${escapedComment}', ${levels};`,
       warnings: [],
     };
   }

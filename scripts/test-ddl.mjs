@@ -391,6 +391,17 @@ assert(
   'empty table name should be rejected',
 );
 
+const mssqlComment = buildTableComment('mssql', 'dbo.users', "O'Brien");
+assert(mssqlComment.ok, 'mssql table comment should be generated');
+assert(mssqlComment.sql.includes('sp_addextendedproperty'), 'mssql add comment missing');
+assert(mssqlComment.sql.includes("O''Brien"), 'mssql comment quote escaping failed');
+assert(mssqlComment.sql.includes("@level0name = N'dbo'"), 'mssql schema missing');
+const mssqlClearComment = buildTableComment('mssql', 'dbo.users', '');
+assert(
+  mssqlClearComment.ok && mssqlClearComment.sql.includes('sp_dropextendedproperty'),
+  'mssql clear comment missing',
+);
+
 console.log('ddl table comment check passed');
 
 // TABLE DESIGN：新建与编辑差异
