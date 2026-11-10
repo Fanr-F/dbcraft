@@ -4295,6 +4295,7 @@ export default function App() {
           detail={tableStructure}
           dialect={activeConnection.input.type}
           onExecute={executeDdlSql}
+          onExecuteStatements={executeDdlScript}
           onOpenEditor={openAgentScript}
           onClose={() => setTableStructure(null)}
         />

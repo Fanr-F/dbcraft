@@ -8,6 +8,7 @@ import {
   buildAddCheck,
   buildAddColumn,
   buildAddForeignKey,
+  buildAddPrimaryKey,
   buildCreateIndex,
   buildCreateTable,
   buildCreateView,
@@ -16,6 +17,7 @@ import {
   buildDropForeignKey,
   buildDropIndex,
   buildDropObject,
+  buildDropPrimaryKey,
   buildDropTrigger,
   buildModifyColumn,
   buildRenameColumn,
@@ -479,6 +481,27 @@ expectSql(buildDropTrigger('sqlite', 'trg_orders'), 'DROP TRIGGER IF EXISTS "trg
 expectSql(buildDropTrigger('mssql', 'trg_orders'), 'DROP TRIGGER [trg_orders];');
 
 console.log('ddl trigger check passed');
+
+// PRIMARY KEY
+expectSql(buildDropPrimaryKey('mysql', 'orders'), 'ALTER TABLE `orders` DROP PRIMARY KEY;');
+expectSql(
+  buildDropPrimaryKey('mssql', 'dbo.orders', 'PK_orders'),
+  'ALTER TABLE [dbo].[orders] DROP CONSTRAINT [PK_orders];',
+);
+expectSql(
+  buildAddPrimaryKey('mysql', 'orders', ['id', 'tenant_id']),
+  'ALTER TABLE `orders` ADD PRIMARY KEY (`id`, `tenant_id`);',
+);
+expectSql(
+  buildAddPrimaryKey('mssql', 'dbo.orders', ['id'], 'PK_orders'),
+  'ALTER TABLE [dbo].[orders] ADD CONSTRAINT [PK_orders] PRIMARY KEY ([id]);',
+);
+assert(
+  !buildDropPrimaryKey('sqlite', 'orders').ok,
+  'sqlite PK change should require rebuild',
+);
+
+console.log('ddl primary key check passed');
 
 // TABLE DESIGN：新建与编辑差异
 const detail = {

@@ -1,12 +1,17 @@
 import { useState } from 'react';
 import type { DatabaseType, TableDetail } from '@shared/ipc-contract';
-import { buildAddCheck, buildAddForeignKey, buildCreateIndex, buildDropCheck, buildDropForeignKey, buildDropIndex, buildDropTrigger, buildTableComment } from '@shared/dialect/ddl';
+import { buildAddCheck, buildAddForeignKey, buildAddPrimaryKey, buildCreateIndex, buildDropCheck, buildDropForeignKey, buildDropIndex, buildDropPrimaryKey, buildDropTrigger, buildTableComment } from '@shared/dialect/ddl';
+import { buildSqliteRebuildTable } from '@shared/dialect/sqlite-rebuild';
 import { Icon } from './Icon';
 
 interface TableStructureDialogProps {
   detail: TableDetail;
   dialect: DatabaseType;
   onExecute?: (sql: string) => Promise<{ ok: boolean; message: string }>;
+  onExecuteStatements?: (
+    statements: string[],
+    options?: { sqliteForeignKeysOff?: boolean },
+  ) => Promise<{ ok: boolean; message: string }>;
   onOpenEditor?: (sql: string, title: string) => void;
   onClose: () => void;
 }
@@ -29,6 +34,7 @@ export function TableStructureDialog({
   detail,
   dialect,
   onExecute,
+  onExecuteStatements,
   onOpenEditor,
   onClose,
 }: TableStructureDialogProps) {
@@ -47,6 +53,8 @@ export function TableStructureDialog({
   const [uniqueColumns, setUniqueColumns] = useState('');
   const [checkName, setCheckName] = useState('');
   const [checkExpression, setCheckExpression] = useState('');
+  const [pkColumns, setPkColumns] = useState(detail.primaryKey.join(', '));
+  const [pkName, setPkName] = useState(detail.primaryKeyName ?? '');
 
   const generated = editing ? buildTableComment(dialect, detail.name, draft) : null;
 
@@ -156,6 +164,73 @@ export function TableStructureDialog({
     );
   };
 
+  const changePrimaryKey = async () => {
+    const next = pkColumns
+      .split(',')
+      .map((column) => column.trim())
+      .filter(Boolean);
+    if (next.length === 0) {
+      setMessage('主键至少需要一列；当前版本不提供删除主键入口。');
+      return;
+    }
+    const current = detail.primaryKey.map((column) => column.toLowerCase());
+    if (
+      current.length === next.length &&
+      current.every((column, index) => column === next[index]!.toLowerCase())
+    ) {
+      setMessage('主键没有变化。');
+      return;
+    }
+    if (!window.confirm(`把主键修改为 (${next.join(', ')})？`)) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      let result: { ok: boolean; message: string };
+      if (dialect === 'sqlite') {
+        const nextSet = new Set(next.map((column) => column.toLowerCase()));
+        const columns = detail.columns.map((column) => ({
+          name: column.name,
+          type: column.declaredType,
+          primaryKey: nextSet.has(column.name.toLowerCase()),
+          autoIncrement: column.autoIncrement,
+          notNull: column.notNull,
+          defaultValue: column.defaultValue ?? undefined,
+          originalName: column.name,
+        }));
+        const rebuilt = buildSqliteRebuildTable(detail, columns, detail.name);
+        if (!rebuilt.ok) {
+          setMessage(rebuilt.message);
+          return;
+        }
+        result = onExecuteStatements
+          ? await onExecuteStatements(rebuilt.statements, { sqliteForeignKeysOff: true })
+          : { ok: false, message: '当前入口不支持多语句执行。' };
+      } else {
+        const statements: string[] = [];
+        if (detail.primaryKey.length > 0) {
+          const dropped = buildDropPrimaryKey(dialect, detail.name, pkName || undefined);
+          if (!dropped.ok) {
+            setMessage(dropped.message);
+            return;
+          }
+          statements.push(dropped.sql);
+        }
+        const added = buildAddPrimaryKey(dialect, detail.name, next, pkName || undefined);
+        if (!added.ok) {
+          setMessage(added.message);
+          return;
+        }
+        statements.push(added.sql);
+        result = onExecuteStatements
+          ? await onExecuteStatements(statements)
+          : { ok: false, message: '当前入口不支持多语句执行。' };
+      }
+      setMessage(result.ok ? '主键已修改；请关闭后重新打开查看最新结构。' : result.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div
@@ -252,6 +327,33 @@ export function TableStructureDialog({
               </tbody>
             </table>
           </div>
+
+          <h3>主键（{detail.primaryKey.length > 0 ? detail.primaryKey.join(', ') : '无'}）</h3>
+          <div className="structure-constraint-form">
+            <label className="field">
+              <span>主键列（逗号分隔）</span>
+              <input value={pkColumns} onChange={(event) => setPkColumns(event.target.value)} />
+            </label>
+            {dialect === 'mssql' && (
+              <label className="field">
+                <span>约束名</span>
+                <input value={pkName} onChange={(event) => setPkName(event.target.value)} />
+              </label>
+            )}
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !onExecuteStatements}
+              onClick={() => void changePrimaryKey()}
+            >
+              修改主键
+            </button>
+          </div>
+          <p className="form-note">
+            {dialect === 'sqlite'
+              ? 'SQLite 会整表重建并将数据复制到新表。'
+              : '修改主键会先删除旧主键约束，再创建新约束。'}
+          </p>
 
           <h3>索引（{detail.indexes.length}）</h3>
           {detail.indexes.length === 0 ? (

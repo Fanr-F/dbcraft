@@ -364,6 +364,8 @@ export interface TableDetail extends TableMeta {
   triggers?: TableTriggerInfo[];
   /** 原始 CREATE TABLE 文本（SQLite 用于识别 WITHOUT ROWID/STRICT/生成列等）。 */
   tableSql?: string;
+  /** MSSQL 主键约束名；其他方言可能省略。 */
+  primaryKeyName?: string;
   /** MySQL 系表注释；SQLite 没有表注释，固定为 null。 */
   comment: string | null;
 }

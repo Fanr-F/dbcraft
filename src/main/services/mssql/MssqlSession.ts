@@ -600,6 +600,11 @@ export class MssqlSession implements DatabaseSession {
       name: asString(row[0]?.value),
       disabled: Boolean(row[1]?.value),
     }));
+    const primaryKeyRows = await this.run(
+      `SELECT name FROM sys.key_constraints
+       WHERE parent_object_id = OBJECT_ID(@p1) AND type = 'PK'`,
+      [name],
+    );
 
     const comment = commentRows.rows[0]?.[0]?.value;
     return {
@@ -608,6 +613,7 @@ export class MssqlSession implements DatabaseSession {
       foreignKeys: [...foreignKeyMap.values()],
       checks,
       triggers,
+      primaryKeyName: asString(primaryKeyRows.rows[0]?.[0]?.value) || undefined,
       comment: comment === null || comment === undefined ? null : asString(comment),
     };
   }

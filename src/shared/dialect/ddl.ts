@@ -544,6 +544,82 @@ export function buildDropCheck(
   };
 }
 
+export function buildDropPrimaryKey(
+  dialect: DatabaseType,
+  tableName: string,
+  name?: string,
+): DdlGenerateResult {
+  if (dialect === 'sqlite') {
+    return {
+      ok: false,
+      message: 'SQLite 修改主键需要重建表，请使用表设计页签。',
+      warnings: [],
+    };
+  }
+  const table = requireName(tableName, '表名');
+  if (!table.ok) return { ok: false, message: table.message, warnings: [] };
+  if (dialect === 'mssql') {
+    const constraint = requireName(name ?? '', '主键约束名');
+    if (!constraint.ok) return { ok: false, message: constraint.message, warnings: [] };
+    return {
+      ok: true,
+      sql: `ALTER TABLE ${quoteQualified('mssql', table.name)} DROP CONSTRAINT ${quoteIdent(
+        'mssql',
+        constraint.name,
+      )};`,
+      warnings: [],
+    };
+  }
+  return {
+    ok: true,
+    sql: `ALTER TABLE ${quoteQualified(dialect, table.name)} DROP PRIMARY KEY;`,
+    warnings: [],
+  };
+}
+
+export function buildAddPrimaryKey(
+  dialect: DatabaseType,
+  tableName: string,
+  columns: string[],
+  name?: string,
+): DdlGenerateResult {
+  if (dialect === 'sqlite') {
+    return {
+      ok: false,
+      message: 'SQLite 修改主键需要重建表，请使用表设计页签。',
+      warnings: [],
+    };
+  }
+  const table = requireName(tableName, '表名');
+  if (!table.ok) return { ok: false, message: table.message, warnings: [] };
+  const normalized = columns.map((column) => column.trim()).filter(Boolean);
+  if (normalized.length === 0) {
+    return { ok: false, message: '主键至少需要一列。', warnings: [] };
+  }
+  const columnList = normalized.map((column) => quoteIdent(dialect, column)).join(', ');
+  if (dialect === 'mssql') {
+    const constraintName =
+      name?.trim() ||
+      `PK_${table.name}_${normalized.join('_')}`
+        .replace(/[^\w]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 60);
+    return {
+      ok: true,
+      sql: `ALTER TABLE ${quoteQualified('mssql', table.name)} ADD CONSTRAINT ${quoteIdent(
+        'mssql',
+        constraintName,
+      )} PRIMARY KEY (${columnList});`,
+      warnings: [],
+    };
+  }
+  return {
+    ok: true,
+    sql: `ALTER TABLE ${quoteQualified(dialect, table.name)} ADD PRIMARY KEY (${columnList});`,
+    warnings: [],
+  };
+}
+
 export function buildDropTrigger(
   dialect: DatabaseType,
   name: string,
