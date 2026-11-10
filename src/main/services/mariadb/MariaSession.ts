@@ -6,6 +6,7 @@ import type {
   MysqlFamilyConnectionInput,
   QueryCell,
   QueryColumn,
+  QueryMessage,
   QueryResult,
   SchemaGetOptions,
   SchemaObject,
@@ -132,6 +133,21 @@ export class MariaSession implements DatabaseSession {
   }
 
   /** 流式读取结果集，最多保留 maxRows 行，其余行只消费不入内存。 */
+  private async readWarnings(): Promise<QueryMessage[]> {
+    try {
+      const rows = await this.connection.query('SHOW WARNINGS');
+      return (rows as Array<{ Level?: string; Code?: number; Message?: string }>).map((row) => {
+        const level = String(row.Level ?? '').toLowerCase();
+        return {
+          level: level.includes('error') ? 'error' : level.includes('warn') ? 'warn' : 'info',
+          text: `${row.Code ?? ''}: ${row.Message ?? ''}`,
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
   private queryStreamed(
     sql: string,
     params?: QueryCell[],
@@ -173,9 +189,10 @@ export class MariaSession implements DatabaseSession {
         reject(error);
       });
 
-      stream.on('end', () => {
+      stream.on('end', async () => {
         if (settled) return;
         settled = true;
+        const messages = await this.readWarnings();
 
         resolve({
           columns,
@@ -185,6 +202,7 @@ export class MariaSession implements DatabaseSession {
           statementType: 'select',
           changes: null,
           truncated,
+          ...(messages.length > 0 ? { messages } : {}),
         });
       });
     });
@@ -198,6 +216,7 @@ export class MariaSession implements DatabaseSession {
     const startedAt = Date.now();
     const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     const rows = await this.connection.query({ sql, rowsAsArray: true }, params);
+    const messages = await this.readWarnings();
 
     if (Array.isArray(rows)) {
       const meta = ((rows as unknown as { meta?: FieldInfo[] }).meta ?? []) as FieldInfo[];
@@ -217,6 +236,7 @@ export class MariaSession implements DatabaseSession {
         statementType: 'select',
         changes: null,
         truncated,
+        ...(messages.length > 0 ? { messages } : {}),
       };
     }
 
@@ -231,6 +251,7 @@ export class MariaSession implements DatabaseSession {
       statementType: 'change',
       changes,
       truncated: false,
+      ...(messages.length > 0 ? { messages } : {}),
     };
   }
 

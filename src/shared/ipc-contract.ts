@@ -114,6 +114,11 @@ export interface QueryColumn {
   declaredType: string | null;
 }
 
+export interface QueryMessage {
+  level: 'info' | 'warn' | 'error';
+  text: string;
+}
+
 export interface QueryResult {
   columns: QueryColumn[];
   rows: QueryCell[][];
@@ -122,6 +127,8 @@ export interface QueryResult {
   statementType: 'select' | 'change';
   changes: number | null;
   truncated: boolean;
+  /** 驱动消息（MSSQL PRINT/RAISERROR、MySQL warning 等）。 */
+  messages?: QueryMessage[];
 }
 
 export interface QueryError {

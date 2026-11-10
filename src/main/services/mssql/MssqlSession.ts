@@ -5,6 +5,7 @@ import type {
   MssqlConnectionInput,
   QueryCell,
   QueryColumn,
+  QueryMessage,
   QueryResult,
   SchemaGetOptions,
   SchemaObject,
@@ -40,6 +41,7 @@ interface ExecResult {
   rows: RawCell[][];
   rowCount: number;
   truncated: boolean;
+  messages: QueryMessage[];
 }
 
 interface ObjectInfo {
@@ -244,6 +246,7 @@ export class MssqlSession implements DatabaseSession {
         statementType: 'change',
         changes,
         truncated: false,
+        ...(result.messages.length > 0 ? { messages: result.messages } : {}),
       };
     }
 
@@ -261,6 +264,7 @@ export class MssqlSession implements DatabaseSession {
       statementType: 'select',
       changes: null,
       truncated: result.truncated,
+      ...(result.messages.length > 0 ? { messages: result.messages } : {}),
     };
   }
 
@@ -710,19 +714,32 @@ function execOn(
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
     const rows: RawCell[][] = [];
+    const messages: QueryMessage[] = [];
     let columns: ColumnMeta[] = [];
     let truncated = false;
     let settled = false;
 
+    const onInfo = (info: { message?: string; class?: number }) => {
+      const text = info.message?.trim();
+      if (!text) return;
+      messages.push({
+        level: info.class && info.class >= 11 ? 'warn' : 'info',
+        text,
+      });
+    };
+    const cleanup = () => connection.removeListener('infoMessage', onInfo);
+    connection.on('infoMessage', onInfo);
+
     const request = new Request(sql, (error, rowCount) => {
       if (settled) return;
       settled = true;
+      cleanup();
       onRequest?.(null);
       if (error) {
         reject(error);
         return;
       }
-      resolve({ columns, rows, rowCount: rowCount ?? rows.length, truncated });
+      resolve({ columns, rows, rowCount: rowCount ?? rows.length, truncated, messages });
     });
 
     // 单语句语义：只保留第一个结果集的列。
@@ -747,6 +764,7 @@ function execOn(
       connection.execSql(request);
     } catch (error) {
       settled = true;
+      cleanup();
       onRequest?.(null);
       reject(error);
     }

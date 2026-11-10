@@ -8,6 +8,7 @@ import type {
   MysqlFamilyConnectionInput,
   QueryCell,
   QueryColumn,
+  QueryMessage,
   QueryResult,
   SchemaGetOptions,
   SchemaObject,
@@ -150,6 +151,28 @@ export class MysqlSession implements DatabaseSession {
   }
 
   /**
+   * 读取当前会话的 warning；没有 warning 时返回空数组。
+   * 查询失败或连接不支持时不阻塞主查询。
+   */
+  private async readWarnings(): Promise<QueryMessage[]> {
+    try {
+      const [rows] = await this.connection.query({
+        sql: 'SHOW WARNINGS',
+        rowsAsArray: true,
+      });
+      return (rows as unknown[][]).map((row) => {
+        const level = String(row[0] ?? '').toLowerCase();
+        return {
+          level: level.includes('error') ? 'error' : level.includes('warn') ? 'warn' : 'info',
+          text: `${String(row[1] ?? '')}: ${String(row[2] ?? '')}`,
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * 使用流式结果，最多保留 MAX_ROWS 行；其余行继续消费但不入内存，
    * 避免 mysql2 的 query() 把整个结果集物化。
    */
@@ -200,9 +223,10 @@ export class MysqlSession implements DatabaseSession {
         reject(error);
       });
 
-      stream.on('end', () => {
+      stream.on('end', async () => {
         if (settled) return;
         settled = true;
+        const messages = await this.readWarnings();
 
         if (!isSelect) {
           const changes = Number(changeHeader?.affectedRows ?? 0);
@@ -214,6 +238,7 @@ export class MysqlSession implements DatabaseSession {
             statementType: 'change',
             changes,
             truncated: false,
+            ...(messages.length > 0 ? { messages } : {}),
           });
           return;
         }
@@ -226,6 +251,7 @@ export class MysqlSession implements DatabaseSession {
           statementType: 'select',
           changes: null,
           truncated,
+          ...(messages.length > 0 ? { messages } : {}),
         });
       });
     });

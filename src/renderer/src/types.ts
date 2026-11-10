@@ -2,6 +2,7 @@ import type {
   ConnectionRecord,
   QueryCell,
   QueryColumn,
+  QueryMessage,
   TableDetail,
 } from '@shared/ipc-contract';
 
@@ -92,6 +93,8 @@ export interface RunState {
   scriptTotal?: number;
   /** 当前结果页签索引；`-1` 表示消息面板。 */
   activeResult?: number;
+  /** 单条查询的驱动消息。 */
+  messages?: QueryMessage[];
 }
 
 export type SessionStatus = 'idle' | 'opening' | 'ready' | 'error';

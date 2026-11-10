@@ -912,6 +912,21 @@ export function Workspace({
           </div>
         )}
 
+        {run.messages && run.messages.length > 0 && (
+          <div className="result-messages" role="status" aria-label="驱动消息">
+            {run.messages.map((message, index) => (
+              <div
+                key={`driver-message-${index}`}
+                className={`result-message-note ${
+                  message.level === 'error' ? 'is-error' : message.level === 'warn' ? 'is-warn' : ''
+                }`}
+              >
+                {message.text}
+              </div>
+            ))}
+          </div>
+        )}
+
         {messagesView && scriptStatements ? (
           <div className="result-messages" role="list" aria-label="执行消息">
             {scriptStatements.map((statement, index) => {
