@@ -839,10 +839,11 @@ const mssqlDefaultChange = buildTableDesign({
     },
   ],
 });
-assert(!mssqlDefaultChange.ok, 'MSSQL default value change should be rejected');
+assert(mssqlDefaultChange.ok, `MSSQL default change should generate DDL: ${mssqlDefaultChange.ok ? '' : mssqlDefaultChange.message}`);
 assert(
-  mssqlDefaultChange.message.includes('默认值'),
-  'MSSQL default change message missing',
+  mssqlDefaultChange.ok &&
+    mssqlDefaultChange.statements.some((sql) => sql.includes("DEFAULT ('y') FOR [no]")),
+  'MSSQL default change DDL missing',
 );
 
 for (const [result, expected] of designFailures) {
@@ -900,4 +901,48 @@ assert(
   sqliteOrder.ok && sqliteOrder.statements[0].includes('"note" TEXT') &&
     sqliteOrder.statements[0].indexOf('"note"') < sqliteOrder.statements[0].indexOf('"name"'),
   'sqlite column order not applied',
+);
+
+const mssqlDefault = buildTableDesign({
+  dialect: 'mssql',
+  mode: 'edit',
+  tableName: 'users',
+  detail: {
+    ...detail,
+    name: 'dbo.users',
+    columns: [
+      {
+        name: 'id',
+        declaredType: 'INT',
+        notNull: true,
+        primaryKey: true,
+        autoIncrement: true,
+        defaultValue: null,
+        readOnly: true,
+      },
+      {
+        name: 'name',
+        declaredType: 'NVARCHAR(10)',
+        notNull: false,
+        primaryKey: false,
+        autoIncrement: false,
+        defaultValue: null,
+        defaultConstraint: 'DF_users_name',
+        readOnly: false,
+      },
+    ],
+  },
+  columns: [
+    { name: 'id', type: 'INT', primaryKey: true, autoIncrement: true, originalName: 'id' },
+    { name: 'name', type: 'NVARCHAR(10)', defaultValue: "'x'", originalName: 'name' },
+  ],
+});
+assert(mssqlDefault.ok, `mssql default change failed: ${mssqlDefault.ok ? '' : mssqlDefault.message}`);
+assert(
+  mssqlDefault.ok && mssqlDefault.statements.some((sql) => sql.includes('DROP CONSTRAINT [DF_users_name]')),
+  'mssql default constraint drop missing',
+);
+assert(
+  mssqlDefault.ok && mssqlDefault.statements.some((sql) => sql.includes('DEFAULT (\'x\') FOR [name]')),
+  'mssql default constraint add missing',
 );

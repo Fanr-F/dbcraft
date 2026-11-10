@@ -63,6 +63,7 @@ interface ColumnInfo {
   computedDefinition: string | null;
   persisted: boolean;
   defaultDefinition: string | null;
+  defaultConstraintName: string | null;
   rowversion: boolean;
   seedValue: number;
   incrementValue: number;
@@ -481,6 +482,7 @@ export class MssqlSession implements DatabaseSession {
         primaryKey: primaryKeySet.has(column.name),
         autoIncrement: column.identity,
         defaultValue: column.defaultDefinition,
+        defaultConstraint: column.defaultConstraintName,
         readOnly,
       };
     });
@@ -649,6 +651,7 @@ export class MssqlSession implements DatabaseSession {
               c.is_nullable, c.is_identity, c.is_computed,
               cc.definition AS computed_definition, cc.is_persisted,
               dc.definition AS default_definition,
+              dc.name AS default_constraint_name,
               CASE WHEN ty.name IN ('timestamp', 'rowversion') THEN 1 ELSE 0 END AS is_rowversion,
               ident.seed_value, ident.increment_value
        FROM sys.columns c
@@ -676,8 +679,9 @@ export class MssqlSession implements DatabaseSession {
       computedDefinition: row[8]?.value === null ? null : asString(row[8]?.value),
       persisted: asBoolean(row[9]?.value),
       defaultDefinition: row[10]?.value === null ? null : asString(row[10]?.value),
-      rowversion: asBoolean(row[11]?.value),
-      seedValue: asNumber(row[12]?.value || 1),
+      defaultConstraintName: row[11]?.value === null ? null : asString(row[11]?.value),
+      rowversion: asBoolean(row[12]?.value),
+      seedValue: asNumber(row[13]?.value || 1),
       incrementValue: asNumber(row[13]?.value || 1),
     }));
   }

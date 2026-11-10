@@ -11,6 +11,7 @@ import {
   type DdlGenerateResult,
 } from './ddl.ts';
 import { buildSqliteRebuildTable, type RebuildTableColumn } from './sqlite-rebuild.ts';
+import { quoteIdent } from './identifiers.ts';
 
 export interface TableDesignColumn extends RebuildTableColumn {
   /** 编辑模式下对应原列名；新增列省略。 */
@@ -320,21 +321,7 @@ export function buildTableDesign(input: TableDesignInput): TableDesignResult {
   }
 
   if (input.dialect === 'mssql') {
-    const defaultChanged = modified.some((column) => {
-      const original = column.originalName ? originals.get(column.originalName) : undefined;
-      return (
-        original !== undefined &&
-        normalize(column.defaultValue) !== normalize(original.defaultValue)
-      );
-    });
-    if (defaultChanged) {
-      return {
-        ok: false,
-        message:
-          'MSSQL 修改默认值需要先删除默认约束；当前表结构页签只支持修改类型和可空性，请使用 SQL 编辑器。',
-        warnings,
-      };
-    }
+    warnings.push('MSSQL 修改默认值会删除旧默认约束并新建默认约束。');
   }
 
   // SQLite 不支持 MODIFY COLUMN；有任何列定义变化就整表重建。
@@ -398,6 +385,41 @@ export function buildTableDesign(input: TableDesignInput): TableDesignResult {
   }
 
   for (const column of modified) {
+    const original = column.originalName ? originals.get(column.originalName) : undefined;
+    const defaultChanged =
+      original !== undefined &&
+      normalize(column.defaultValue) !== normalize(original.defaultValue);
+
+    if (input.dialect === 'mssql' && defaultChanged && original) {
+      const tableRef = quoteIdent('mssql', currentTable);
+      const columnRef = quoteIdent('mssql', column.name.trim());
+      if (original.defaultConstraint) {
+        statements.push(
+          `ALTER TABLE ${tableRef} DROP CONSTRAINT ${quoteIdent(
+            'mssql',
+            original.defaultConstraint,
+          )};`,
+        );
+      }
+      const defaultValue = optionValue(column);
+      if (defaultValue) {
+        const constraint = `DF_${currentTable}_${column.name}`
+          .replace(/[^\w]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .slice(0, 60);
+        statements.push(
+          `ALTER TABLE ${tableRef} ADD CONSTRAINT ${quoteIdent(
+            'mssql',
+            constraint,
+          )} DEFAULT (${defaultValue}) FOR ${columnRef};`,
+        );
+      }
+      const typeOrNullChanged =
+        normalize(column.type) !== normalize(original.declaredType) ||
+        column.notNull !== original.notNull;
+      if (!typeOrNullChanged) continue;
+    }
+
     const built: DdlGenerateResult = buildModifyColumn(
       input.dialect,
       currentTable,

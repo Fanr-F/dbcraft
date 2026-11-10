@@ -313,6 +313,8 @@ export interface TableColumnMeta {
   primaryKey: boolean;
   autoIncrement: boolean;
   defaultValue: string | null;
+  /** MSSQL 默认值约束名；其他方言为 null/省略。 */
+  defaultConstraint?: string | null;
   /** 主键与生成列不允许在网格中直接编辑。 */
   readOnly: boolean;
 }
