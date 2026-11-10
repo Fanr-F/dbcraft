@@ -1178,7 +1178,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | K-04 | 编辑器：版本感知补全、类型提示、错误波浪线、`GO 5`、驱动级多结果集、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
 | K-05 | 历史：复杂形式的敏感字段脱敏 | §3.4.3 | P2 | 🟡 |
 | K-06 | Agent：运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
-| K-07 | 设置：跟随系统主题、字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
+| K-07 | 设置：字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
 | K-08 | 连接：SQLite 文件拖入、认证插件字段、独立「只读连接」标记、Percona 真实实例回归、全量错误码 | §3.4.1 | P2 | 🟡 |
 | K-09 | DDL/刷新后表子对象缓存不失效 | ✅ 已修复（W-20261109-51）：执行 DDL 与刷新 schema 时清空该 tab/browse session 的 `tableExtras` | — | — |
 | K-10 | 非功能：打包/签名/安装包、性能基线、无障碍、CI 门禁、崩溃率与冷启动指标 | §3.6.2 / §3.9 | P2 | ❌ |
@@ -1386,7 +1386,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 
 ### 5.8 设置 / 主题 / 打磨
 
-- [ ] “跟随系统”主题
+- [~] “跟随系统”主题（W-20261109-57；待真机验收）
 - [ ] 字体族、Tab 宽度、关键字大小写、补全开关与延迟
 - [~] 历史去重/脱敏开关（设置面板已接入，待人工真机验收）
 - [ ] 网格自动提交/提交确认
@@ -1494,6 +1494,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-54 M02-14 SQL 文件新建/另存为/最近/拖入**：诉求是补齐 SQL 文件操作。变更：新增 `file:read-sql` IPC（契约/zod/router/preload）；`App.openSqlFile(path?)` 支持直接读路径；新增 `newSqlFile`、`saveSqlFile(forceDialog)`；最近文件存 `localStorage`（最多 10 个）并在工作区提供下拉；窗口级 `dragover/drop` 打开 `.sql`/`.txt`；工作区增加「新建 SQL」「另存为」按钮。涉及 `src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机拖入/点击最近文件。遗留：最近文件只存路径，不校验文件是否仍存在；拖入只接受第一个文件。
 - **W-20261109-55 M02-06 驱动消息采集**：诉求是把 MSSQL `PRINT`/`RAISERROR` 与 MySQL/MariaDB warning 显示到结果区。变更：`QueryResult` 增加 `messages`；MSSQL `execOn` 监听 connection 的 `infoMessage` 并随查询返回；MySQL/MariaDB 查询后读取 `SHOW WARNINGS`；`RunState` 增加 `messages`，Workspace 在结果区显示驱动消息。涉及 `src/shared/ipc-contract.ts`、`src/main/services/mssql/MssqlSession.ts`、`src/main/services/mysql/MysqlSession.ts`、`src/main/services/mariadb/MariaSession.ts`、`src/renderer/src/types.ts`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL/MySQL 上验证 PRINT/RAISERROR/warning。遗留：仍不是驱动级多结果集，多语句继续逐条 IPC；`SHOW WARNINGS` 每查询多一次往返；驱动消息未进入脚本消息面板，只在结果区顶部显示。
 - **W-20261109-56 M04-10/R-07 库级 DDL 覆盖存储过程**：诉求是库级 DDL 不再跳过存储过程。变更：`DdlObjectKind` 增加 `procedure`；MSSQL `getDdl` 对 `V`/`P` 都读 `sys.sql_modules`；MySQL/MariaDB 对 procedure 用 `SHOW CREATE PROCEDURE`；SQLite 明确报不支持；库级 DDL 循环不再跳过 procedure。涉及 `src/shared/ipc-contract.ts`、`src/main/services/mssql/MssqlSession.ts`、`src/main/services/mysql/MysqlSession.ts`、`src/main/services/mariadb/MariaSession.ts`、`src/main/services/sqlite/SqliteSession.ts`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实实例生成库级脚本。遗留：MSSQL 存储过程定义可能依赖 `SET ANSI_NULLS` 等上下文；未补真机回归。
+- **W-20261109-57 M07-02 跟随系统主题**：诉求是主题可跟随系统。变更：`AppSettings.theme` 增加 `system`；设置归一化允许 system；设置面板增加「跟随系统」；App 监听 `prefers-color-scheme` 计算有效主题并设置 `data-theme`，RevoGrid 使用有效主题。涉及 `src/shared/ipc-contract.ts`、`src/shared/settings.ts`、`src/renderer/src/components/SettingsDialog.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run test:settings`、`npm run build` 通过；未在真实 Electron 中切换系统主题验收。遗留：主题切换只影响 CSS 与网格，窗口原生主题未处理。
 
 ---
 

@@ -522,9 +522,21 @@ export default function App() {
   }, []);
 
   // 主题只影响渲染层样式与 RevoGrid 主题，不写数据库。
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true,
+  );
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme;
-  }, [settings.theme]);
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!media) return;
+    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+  const effectiveTheme =
+    settings.theme === 'system' ? (systemDark ? 'dark' : 'light') : settings.theme;
+  useEffect(() => {
+    document.documentElement.dataset.theme = effectiveTheme;
+  }, [effectiveTheme]);
 
   // 编辑器字号通过 CSS 变量生效，避免每个组件单独传参。
   useEffect(() => {
@@ -4022,7 +4034,7 @@ export default function App() {
           onBeginTransaction={beginTransaction}
           onCommitTransaction={commitTransaction}
           onRollbackTransaction={rollbackTransaction}
-          theme={settings.theme}
+          theme={effectiveTheme}
           tableMeta={activeTableMeta}
           tableEditable={tableEditable}
           canEnableNoPk={canEnableNoPk}

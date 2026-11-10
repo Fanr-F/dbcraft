@@ -205,10 +205,13 @@ export function SettingsDialog({
             <span>主题</span>
             <select
               value={theme}
-              onChange={(event) => setTheme(event.target.value as 'dark' | 'light')}
+              onChange={(event) =>
+                setTheme(event.target.value as 'dark' | 'light' | 'system')
+              }
             >
               <option value="dark">深色</option>
               <option value="light">浅色</option>
+              <option value="system">跟随系统</option>
             </select>
           </label>
 

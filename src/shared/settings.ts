@@ -68,7 +68,8 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
   );
   return {
     resultRowLimit: allowed ? requested : DEFAULT_APP_SETTINGS.resultRowLimit,
-    theme: record.theme === 'light' ? 'light' : 'dark',
+    theme:
+      record.theme === 'light' || record.theme === 'system' ? record.theme : 'dark',
     editorFontSize: fontAllowed
       ? requestedFont
       : DEFAULT_APP_SETTINGS.editorFontSize,

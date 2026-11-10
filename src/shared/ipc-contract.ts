@@ -563,7 +563,7 @@ export interface AppInfo {
 export interface AppSettings {
   /** 单次查询最多保留的结果行数。 */
   resultRowLimit: number;
-  theme: 'dark' | 'light';
+  theme: 'dark' | 'light' | 'system';
   /** SQL 编辑器字号。 */
   editorFontSize: number;
   /** 查询历史保留条数。 */
