@@ -364,6 +364,8 @@ export interface TableDetail extends TableMeta {
   checks: TableCheckInfo[];
   /** 表上的触发器；部分驱动可能不返回。 */
   triggers?: TableTriggerInfo[];
+  /** 依赖该表的视图（SQLite 重建时用于恢复）。 */
+  dependentViews?: Array<{ name: string; sql: string }>;
   /** 原始 CREATE TABLE 文本（SQLite 用于识别 WITHOUT ROWID/STRICT/生成列等）。 */
   tableSql?: string;
   /** MSSQL 主键约束名；其他方言可能省略。 */

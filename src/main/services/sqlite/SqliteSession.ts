@@ -310,12 +310,23 @@ export class SqliteSession implements DatabaseSession {
       }))
       .filter((trigger) => trigger.name.length > 0);
 
+    const viewRows = await this.query(
+      `SELECT name, sql FROM sqlite_master
+       WHERE type = 'view' AND sql IS NOT NULL AND instr(lower(sql), lower(?)) > 0
+       ORDER BY name`,
+      [name],
+    );
+    const dependentViews = viewRows.rows
+      .map((row) => ({ name: String(row[0] ?? ''), sql: String(row[1] ?? '') }))
+      .filter((view) => view.name.length > 0 && view.sql.length > 0);
+
     return {
       ...meta,
       indexes,
       foreignKeys,
       checks: extractCheckExpressions(ddl),
       triggers,
+      dependentViews,
       tableSql: ddl,
       comment: null,
     };
