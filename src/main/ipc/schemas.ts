@@ -249,6 +249,10 @@ export const fileSaveSqlSchema = z.object({
   suggestedName: z.string().trim().min(1).max(200),
 });
 
+export const fileReadSqlSchema = z.object({
+  path: z.string().min(1).max(4096),
+});
+
 export const logWriteSchema = z.object({  level: z.enum(['error', 'warn', 'info', 'debug']),
   scope: z.string().trim().min(1).max(64),
   message: z.string().min(1).max(2000),

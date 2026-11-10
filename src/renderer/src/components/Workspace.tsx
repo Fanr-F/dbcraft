@@ -78,6 +78,10 @@ interface WorkspaceProps {
   onShowMessages: () => void;
   onOpenSqlFile: () => void;
   onSaveSqlFile: () => void;
+  onNewSqlFile: () => void;
+  onSaveSqlFileAs: () => void;
+  recentSqlFiles: string[];
+  onOpenRecentSqlFile: (path: string) => void;
   onFormatSql: () => void;
   /** 编辑器右键「从历史插入」。 */
   onOpenHistory: () => void;
@@ -163,6 +167,10 @@ export function Workspace({
   onShowMessages,
   onOpenSqlFile,
   onSaveSqlFile,
+  onNewSqlFile,
+  onSaveSqlFileAs,
+  recentSqlFiles,
+  onOpenRecentSqlFile,
   onFormatSql,
   onOpenHistory,
   insertRequest,
@@ -484,6 +492,14 @@ export function Workspace({
           <button
             type="button"
             className="btn"
+            onClick={onNewSqlFile}
+            title="新建 SQL 文件"
+          >
+            新建 SQL
+          </button>
+          <button
+            type="button"
+            className="btn"
             onClick={onOpenSqlFile}
             title="打开 SQL 文件"
           >
@@ -497,6 +513,31 @@ export function Workspace({
           >
             保存 SQL
           </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={onSaveSqlFileAs}
+            title="另存为 SQL 文件"
+          >
+            另存为
+          </button>
+          {recentSqlFiles.length > 0 && (
+            <select
+              className="db-select-inline"
+              aria-label="最近打开的 SQL 文件"
+              value=""
+              onChange={(event) => {
+                if (event.target.value) onOpenRecentSqlFile(event.target.value);
+              }}
+            >
+              <option value="">最近文件…</option>
+              {recentSqlFiles.map((path) => (
+                <option key={path} value={path}>
+                  {path.split(/[\\/]/).pop() || path}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             className="btn"

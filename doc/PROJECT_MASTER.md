@@ -1175,7 +1175,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | K-01 | DDL：唯一约束/索引变更进设计页签、CHECK/外键编辑、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
 | K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid` | §5、§3.4.5 | P1 | 🟡 |
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出 | §3.6.4 | P2 | ❌ |
-| K-04 | 编辑器：版本感知补全、类型提示、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、最近文件/另存为/拖入、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
+| K-04 | 编辑器：版本感知补全、类型提示、错误波浪线、`GO 5`、MSSQL `PRINT`/`RAISERROR`/MySQL warning 进消息面板、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
 | K-05 | 历史：复杂形式的敏感字段脱敏 | §3.4.3 | P2 | 🟡 |
 | K-06 | Agent：运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
 | K-07 | 设置：跟随系统主题、字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
@@ -1344,7 +1344,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] 多结果页签 + 消息面板（W-20261109-22；E2E 覆盖结果切换/失败停止，待人工验收）
 - [ ] 驱动级多结果集、MSSQL `PRINT`/`RAISERROR` 消息、MySQL warning 进入消息面板
 - [ ] `GO 5` 重复批次
-- [ ] 打开/另存为/最近文件/拖入 `.sql`
+- [~] 打开/另存为/最近文件/拖入 `.sql`（W-20261109-54；待真机验收）
 
 ### 5.5 查询历史（MOD-03）
 
@@ -1491,6 +1491,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-51 K-09 DDL/刷新后清表子对象缓存**：诉求是 DDL 或手动刷新后重新展开表能看到最新约束/触发器/索引。变更：`executeDdlScript` 成功后清空当前 tab 的 `tableExtrasByTab`；`refreshSchema` 清当前 tab、`refreshBrowseSchema` 清 browse session 的缓存。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中执行 DDL 后展开表验收。遗留：大库分级加载仍未实现。
 - **W-20261109-52 R-06/M04-23 MSSQL 会话 SET**：诉求是让 DDL/索引行为与 SSMS 默认会话选项一致。变更：`MssqlSession.create` 连接成功后执行 `SET ANSI_NULLS ON; SET QUOTED_IDENTIFIER ON;`，失败不阻塞连接。涉及 `src/main/services/mssql/MssqlSession.ts`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 SQL Server 上跑 DDL 回归。遗留：未逐会话验证设置值；`SET` 失败被静默忽略。
 - **W-20261109-53 M03-09 历史导出 SQL/CSV**：诉求是历史记录支持 `.sql` 与 `.csv` 导出。变更：新增 `shared/history-export.ts`（SQL 带来源注释、CSV 含时间/方言/连接/库/状态/来源/行数/耗时/SQL）；历史弹窗增加 JSON/SQL/CSV 三个导出按钮；`test-export` 增加历史导出用例。涉及 `src/shared/history-export.ts`、`src/renderer/src/components/HistoryDialog.tsx`、`scripts/test-export.mjs`。验证：`npm run typecheck`、`npm run test:export`、`npm run build` 通过。遗留：CSV 仍可能包含敏感 SQL，依赖用户确认；未真机点击。
+- **W-20261109-54 M02-14 SQL 文件新建/另存为/最近/拖入**：诉求是补齐 SQL 文件操作。变更：新增 `file:read-sql` IPC（契约/zod/router/preload）；`App.openSqlFile(path?)` 支持直接读路径；新增 `newSqlFile`、`saveSqlFile(forceDialog)`；最近文件存 `localStorage`（最多 10 个）并在工作区提供下拉；窗口级 `dragover/drop` 打开 `.sql`/`.txt`；工作区增加「新建 SQL」「另存为」按钮。涉及 `src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机拖入/点击最近文件。遗留：最近文件只存路径，不校验文件是否仍存在；拖入只接受第一个文件。
 
 ---
 

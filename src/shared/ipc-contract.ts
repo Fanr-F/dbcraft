@@ -706,6 +706,7 @@ export interface DBCraftApi {
   };
   file: {
     openSql: () => Promise<SqlFileOpenResult>;
+    readSql: (path: string) => Promise<SqlFileOpenResult>;
     saveSql: (request: SqlFileSaveRequest) => Promise<SqlFileSaveResult>;
   };
   log: {
@@ -754,6 +755,7 @@ export const IPC_CHANNELS = {
   diagnosticsBackupDatabase: 'diagnostics:backup-database',
   diagnosticsRestoreDatabase: 'diagnostics:restore-database',
   fileOpenSql: 'file:open-sql',
+  fileReadSql: 'file:read-sql',
   fileSaveSql: 'file:save-sql',
   logWrite: 'log:write',
 } as const;

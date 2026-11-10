@@ -102,6 +102,7 @@ const api: DBCraftApi = {
   },
   file: {
     openSql: () => ipcRenderer.invoke(IPC_CHANNELS.fileOpenSql),
+    readSql: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.fileReadSql, { path }),
     saveSql: (request) => ipcRenderer.invoke(IPC_CHANNELS.fileSaveSql, request),
   },
   log: {

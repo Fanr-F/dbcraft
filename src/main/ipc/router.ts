@@ -54,6 +54,7 @@ import {
   exportSaveSchema,
   exportXlsxSchema,
   fileSaveSqlSchema,
+  fileReadSqlSchema,
   formatConnectionIssues,
   historyListSchema,
   logWriteSchema,
@@ -821,6 +822,26 @@ export function registerIpcHandlers(): void {
           return { ok: false, message: 'SQL 文件过大：上限 2 MB。' };
         }
         return { ok: true, path: picked.filePaths[0], content };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.fileReadSql,
+    async (_event, rawInput: unknown): Promise<SqlFileOpenResult> => {
+      const parsed = fileReadSqlSchema.safeParse(rawInput);
+      if (!parsed.success) return { ok: false, message: '文件路径无效。' };
+      try {
+        const content = await readFile(parsed.data.path, 'utf8');
+        if (content.length > 2_000_000) {
+          return { ok: false, message: 'SQL 文件过大：上限 2 MB。' };
+        }
+        return { ok: true, path: parsed.data.path, content };
       } catch (error) {
         return {
           ok: false,

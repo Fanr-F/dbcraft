@@ -89,6 +89,20 @@ const INITIAL_TAB: QueryTab = {
 const DRAFT_STORAGE_KEY = 'dbcraft:drafts:v1';
 const DRAFT_VERSION = 1;
 const MAX_DRAFT_TABS = 20;
+const RECENT_SQL_KEY = 'dbcraft:recent-sql:v1';
+const MAX_RECENT_SQL = 10;
+
+function loadRecentSqlFiles(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_SQL_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string').slice(0, MAX_RECENT_SQL)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 interface DraftPayload {
   version: number;
@@ -397,6 +411,7 @@ export default function App() {
   } | null>(null);
   const [browseConnectionId, setBrowseConnectionId] = useState<string | null>(null);
   const [connectionDialog, setConnectionDialog] = useState<ConnectionDialogState | null>(null);
+  const [recentSqlFiles, setRecentSqlFiles] = useState<string[]>(loadRecentSqlFiles);
   const [pendingDanger, setPendingDanger] = useState<{
     sql: string;
     match: DangerMatch;
@@ -3689,13 +3704,25 @@ export default function App() {
     return { ok: true };
   };
 
-  const openSqlFile = async () => {
+  const rememberRecentSqlFile = (path: string) => {
+    setRecentSqlFiles((current) => {
+      const next = [path, ...current.filter((item) => item !== path)].slice(0, MAX_RECENT_SQL);
+      try {
+        window.localStorage.setItem(RECENT_SQL_KEY, JSON.stringify(next));
+      } catch {
+        // 最近文件属于尽力而为。
+      }
+      return next;
+    });
+  };
+
+  const openSqlFile = async (path?: string) => {
     const api = window.dbcraft;
     if (!api) {
       showNotice('error', '未检测到 Electron IPC 桥接。');
       return;
     }
-    const result = await api.file.openSql();
+    const result = path ? await api.file.readSql(path) : await api.file.openSql();
     if (!result.ok) {
       if (!result.canceled) showNotice('error', result.message);
       return;
@@ -3718,10 +3745,28 @@ export default function App() {
     if (tab.connectionId) {
       void openTabSession(tab, tab.connectionId);
     }
+    rememberRecentSqlFile(result.path);
     showNotice('info', `已打开 ${fileName}。`);
   };
 
-  const saveSqlFile = async () => {
+  const newSqlFile = () => {
+    const number = tabCounter.current;
+    tabCounter.current += 1;
+    const tab: QueryTab = {
+      id: `query-${number}`,
+      title: `未命名 ${number}.sql`,
+      sql: 'SELECT 1;',
+      connectionId: activeTab.connectionId,
+      dirty: false,
+    };
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+    if (tab.connectionId) {
+      void openTabSession(tab, tab.connectionId);
+    }
+  };
+
+  const saveSqlFile = async (forceDialog = false) => {
     const api = window.dbcraft;
     if (!api) {
       showNotice('error', '未检测到 Electron IPC 桥接。');
@@ -3731,7 +3776,7 @@ export default function App() {
     const tab = activeTab;
     const result = await api.file.saveSql({
       content: tab.sql,
-      path: tab.filePath,
+      path: forceDialog ? undefined : tab.filePath,
       suggestedName: `${tab.title || 'query'}.sql`,
     });
     if (!result.ok) {
@@ -3747,8 +3792,27 @@ export default function App() {
           : item,
       ),
     );
+    rememberRecentSqlFile(result.path);
     showNotice('info', `已保存到 ${result.path}`);
   };
+
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    };
+    const onDrop = (event: DragEvent) => {
+      const file = event.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined;
+      if (!file?.path || !/\.(sql|txt)$/i.test(file.path)) return;
+      event.preventDefault();
+      void openSqlFile(file.path);
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [openSqlFile]);
 
   const formatActiveSql = () => {
     const tab = activeTab;
@@ -3988,6 +4052,10 @@ export default function App() {
           onRun={(sql) => void runQuery(sql)}
           onOpenSqlFile={() => void openSqlFile()}
           onSaveSqlFile={() => void saveSqlFile()}
+          onNewSqlFile={newSqlFile}
+          onSaveSqlFileAs={() => void saveSqlFile(true)}
+          recentSqlFiles={recentSqlFiles}
+          onOpenRecentSqlFile={(path) => void openSqlFile(path)}
           onFormatSql={formatActiveSql}
           onOpenHistory={() => setHistoryOpen(true)}
           insertRequest={insertRequest}
