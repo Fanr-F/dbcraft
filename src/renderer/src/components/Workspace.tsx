@@ -124,6 +124,8 @@ interface WorkspaceProps {
   pendingEdits: number;
   committing: boolean;
   selectedRow: number | null;
+  selectedRowRange?: { start: number; end: number } | null;
+  onRowRangeChange: (start: number, end: number) => void;
   canUndo: boolean;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
@@ -226,6 +228,8 @@ export function Workspace({
   pendingEdits,
   committing,
   selectedRow,
+  selectedRowRange,
+  onRowRangeChange,
   canUndo,
   onSelectTab,
   onCloseTab,
@@ -1064,11 +1068,17 @@ export function Workspace({
                 <button
                   type="button"
                   className="btn"
-                  disabled={running || selectedRow === null}
+                  disabled={
+                    running ||
+                    (selectedRow === null &&
+                      (!selectedRowRange || selectedRowRange.end < selectedRowRange.start))
+                  }
                   title={
-                    selectedRow === null
-                      ? '先点击要删除的行'
-                      : '删除当前选中行，提交时执行 DELETE'
+                    selectedRowRange && selectedRowRange.end > selectedRowRange.start
+                      ? `删除选中的 ${selectedRowRange.end - selectedRowRange.start + 1} 行，提交时执行 DELETE`
+                      : selectedRow === null
+                        ? '先点击要删除的行，或拖拽/Shift 选择多行'
+                        : '删除当前选中行，提交时执行 DELETE'
                   }
                   onClick={onDeleteRow}
                 >
@@ -1239,12 +1249,16 @@ export function Workspace({
             theme={theme}
             onCellChange={onCellChange}
             onCellsChange={onCellsChange}
-            onRowFocus={onRowFocus}
+            onRowFocus={(rowIndex) => {
+              onRowFocus(rowIndex);
+              onRowRangeChange(rowIndex, rowIndex);
+            }}
             onCellFocus={onCellFocus}
             focusedCell={focusedCell}
             insertRows={insertRows}
             onSetCellNull={onSetCellNull}
             onSetCellDefault={onSetCellDefault}
+            onRowRangeChange={onRowRangeChange}
             onHeaderClick={(column, additive) => {
               if (!activeTab.table || lockedByEdits) return;
               const current = activeSorts.find((item) => item.column === column);

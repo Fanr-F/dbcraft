@@ -27,6 +27,8 @@ interface ResultGridProps {
   insertRows?: number[];
   onSetCellNull?: (rowIndex: number, columnIndex: number) => void;
   onSetCellDefault?: (rowIndex: number, columnIndex: number) => void;
+  /** 拖拽/Shift 选择的行区间（含端点）。 */
+  onRowRangeChange?: (start: number, end: number) => void;
   /** 表数据页的布局记忆键；为空时不做持久化（普通查询结果）。 */
   layoutKey?: string;
 }
@@ -138,6 +140,7 @@ export function ResultGrid({
   insertRows = [],
   onSetCellNull,
   onSetCellDefault,
+  onRowRangeChange,
   layoutKey,
 }: ResultGridProps) {
   const gridRef = useRef<HTMLElement | null>(null);
@@ -352,6 +355,26 @@ export function ResultGrid({
   const menuColumn = cellMenu ? columns[cellMenu.columnIndex] : undefined;
   const menuReadOnly = menuColumn ? readOnlySet.has(menuColumn.name) : true;
   const menuIsInsert = cellMenu ? insertRows.includes(cellMenu.rowIndex) : false;
+
+  // 记录拖拽/Shift 选择的行区间，供批量删除。
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || !onRowRangeChange) return;
+
+    const handler = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          newRange?: { y?: number; y1?: number };
+        }>
+      ).detail;
+      const range = detail?.newRange;
+      if (!range || typeof range.y !== 'number' || typeof range.y1 !== 'number') return;
+      onRowRangeChange(Math.min(range.y, range.y1), Math.max(range.y, range.y1));
+    };
+
+    element.addEventListener('beforerange', handler);
+    return () => element.removeEventListener('beforerange', handler);
+  }, [onRowRangeChange]);
 
   // 列宽拖动结束后按表记忆。
   useEffect(() => {

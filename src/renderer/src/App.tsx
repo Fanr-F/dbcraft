@@ -412,6 +412,9 @@ export default function App() {
   );
   const [committingTabs, setCommittingTabs] = useState<Record<string, boolean>>({});
   const [tableSelection, setTableSelection] = useState<Record<string, number | null>>({});
+  const [tableSelectionRange, setTableSelectionRange] = useState<
+    Record<string, { start: number; end: number } | null>
+  >({});
   const [focusedCells, setFocusedCells] = useState<
     Record<string, { rowIndex: number; columnIndex: number } | null>
   >({});
@@ -2305,40 +2308,73 @@ export default function App() {
     const tab = activeTab;
     const meta = tableMetas[tab.id];
     const run = runs[tab.id];
-    const rowIndex = tableSelection[tab.id];
-    if (
-      !tab.table ||
-      !meta ||
-      !run ||
-      !tableEditable ||
-      rowIndex === null ||
-      rowIndex === undefined
-    ) {
+    if (!tab.table || !meta || !run || !tableEditable) return;
+
+    const range = tableSelectionRange[tab.id];
+    const single = tableSelection[tab.id];
+    let start: number;
+    let end: number;
+    if (range) {
+      start = range.start;
+      end = range.end;
+    } else if (single !== null && single !== undefined) {
+      start = single;
+      end = single;
+    } else {
       return;
     }
-    if (rowIndex < 0 || rowIndex >= run.rows.length) return;
 
-    if (activeNoPkMode && rowIndex < (editableFromRow ?? 0)) {
+    start = Math.max(0, start);
+    end = Math.min(run.rows.length - 1, end);
+    if (end < start) return;
+
+    if (activeNoPkMode && start < (editableFromRow ?? 0)) {
       showNotice('error', '无主键表不能删除已有行，只能删除本次新增的行。');
       return;
     }
 
-    snapshotTableEdit(tab.id);
-    const isInsert = pendingTableEdits[tab.id]?.inserts[rowIndex] !== undefined;
+    const indices: number[] = [];
+    for (let index = start; index <= end; index += 1) indices.push(index);
+    if (indices.length === 0) return;
+    if (
+      indices.length > 1 &&
+      !window.confirm(`删除选中的 ${indices.length} 行？提交后才会真正删除。`)
+    ) {
+      return;
+    }
 
-    let keys: Record<string, QueryCell> | null = null;
-    if (!isInsert) {
-      const keyIndexes = meta.primaryKey.map((name) =>
-        run.columns.findIndex((item) => item.name === name),
-      );
-      if (keyIndexes.some((index) => index < 0)) {
-        showNotice('error', '无法定位主键列，已取消本次删除。');
-        return;
+    const keyIndexes = meta.primaryKey.map((name) =>
+      run.columns.findIndex((item) => item.name === name),
+    );
+    const needsKeys =
+      meta.primaryKey.length > 0 && indices.some((index) => !pendingInsertAt(index));
+    if (needsKeys && keyIndexes.some((index) => index < 0)) {
+      showNotice('error', '无法定位主键列，已取消本次删除。');
+      return;
+    }
+
+    function pendingInsertAt(index: number): boolean {
+      return pendingTableEdits[tab.id]?.inserts[index] !== undefined;
+    }
+
+    snapshotTableEdit(tab.id);
+    let state: PendingTableEdits = structuredClone(
+      pendingTableEdits[tab.id] ?? emptyPendingTableEdits(),
+    );
+    const rows = run.rows.map((row) => [...row]);
+
+    for (const index of [...indices].sort((left, right) => right - left)) {
+      const isInsert = state.inserts[index] !== undefined;
+      let keys: Record<string, QueryCell> | null = null;
+      if (!isInsert) {
+        keys = {};
+        meta.primaryKey.forEach((name, keyIndex) => {
+          keys![name] = run.rows[index]?.[keyIndexes[keyIndex]!] ?? null;
+        });
       }
-      keys = {};
-      meta.primaryKey.forEach((name, index) => {
-        keys![name] = run.rows[rowIndex]?.[keyIndexes[index]!] ?? null;
-      });
+      rows.splice(index, 1);
+      state = shiftPendingRows(state, index);
+      if (keys) state.deletes[index] = keys;
     }
 
     setRuns((current) => {
@@ -2348,23 +2384,14 @@ export default function App() {
         ...current,
         [tab.id]: {
           ...target,
-          rows: target.rows.filter((_row, index) => index !== rowIndex),
-          rowCount: Math.max(0, target.rowCount - 1),
+          rows,
+          rowCount: Math.max(0, target.rowCount - indices.length),
         },
       };
     });
-
-    setPendingTableEdits((current) => {
-      const state = shiftPendingRows(
-        current[tab.id] ?? emptyPendingTableEdits(),
-        rowIndex,
-      );
-      if (!isInsert && keys) {
-        state.deletes[rowIndex] = keys;
-      }
-      return { ...current, [tab.id]: state };
-    });
+    setPendingTableEdits((current) => ({ ...current, [tab.id]: state }));
     setTableSelection((current) => ({ ...current, [tab.id]: null }));
+    setTableSelectionRange((current) => ({ ...current, [tab.id]: null }));
   };
 
   /** 撤销最近一步本地编辑；提交/回滚/重新查询后历史清空。 */
@@ -4314,6 +4341,10 @@ export default function App() {
           pendingEdits={pendingEditCount}
           committing={committing}
           selectedRow={tableSelection[activeTab.id] ?? null}
+          selectedRowRange={tableSelectionRange[activeTab.id] ?? null}
+          onRowRangeChange={(start, end) =>
+            setTableSelectionRange((current) => ({ ...current, [activeTab.id]: { start, end } }))
+          }
           canUndo={canUndoEdit}
           onSelectTab={setActiveTabId}
           onCloseTab={closeTab}
