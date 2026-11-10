@@ -1240,6 +1240,11 @@ export function Workspace({
                 )
                 .map((column) => column.name) ?? []
             }
+            requiredColumns={
+              tableMeta?.columns
+                .filter((column) => column.notNull && !column.autoIncrement)
+                .map((column) => column.name) ?? []
+            }
             sorts={activeSorts}
             layoutKey={
               activeTab.table

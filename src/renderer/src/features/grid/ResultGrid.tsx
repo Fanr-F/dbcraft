@@ -12,6 +12,8 @@ interface ResultGridProps {
   editable?: boolean;
   /** 主键 / 生成列等不允许编辑的列名。 */
   readOnlyColumns?: string[];
+  /** 非空且无自增的必填列名，用于列头标记。 */
+  requiredColumns?: string[];
   /** 无主键高风险模式：小于该行号的行保持只读。 */
   editableFromRow?: number;
   sorts?: Array<{ column: string; direction: 'asc' | 'desc' }>;
@@ -128,6 +130,7 @@ export function ResultGrid({
   rows,
   editable = false,
   readOnlyColumns = [],
+  requiredColumns = [],
   editableFromRow,
   sorts = [],
   theme = 'dark',
@@ -145,6 +148,7 @@ export function ResultGrid({
 }: ResultGridProps) {
   const gridRef = useRef<HTMLElement | null>(null);
   const readOnlySet = useMemo(() => new Set(readOnlyColumns), [readOnlyColumns]);
+  const requiredSet = useMemo(() => new Set(requiredColumns), [requiredColumns]);
   const [layout, setLayout] = useState<GridColumnLayout>(() => readLayout(layoutKey));
   const [cellMenu, setCellMenu] = useState<{
     x: number;
@@ -190,7 +194,9 @@ export function ResultGrid({
             sorts.length > 1 ? String(sortIndex + 1) : ''
           }`
         : '';
-      const label = sorted ? `${column.name} ${sortLabel}` : column.name;
+      const label = `${sorted ? `${column.name} ${sortLabel}` : column.name}${
+        requiredSet.has(column.name) ? ' *' : ''
+      }`;
       const dateLike = /date|time|year/i.test(column.declaredType ?? '');
       const pinned = visibleIndex < layout.pinned;
       const editor = typedEditor(column.declaredType);
@@ -217,7 +223,9 @@ export function ResultGrid({
           ...(column.declaredType
             ? {
                 columnProperties: () => ({
-                  title: `${column.name} · ${column.declaredType}`,
+                  title: `${column.name} · ${column.declaredType}${
+                    requiredSet.has(column.name) ? ' · 必填' : ''
+                  }`,
                 }),
               }
             : {}),
@@ -235,6 +243,7 @@ export function ResultGrid({
     layout.widths,
     layout.pinned,
     onHeaderClick,
+    requiredSet,
   ]);
 
   const source = useMemo(
