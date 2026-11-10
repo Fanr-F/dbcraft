@@ -231,6 +231,43 @@ expectSql(
   [5, 1, 1],
 );
 
+// 自增列默认拒绝显式 INSERT；显式开启后放行（UPDATE 仍拒绝）。
+expectThrows(
+  () =>
+    buildInsertStatement('sqlite', 'users', meta, {
+      kind: 'insert',
+      values: { id: 10, name: 'explicit' },
+    }),
+  '不可编辑',
+);
+expectSql(
+  buildInsertStatement(
+    'sqlite',
+    'users',
+    meta,
+    { kind: 'insert', values: { id: 10, name: 'explicit' } },
+    { allowIdentityInsert: true },
+  ),
+  'INSERT INTO "users" ("id", "name") VALUES (?, ?)',
+  [10, 'explicit'],
+);
+expectThrows(
+  () =>
+    buildUpdateStatement(
+      'sqlite',
+      'users',
+      meta,
+      {
+        kind: 'update',
+        keys: { id: 1 },
+        values: { id: 10 },
+        original: { id: 1 },
+      },
+      { allowIdentityInsert: true },
+    ),
+  '不可编辑',
+);
+
 // 带引号的标识符正确转义。
 const weirdMeta = {
   ...meta,

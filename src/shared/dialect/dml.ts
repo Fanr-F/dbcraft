@@ -65,18 +65,22 @@ function assertPrimaryKey(meta: TableMeta, keys: Record<string, QueryCell>): voi
 export interface BuildEditOptions {
   /** 允许显式修改主键列；UI 需二次确认。 */
   allowPrimaryKeyChange?: boolean;
+  /** 允许 INSERT 显式写入自增/IDENTITY 列。 */
+  allowIdentityInsert?: boolean;
 }
 
 function writableColumns(
   meta: TableMeta,
   columns: string[],
   options: BuildEditOptions,
+  identityAllowed = false,
 ): void {
   const byName = new Map(meta.columns.map((column) => [column.name, column]));
   for (const name of columns) {
     const column = byName.get(name);
     if (!column || !column.readOnly) continue;
     if (options.allowPrimaryKeyChange && column.primaryKey) continue;
+    if (identityAllowed && options.allowIdentityInsert && column.autoIncrement) continue;
     throw new Error(`列「${name}」不可编辑（主键或生成列）。`);
   }
 }
@@ -161,7 +165,7 @@ export function buildInsertStatement(
   const values = edit.values ?? {};
   const columns = Object.keys(values);
   assertKnownColumns(meta, columns, '新增');
-  writableColumns(meta, columns, options);
+  writableColumns(meta, columns, options, true);
 
   if (columns.length === 0) {
     const sql =

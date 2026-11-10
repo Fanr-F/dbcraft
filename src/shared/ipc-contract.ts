@@ -399,6 +399,8 @@ export interface TableApplyRequest {
   allowNoPrimaryKeyInsert?: boolean;
   /** 允许显式修改/插入主键列；UI 需二次确认。 */
   allowPrimaryKeyChange?: boolean;
+  /** 允许 INSERT 显式写入自增/IDENTITY 列；MSSQL 会包裹 SET IDENTITY_INSERT。 */
+  allowIdentityInsert?: boolean;
   connectionId?: string;
   connectionName?: string;
   database?: string;

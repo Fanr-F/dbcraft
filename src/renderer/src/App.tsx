@@ -424,6 +424,8 @@ export default function App() {
   const [noPkMode, setNoPkMode] = useState<Record<string, boolean>>({});
   /** 主键修改是高风险操作，必须为每个标签显式开启。 */
   const [pkEditMode, setPkEditMode] = useState<Record<string, boolean>>({});
+  /** 允许 INSERT 显式写入自增列；MSSQL 会使用 IDENTITY_INSERT。 */
+  const [identityInsertMode, setIdentityInsertMode] = useState<Record<string, boolean>>({});
   const [transactions, setTransactions] = useState<Record<string, TransactionRuntime>>({});
   const [treeCollapseSignal, setTreeCollapseSignal] = useState<{
     connectionId: string;
@@ -956,6 +958,10 @@ export default function App() {
   const activeNoPkMode = canEnableNoPk && noPkMode[activeTab.id] === true;
   const activePkEditMode =
     (activeTableMeta?.primaryKey.length ?? 0) > 0 && pkEditMode[activeTab.id] === true;
+  const canEnableIdentityInsert =
+    activeTableMeta?.columns.some((column) => column.autoIncrement) ?? false;
+  const activeIdentityInsert =
+    canEnableIdentityInsert && identityInsertMode[activeTab.id] === true;
   const tableEditable = activeTableMeta?.editable === true || activeNoPkMode;
   const activeInsertCount = Object.keys(
     pendingTableEdits[activeTab.id]?.inserts ?? {},
@@ -1981,13 +1987,16 @@ export default function App() {
         : undefined;
       const row = rows[rowIndex];
       const existing = state.updates[rowIndex];
+      const isInsert = state.inserts[rowIndex] !== undefined;
+      const identityEditable =
+        activeIdentityInsert && columnMeta?.autoIncrement === true && isInsert;
       const readOnly =
         columnMeta !== undefined &&
         columnMeta.readOnly &&
-        !(activePkEditMode && columnMeta.primaryKey);
+        !(activePkEditMode && columnMeta.primaryKey) &&
+        !identityEditable;
       if (!column || !columnMeta || readOnly || !row) continue;
 
-      const isInsert = state.inserts[rowIndex] !== undefined;
       // 无主键高风险模式只允许新增行，已有行一律不可改。
       if (activeNoPkMode && !isInsert) continue;
 
@@ -2118,6 +2127,7 @@ export default function App() {
         edits,
         allowNoPrimaryKeyInsert: activeNoPkMode,
         allowPrimaryKeyChange: activePkEditMode,
+        allowIdentityInsert: activeIdentityInsert,
         connectionId: connection?.id,
         connectionName: connection?.input.name,
         database:
@@ -2319,6 +2329,27 @@ export default function App() {
       next
         ? '已允许修改主键列；双击主键单元格可编辑，提交前会再次确认。'
         : '已恢复主键只读。',
+    );
+  };
+
+  const toggleIdentityInsertMode = (next: boolean) => {
+    const tab = activeTab;
+    if (countPendingEdits(pendingTableEdits[tab.id]) > 0) {
+      showNotice('error', '请先提交或回滚当前修改，再切换自增列写入模式。');
+      return;
+    }
+    if (
+      next &&
+      !window.confirm(
+        '允许在新增行中显式写入自增列？MSSQL 会临时开启 IDENTITY_INSERT，提交后自动关闭。',
+      )
+    ) {
+      return;
+    }
+    setIdentityInsertMode((current) => ({ ...current, [tab.id]: next }));
+    showNotice(
+      'info',
+      next ? '新增行现在可以填写自增列。' : '新增行将使用数据库自增值。',
     );
   };
 
@@ -4182,6 +4213,9 @@ export default function App() {
           noPkMode={activeNoPkMode}
           allowPrimaryKeyEdit={activePkEditMode}
           onTogglePrimaryKeyEdit={togglePkEditMode}
+          canEnableIdentityInsert={canEnableIdentityInsert}
+          allowIdentityInsert={activeIdentityInsert}
+          onToggleIdentityInsert={toggleIdentityInsertMode}
           editableFromRow={editableFromRow}
           onToggleNoPk={toggleNoPkMode}
           pendingEdits={pendingEditCount}

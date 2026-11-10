@@ -25,6 +25,7 @@ import type {
   TableMetaResult,
 } from '../../shared/ipc-contract';
 import { buildTableEditStatements } from '../../shared/dialect/dml';
+import { quoteIdent } from '../../shared/dialect/identifiers';
 import type { DatabaseSession } from './DatabaseSession';
 import { MariaSession } from './mariadb/MariaSession';
 import { MssqlSession } from './mssql/MssqlSession';
@@ -1160,6 +1161,7 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
   if (request.edits.length === 0) return failed('没有待提交的修改。');
 
   let statements;
+  let identityInsertNeeded = false;
   try {
     const meta = await session.getTableMeta(request.table, 'table');
     // 无主键表默认只读；高风险开关只允许 INSERT，UPDATE/DELETE 无法安全定位行。
@@ -1171,8 +1173,20 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
     if (!meta.editable && !insertOnly) {
       return failed(meta.reason ?? '该表不可编辑。');
     }
+    const identityColumn = meta.columns.find((column) => column.autoIncrement);
+    identityInsertNeeded =
+      request.allowIdentityInsert === true &&
+      session.dialect === 'mssql' &&
+      identityColumn !== undefined &&
+      request.edits.some(
+        (edit) =>
+          edit.kind === 'insert' &&
+          edit.values !== undefined &&
+          identityColumn.name in edit.values,
+      );
     statements = buildTableEditStatements(session.dialect, request.table, meta, request.edits, {
       allowPrimaryKeyChange: request.allowPrimaryKeyChange === true,
+      allowIdentityInsert: request.allowIdentityInsert === true,
     });
   } catch (error) {
     return failed(error instanceof Error ? error.message : String(error));
@@ -1195,8 +1209,15 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
 
   let applied = 0;
   let conflict = false;
+  let identityInsertOn = false;
+  const identityTable = quoteIdent('mssql', request.table);
 
   try {
+    if (identityInsertNeeded) {
+      await session.query(`SET IDENTITY_INSERT ${identityTable} ON`);
+      identityInsertOn = true;
+    }
+
     for (let index = 0; index < statements.length; index += 1) {
       const statement = statements[index]!;
       const edit = request.edits[index]!;
@@ -1212,8 +1233,16 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
       applied += 1;
     }
 
+    if (identityInsertOn) {
+      await session.query(`SET IDENTITY_INSERT ${identityTable} OFF`);
+      identityInsertOn = false;
+    }
     await session.query('COMMIT');
   } catch (error) {
+    // SET IDENTITY_INSERT 是会话级状态，回滚事务不会自动关闭，必须显式复位。
+    if (identityInsertOn) {
+      await session.query(`SET IDENTITY_INSERT ${identityTable} OFF`).catch(() => undefined);
+    }
     await session.query('ROLLBACK').catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
     log.warn('表格编辑回滚', {

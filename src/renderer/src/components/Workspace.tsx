@@ -116,6 +116,9 @@ interface WorkspaceProps {
   noPkMode: boolean;
   allowPrimaryKeyEdit: boolean;
   onTogglePrimaryKeyEdit: (next: boolean) => void;
+  canEnableIdentityInsert: boolean;
+  allowIdentityInsert: boolean;
+  onToggleIdentityInsert: (next: boolean) => void;
   editableFromRow?: number;
   onToggleNoPk: (next: boolean) => void;
   pendingEdits: number;
@@ -211,6 +214,9 @@ export function Workspace({
   noPkMode,
   allowPrimaryKeyEdit,
   onTogglePrimaryKeyEdit,
+  canEnableIdentityInsert,
+  allowIdentityInsert,
+  onToggleIdentityInsert,
   editableFromRow,
   onToggleNoPk,
   pendingEdits,
@@ -1077,6 +1083,17 @@ export function Workspace({
                     {allowPrimaryKeyEdit ? '主键可改（谨慎）' : '允许修改主键'}
                   </button>
                 )}
+                {canEnableIdentityInsert && (
+                  <button
+                    type="button"
+                    className={allowIdentityInsert ? 'btn btn-danger' : 'btn'}
+                    disabled={running}
+                    title="新增行可显式填写自增列；MSSQL 使用 IDENTITY_INSERT"
+                    onClick={() => onToggleIdentityInsert(!allowIdentityInsert)}
+                  >
+                    {allowIdentityInsert ? '自增列可写（谨慎）' : '允许写自增列'}
+                  </button>
+                )}
               </>
             )}
             {lockedByEdits && (
@@ -1200,7 +1217,9 @@ export function Workspace({
               tableMeta?.columns
                 .filter(
                   (column) =>
-                    column.readOnly && !(allowPrimaryKeyEdit && column.primaryKey),
+                    column.readOnly &&
+                    !(allowPrimaryKeyEdit && column.primaryKey) &&
+                    !(allowIdentityInsert && column.autoIncrement),
                 )
                 .map((column) => column.name) ?? []
             }
