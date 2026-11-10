@@ -33,6 +33,7 @@ import {
 import { splitSqlStatements } from './utils/sql-script';
 import { formatSql } from './utils/sql-format';
 import { buildTablePageQuery, buildTablePreviewSql, quoteIdent } from '@shared/dialect/identifiers';
+import type { TableSort } from '@shared/dialect/identifiers';
 import { inspectDangerousSql, type DangerMatch } from '@shared/dialect/safety';
 import { explainErrorText, explainQueryError } from '@shared/errors';
 import { serializeConnections } from '@shared/connection-export';
@@ -345,6 +346,15 @@ function shiftPendingRows(state: PendingTableEdits, removedIndex: number): Pendi
     inserts: shift(state.inserts),
     deletes: shift(state.deletes),
   };
+}
+
+/** 表数据页当前排序；sorts 优先，兼容旧草稿里的单列 sort。 */
+function tableSorts(
+  table: QueryTab['table'] | undefined,
+): Array<{ column: string; direction: 'asc' | 'desc' }> {
+  if (!table) return [];
+  if (table.sorts && table.sorts.length > 0) return table.sorts;
+  return table.sort ? [table.sort] : [];
 }
 
 function createId(prefix: string): string {
@@ -2677,7 +2687,7 @@ export default function App() {
       tab.table.name,
       tab.table.pageSize,
       page * tab.table.pageSize,
-      tab.table.sort,
+      tableSorts(tab.table),
       tab.table.filter,
     );
     const nextTab: QueryTab = {
@@ -2704,7 +2714,7 @@ export default function App() {
       tab.table.name,
       pageSize,
       0,
-      tab.table.sort,
+      tableSorts(tab.table),
       tab.table.filter,
     );
     const nextTab: QueryTab = {
@@ -2717,7 +2727,11 @@ export default function App() {
     await runQuery(query.sql, nextTab, query.params, { internal: true });
   };
 
-  const changeTableSort = async (column: string, direction: 'asc' | 'desc') => {
+  const changeTableSort = async (
+    column: string,
+    direction: 'asc' | 'desc',
+    additive = false,
+  ) => {
     const tab = activeTab;
     const connection = activeConnection;
     if (!tab.table || !connection) return;
@@ -2726,19 +2740,34 @@ export default function App() {
       return;
     }
 
-    const sort = column ? { column, direction } : undefined;
+    const current = tableSorts(tab.table);
+    let sorts: TableSort[] = [];
+    if (column) {
+      if (!additive) {
+        sorts = [{ column, direction }];
+      } else {
+        const index = current.findIndex((item) => item.column === column);
+        sorts =
+          index >= 0
+            ? current.map((item, itemIndex) =>
+                itemIndex === index ? { column, direction } : item,
+              )
+            : [...current, { column, direction }];
+      }
+    }
+    const sort = sorts[0];
     const query = buildTablePageQuery(
       connection.input.type,
       tab.table.name,
       tab.table.pageSize,
       0,
-      sort,
+      sorts,
       tab.table.filter,
     );
     const nextTab: QueryTab = {
       ...tab,
       sql: query.sql,
-      table: { ...tab.table, page: 0, sort, params: query.params },
+      table: { ...tab.table, page: 0, sort, sorts, params: query.params },
     };
 
     setTabs((current) => current.map((item) => (item.id === tab.id ? nextTab : item)));
@@ -2760,7 +2789,7 @@ export default function App() {
       tab.table.name,
       tab.table.pageSize,
       0,
-      tab.table.sort,
+      tableSorts(tab.table),
       filter,
     );
     const nextTab: QueryTab = {
@@ -3656,7 +3685,7 @@ export default function App() {
         tab.table.name,
         10_000,
         0,
-        tab.table.sort,
+        tableSorts(tab.table),
         tab.table.filter,
       );
       sql = query.sql;

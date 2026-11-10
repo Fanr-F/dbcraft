@@ -56,13 +56,22 @@ export interface TablePageQuery {
   params: QueryCell[];
 }
 
-/** 表数据页查询：分页 + 服务端排序 + 服务端 LIKE 过滤（参数化）。 */
+/** 单列排序与多列排序共用；数组顺序就是 ORDER BY 的优先级。 */
+export function normalizeTableSorts(sort?: TableSort | TableSort[] | null): TableSort[] {
+  if (!sort) return [];
+  const list = Array.isArray(sort) ? sort : [sort];
+  return list
+    .filter((item) => item && item.column)
+    .map((item) => ({ column: item.column, direction: item.direction === 'desc' ? 'desc' : 'asc' }));
+}
+
+/** 表数据页查询：分页 + 服务端多列排序 + 服务端 LIKE 过滤（参数化）。 */
 export function buildTablePageQuery(
   type: DatabaseType,
   name: string,
   limit: number,
   offset: number,
-  sort?: TableSort | null,
+  sort?: TableSort | TableSort[] | null,
   filter?: TableFilter | null,
 ): TablePageQuery {
   const target = quoteIdent(type, name);
@@ -75,8 +84,14 @@ export function buildTablePageQuery(
     params.push(`%${escapeLikeValue(filter.value)}%`);
   }
 
-  const order = sort?.column
-    ? ` ORDER BY ${quoteIdent(type, sort.column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
+  const sorts = normalizeTableSorts(sort);
+  const order = sorts.length
+    ? ` ORDER BY ${sorts
+        .map(
+          (item) =>
+            `${quoteIdent(type, item.column)} ${item.direction === 'desc' ? 'DESC' : 'ASC'}`,
+        )
+        .join(', ')}`
     : '';
 
   if (type === 'mssql') {
@@ -99,7 +114,7 @@ export function buildTablePageSql(
   name: string,
   limit: number,
   offset: number,
-  sort?: TableSort | null,
+  sort?: TableSort | TableSort[] | null,
   filter?: TableFilter | null,
 ): string {
   return buildTablePageQuery(type, name, limit, offset, sort, filter).sql;

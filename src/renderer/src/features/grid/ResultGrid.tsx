@@ -12,11 +12,11 @@ interface ResultGridProps {
   readOnlyColumns?: string[];
   /** 无主键高风险模式：小于该行号的行保持只读。 */
   editableFromRow?: number;
-  sort?: { column: string; direction: 'asc' | 'desc' } | null;
+  sorts?: Array<{ column: string; direction: 'asc' | 'desc' }>;
   theme?: 'dark' | 'light';
   onCellChange?: (rowIndex: number, columnIndex: number, value: QueryCell) => void;
   onCellsChange?: (changes: GridCellChange[]) => void;
-  onHeaderClick?: (columnName: string) => void;
+  onHeaderClick?: (columnName: string, additive: boolean) => void;
   onRowFocus?: (rowIndex: number) => void;
   onCellFocus?: (rowIndex: number, columnIndex: number) => void;
 }
@@ -75,7 +75,7 @@ export function ResultGrid({
   editable = false,
   readOnlyColumns = [],
   editableFromRow,
-  sort = null,
+  sorts = [],
   theme = 'dark',
   onCellChange,
   onCellsChange,
@@ -95,10 +95,14 @@ export function ResultGrid({
         0,
       );
       const size = Math.min(360, Math.max(120, column.name.length * 9 + 56, contentWidth));
-      const sorted = sort?.column === column.name;
-      const label = sorted
-        ? `${column.name} ${sort?.direction === 'desc' ? '↓' : '↑'}`
-        : column.name;
+      const sortIndex = sorts.findIndex((item) => item.column === column.name);
+      const sorted = sortIndex >= 0;
+      const sortLabel = sorted
+        ? `${sorts[sortIndex]!.direction === 'desc' ? '↓' : '↑'}${
+            sorts.length > 1 ? String(sortIndex + 1) : ''
+          }`
+        : '';
+      const label = sorted ? `${column.name} ${sortLabel}` : column.name;
       const dateLike = /date|time|year/i.test(column.declaredType ?? '');
 
       return {
@@ -126,7 +130,7 @@ export function ResultGrid({
           : {}),
       };
     }) as any[];
-  }, [columns, rows, editable, readOnlySet, editableFromRow, sort]);
+  }, [columns, rows, editable, readOnlySet, editableFromRow, sorts]);
 
   const source = useMemo(
     () =>
@@ -186,12 +190,16 @@ export function ResultGrid({
     if (!element || !onHeaderClick) return;
 
     const handler = (event: Event) => {
-      const column = (event as CustomEvent<{ prop?: string }>).detail;
+      const column = (
+        event as CustomEvent<{ prop?: string; originalEvent?: MouseEvent }>
+      ).detail;
       if (!column || typeof column.prop !== 'string' || !column.prop.startsWith('c')) return;
 
       const index = Number(column.prop.slice(1));
       const target = columns[index];
-      if (target) onHeaderClick(target.name);
+      if (target) {
+        onHeaderClick(target.name, Boolean(column.originalEvent?.shiftKey));
+      }
     };
 
     element.addEventListener('headerclick', handler);

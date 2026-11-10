@@ -102,7 +102,7 @@ interface WorkspaceProps {
   onCopyCell: () => void;
   onTablePageChange: (page: number) => void;
   onTablePageSizeChange: (pageSize: number) => void;
-  onTableSortChange: (column: string, direction: 'asc' | 'desc') => void;
+  onTableSortChange: (column: string, direction: 'asc' | 'desc', additive?: boolean) => void;
   onTableFilterChange: (column: string, value: string) => void;
   onCellChange: (rowIndex: number, columnIndex: number, value: QueryCell) => void;
   onCellsChange: (
@@ -244,7 +244,10 @@ export function Workspace({
     activeTab.table?.filter?.column ?? '',
   );
   const [filterValue, setFilterValue] = useState(activeTab.table?.filter?.value ?? '');
-  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(
+  const activeSorts =
+    activeTab.table?.sorts ??
+    (activeTab.table?.sort ? [activeTab.table.sort] : []);
+  const primarySort = activeSorts[0];  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(
     null,
   );
 
@@ -761,12 +764,12 @@ export function Workspace({
             <select
               className="page-size"
               aria-label="排序字段"
-              value={activeTab.table.sort?.column ?? ''}
+              value={primarySort?.column ?? ''}
               disabled={running || lockedByEdits || run.columns.length === 0}
               onChange={(event) =>
                 onTableSortChange(
                   event.target.value,
-                  activeTab.table!.sort?.direction ?? 'asc',
+                  primarySort?.direction ?? 'asc',
                 )
               }
             >
@@ -778,19 +781,37 @@ export function Workspace({
               ))}
             </select>
 
-            {activeTab.table.sort && (
+            {primarySort && (
               <button
                 type="button"
                 className="btn"
                 disabled={running || lockedByEdits}
                 onClick={() =>
                   onTableSortChange(
-                    activeTab.table!.sort!.column,
-                    activeTab.table!.sort!.direction === 'asc' ? 'desc' : 'asc',
+                    primarySort.column,
+                    primarySort.direction === 'asc' ? 'desc' : 'asc',
                   )
                 }
               >
-                {activeTab.table.sort.direction === 'asc' ? '升序' : '降序'}
+                {primarySort.direction === 'asc' ? '升序' : '降序'}
+              </button>
+            )}
+            {activeSorts.map((item, index) => (
+              <span key={`sort-${item.column}`} className="badge badge-ok">
+                {index + 1}. {item.column} {item.direction === 'asc' ? '↑' : '↓'}
+              </span>
+            ))}
+            {activeSorts.length > 1 && (
+              <span className="pane-hint">Shift+点击列头追加排序</span>
+            )}
+            {activeSorts.length > 0 && (
+              <button
+                type="button"
+                className="btn"
+                disabled={running || lockedByEdits}
+                onClick={() => onTableSortChange('', 'asc')}
+              >
+                清除排序
               </button>
             )}
 
@@ -1006,22 +1027,23 @@ export function Workspace({
               tableMeta?.columns.filter((column) => column.readOnly).map((column) => column.name) ??
               []
             }
-            sort={activeTab.table?.sort ?? null}
+            sorts={activeSorts}
             theme={theme}
             onCellChange={onCellChange}
             onCellsChange={onCellsChange}
             onRowFocus={onRowFocus}
             onCellFocus={onCellFocus}
-            onHeaderClick={(column) => {
+            onHeaderClick={(column, additive) => {
               if (!activeTab.table || lockedByEdits) return;
-              const current = activeTab.table.sort;
+              const current = activeSorts.find((item) => item.column === column);
               onTableSortChange(
                 column,
-                current?.column === column
+                current
                   ? current.direction === 'asc'
                     ? 'desc'
                     : 'asc'
                   : 'asc',
+                additive,
               );
             }}
           />

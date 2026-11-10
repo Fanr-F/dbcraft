@@ -50,6 +50,11 @@ export interface QueryTab {
       column: string;
       direction: 'asc' | 'desc';
     };
+    /** 多列排序；存在时优先于 sort。数组顺序即 ORDER BY 优先级。 */
+    sorts?: Array<{
+      column: string;
+      direction: 'asc' | 'desc';
+    }>;
     filter?: {
       column: string;
       value: string;

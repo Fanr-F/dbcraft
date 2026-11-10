@@ -59,6 +59,21 @@ assert(
     'SELECT * FROM [users] ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 200 ROWS ONLY;',
   'mssql default order wrong',
 );
+assert(
+  buildTablePageSql('sqlite', 'users', 200, 0, [
+    { column: 'name', direction: 'asc' },
+    { column: 'id', direction: 'desc' },
+  ]) === 'SELECT * FROM "users" ORDER BY "name" ASC, "id" DESC LIMIT 200 OFFSET 0;',
+  'sqlite multi-column sort wrong',
+);
+assert(
+  buildTablePageSql('mssql', 'users', 200, 0, [
+    { column: 'name', direction: 'asc' },
+    { column: 'id', direction: 'desc' },
+  ]) ===
+    'SELECT * FROM [users] ORDER BY [name] ASC, [id] DESC OFFSET 0 ROWS FETCH NEXT 200 ROWS ONLY;',
+  'mssql multi-column sort wrong',
+);
 
 assert(
   buildTablePreviewSql('sqlite', 'users', 100) === 'SELECT * FROM "users" LIMIT 100;',
