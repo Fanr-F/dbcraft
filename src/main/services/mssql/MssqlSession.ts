@@ -484,6 +484,7 @@ export class MssqlSession implements DatabaseSession {
         defaultValue: column.defaultDefinition,
         defaultConstraint: column.defaultConstraintName,
         readOnly,
+        ...(column.rowversion ? { rowversion: true } : {}),
       };
     });
 

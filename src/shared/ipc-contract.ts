@@ -319,6 +319,8 @@ export interface TableColumnMeta {
   defaultConstraint?: string | null;
   /** 主键与生成列不允许在网格中直接编辑。 */
   readOnly: boolean;
+  /** MSSQL rowversion/timestamp；用于乐观锁。 */
+  rowversion?: boolean;
 }
 
 export interface TableMeta {

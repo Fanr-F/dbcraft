@@ -2048,6 +2048,15 @@ export default function App() {
       if (!(columnMeta.name in original)) {
         original[columnMeta.name] = previous;
       }
+      if (!existing) {
+        const rowversion = meta.columns.find((item) => item.rowversion);
+        const rowversionIndex = rowversion
+          ? run.columns.findIndex((item) => item.name === rowversion.name)
+          : -1;
+        if (rowversion && rowversionIndex >= 0) {
+          original[rowversion.name] = row[rowversionIndex] ?? null;
+        }
+      }
       const values: Record<string, QueryCell> = { ...(existing?.values ?? {}) };
 
       if (original[columnMeta.name] === next) {
@@ -2152,6 +2161,15 @@ export default function App() {
       const previous = run.rows[rowIndex]?.[columnIndex] ?? null;
       const original: Record<string, QueryCell> = { ...(existing?.original ?? {}) };
       if (!(columnMeta.name in original)) original[columnMeta.name] = previous;
+      if (!existing) {
+        const rowversion = meta.columns.find((item) => item.rowversion);
+        const rowversionIndex = rowversion
+          ? run.columns.findIndex((item) => item.name === rowversion.name)
+          : -1;
+        if (rowversion && rowversionIndex >= 0) {
+          original[rowversion.name] = run.rows[rowIndex]?.[rowversionIndex] ?? null;
+        }
+      }
       const values: Record<string, QueryCell> = { ...(existing?.values ?? {}) };
       if (mode === 'null' && previous === null) {
         // 原本就是 NULL，右键设为 NULL 不产生数据库写入。

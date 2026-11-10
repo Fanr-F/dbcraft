@@ -106,7 +106,10 @@ export function buildUpdateStatement(
 
   for (const name of originalColumns) {
     if (!(name in values)) {
-      throw new Error(`原始值列「${name}」不在本次更新范围内。`);
+      const column = meta.columns.find((item) => item.name === name);
+      if (!column?.rowversion) {
+        throw new Error(`原始值列「${name}」不在本次更新范围内。`);
+      }
     }
   }
 
@@ -156,7 +159,10 @@ export function buildConflictCheckStatement(
     assertKnownColumns(meta, Object.keys(original), '冲突预检');
     for (const name of Object.keys(original)) {
       if (!(name in (edit.values ?? {}))) {
-        throw new Error(`原始值列「${name}」不在本次更新范围内。`);
+        const column = meta.columns.find((item) => item.name === name);
+        if (!column?.rowversion) {
+          throw new Error(`原始值列「${name}」不在本次更新范围内。`);
+        }
       }
       params.push(original[name] ?? null);
       conditions.push(sameValue(type, name, placeholder(type, params.length - 1)));

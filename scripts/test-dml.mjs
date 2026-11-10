@@ -202,6 +202,34 @@ expectThrows(
   '第 2 项编辑无效',
 );
 
+// MSSQL rowversion 不是普通更新值，但可作为乐观锁条件。
+const rowversionMeta = {
+  ...meta,
+  columns: [
+    ...meta.columns,
+    {
+      name: 'rv',
+      declaredType: 'rowversion',
+      notNull: true,
+      primaryKey: false,
+      autoIncrement: false,
+      defaultValue: null,
+      readOnly: true,
+      rowversion: true,
+    },
+  ],
+};
+expectSql(
+  buildUpdateStatement('mssql', 'users', rowversionMeta, {
+    kind: 'update',
+    keys: { id: 1 },
+    values: { name: 'alice' },
+    original: { name: 'old', rv: 'AAAA' },
+  }),
+  'UPDATE [users] SET [name] = @p1 WHERE [id] = @p2 AND ([name] = @p3 OR ([name] IS NULL AND @p3 IS NULL)) AND ([rv] = @p4 OR ([rv] IS NULL AND @p4 IS NULL))',
+  ['alice', 1, 'old', 'AAAA'],
+);
+
 // 冲突预检使用与 UPDATE 相同的乐观锁条件；INSERT 不需要预检。
 expectSql(
   buildConflictCheckStatement('sqlite', 'users', meta, {
