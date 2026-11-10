@@ -88,6 +88,7 @@ interface WorkspaceProps {
   /** 历史记录的一次性插入请求，由 SqlEditor 在光标处应用。 */
   insertRequest: { text: string; token: number } | null;
   completionItems: string[];
+  completionDetails?: Record<string, string>;
   onRequestCompletion: (context: CompletionContext) => Promise<string[]>;
   onCancel: () => void;
   onReconnect: () => void;
@@ -175,6 +176,7 @@ export function Workspace({
   onOpenHistory,
   insertRequest,
   completionItems,
+  completionDetails,
   onRequestCompletion,
   onCancel,
   onReconnect,
@@ -607,6 +609,7 @@ export function Workspace({
           onOpenHistory={onOpenHistory}
           insertRequest={insertRequest}
           completionItems={completionItems}
+          completionDetails={completionDetails}
           onRequestCompletion={onRequestCompletion}
           dialect={connectionType}
         />

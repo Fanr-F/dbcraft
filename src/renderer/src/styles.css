@@ -1092,6 +1092,10 @@ button:disabled {
 }
 
 .sql-completion-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   padding: 4px 8px;
   border: none;
   border-radius: 5px;
@@ -1104,6 +1108,12 @@ button:disabled {
     monospace;
   font-size: 12px;
   text-align: left;
+}
+
+.sql-completion-detail {
+  color: var(--faint);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .sql-completion-item.is-active {
@@ -2559,7 +2569,7 @@ button:disabled {
   color: var(--text);
 }
 
-/* ·þÎñÆ÷·Ö×é£¨PRD v0.20 Q21£© */
+/* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½é£¨PRD v0.20 Q21ï¿½ï¿½ */
 .connection-server-head {
   display: flex;
   align-items: center;
@@ -2593,7 +2603,7 @@ button:disabled {
   font-size: 10px;
 }
 
-/* º¯ÊýÇ©ÃûÌáÊ¾£¨PRD v0.20 ²¹È« Phase 2£© */
+/* ï¿½ï¿½ï¿½ï¿½Ç©ï¿½ï¿½ï¿½ï¿½Ê¾ï¿½ï¿½PRD v0.20 ï¿½ï¿½È« Phase 2ï¿½ï¿½ */
 .sql-signature {
   position: absolute;
   right: 16px;
@@ -2624,7 +2634,7 @@ button:disabled {
   font-weight: 600;
 }
 
-/* ¶àÓï¾äÖ´ÐÐ£º½á¹ûÒ³Ç©ÓëÏûÏ¢Ãæ°å */
+/* ï¿½ï¿½ï¿½ï¿½ï¿½Ö´ï¿½Ð£ï¿½ï¿½ï¿½ï¿½Ò³Ç©ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ */
 .result-tabs {
   display: flex;
   gap: 4px;

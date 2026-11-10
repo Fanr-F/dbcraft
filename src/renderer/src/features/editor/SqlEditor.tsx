@@ -27,6 +27,8 @@ interface SqlEditorProps {
   insertRequest?: { text: string; token: number } | null;
   /** 关键字 + 当前连接对象名。 */
   completionItems?: string[];
+  /** 补全项的类型详情（列名 → 类型）。 */
+  completionDetails?: Record<string, string>;
   /** 按光标上下文异步补充列/别名等候选。 */
   onRequestCompletion?: (context: CompletionContext) => Promise<string[]>;
   /** 当前连接的方言；用于函数签名提示。 */
@@ -48,6 +50,7 @@ export function SqlEditor({
   onOpenHistory,
   insertRequest,
   completionItems = [],
+  completionDetails,
   onRequestCompletion,
   dialect = null,
 }: SqlEditorProps) {
@@ -328,6 +331,9 @@ export function SqlEditor({
               onClick={() => acceptCompletion(index)}
             >
               {item}
+              {completionDetails?.[item] && (
+                <span className="sql-completion-detail">{completionDetails[item]}</span>
+              )}
             </button>
           ))}
         </div>

@@ -1175,7 +1175,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 | K-01 | DDL：唯一约束/索引变更进设计页签、CHECK/外键编辑、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
 | K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid` | §5、§3.4.5 | P1 | 🟡 |
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出 | §3.6.4 | P2 | ❌ |
-| K-04 | 编辑器：版本感知补全、类型提示、错误波浪线、`GO 5`、驱动级多结果集、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
+| K-04 | 编辑器：SQLite ATTACH 库内对象、MySQL 跨库列、错误波浪线、`GO 5`、驱动级多结果集、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
 | K-05 | 历史：复杂形式的敏感字段脱敏 | §3.4.3 | P2 | 🟡 |
 | K-06 | Agent：运行中/空闲状态、>1000 作业的服务端分页（`agent-queries.ts:87` 列表无 TOP/OFFSET）、右键菜单完整化、权限不足/Agent XPs 真机回归 | §3.4.8 | P1/P2 | 🟡 |
 | K-07 | 设置：字体族/Tab 宽度、补全开关与延迟、快捷键自定义、数据目录迁移、网格偏好 | §3.4.7 | P2 | ❌ |
@@ -1495,6 +1495,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-55 M02-06 驱动消息采集**：诉求是把 MSSQL `PRINT`/`RAISERROR` 与 MySQL/MariaDB warning 显示到结果区。变更：`QueryResult` 增加 `messages`；MSSQL `execOn` 监听 connection 的 `infoMessage` 并随查询返回；MySQL/MariaDB 查询后读取 `SHOW WARNINGS`；`RunState` 增加 `messages`，Workspace 在结果区显示驱动消息。涉及 `src/shared/ipc-contract.ts`、`src/main/services/mssql/MssqlSession.ts`、`src/main/services/mysql/MysqlSession.ts`、`src/main/services/mariadb/MariaSession.ts`、`src/renderer/src/types.ts`、`src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 MSSQL/MySQL 上验证 PRINT/RAISERROR/warning。遗留：仍不是驱动级多结果集，多语句继续逐条 IPC；`SHOW WARNINGS` 每查询多一次往返；驱动消息未进入脚本消息面板，只在结果区顶部显示。
 - **W-20261109-56 M04-10/R-07 库级 DDL 覆盖存储过程**：诉求是库级 DDL 不再跳过存储过程。变更：`DdlObjectKind` 增加 `procedure`；MSSQL `getDdl` 对 `V`/`P` 都读 `sys.sql_modules`；MySQL/MariaDB 对 procedure 用 `SHOW CREATE PROCEDURE`；SQLite 明确报不支持；库级 DDL 循环不再跳过 procedure。涉及 `src/shared/ipc-contract.ts`、`src/main/services/mssql/MssqlSession.ts`、`src/main/services/mysql/MysqlSession.ts`、`src/main/services/mariadb/MariaSession.ts`、`src/main/services/sqlite/SqliteSession.ts`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实实例生成库级脚本。遗留：MSSQL 存储过程定义可能依赖 `SET ANSI_NULLS` 等上下文；未补真机回归。
 - **W-20261109-57 M07-02 跟随系统主题**：诉求是主题可跟随系统。变更：`AppSettings.theme` 增加 `system`；设置归一化允许 system；设置面板增加「跟随系统」；App 监听 `prefers-color-scheme` 计算有效主题并设置 `data-theme`，RevoGrid 使用有效主题。涉及 `src/shared/ipc-contract.ts`、`src/shared/settings.ts`、`src/renderer/src/components/SettingsDialog.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run test:settings`、`npm run build` 通过；未在真实 Electron 中切换系统主题验收。遗留：主题切换只影响 CSS 与网格，窗口原生主题未处理。
+- **W-20261109-58 M02-11 补全增强**：诉求是补版本感知、类型提示和 `SELECT *` 展开。变更：`completionItems` 按连接版本过滤 `WITH/OVER/PARTITION/RETURNING`；列补全加载时记录 `declaredType`，补全弹层右侧显示类型；`SELECT *` 后手动补全展开当前表/别名列；`SqlEditor`/`Workspace` 增加 `completionDetails`。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/styles.css`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击补全。遗留：SQLite ATTACH 库内对象和 MySQL 跨库列仍未做；版本过滤只按主/次版本粗筛。
 
 ---
 

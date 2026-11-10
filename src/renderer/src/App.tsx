@@ -458,6 +458,7 @@ export default function App() {
   const runningRequests = useRef<Record<string, string>>({});
   const columnCache = useRef<Record<string, string[]>>({});
   const schemaObjectCache = useRef<Record<string, SchemaObject[]>>({});
+  const completionDetails = useRef<Record<string, string>>({});
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
 
@@ -625,6 +626,7 @@ export default function App() {
     return states;
   }, [tabs, sessions]);
   const activeDatabases = databasesByTab[activeTab.id] ?? [];
+  const activeVersion = sessions[activeTab.id]?.version ?? '';
   const completionItems = useMemo(() => {
     const schemaNames = Array.from(
       new Set(
@@ -633,15 +635,30 @@ export default function App() {
           .filter((name): name is string => Boolean(name)),
       ),
     );
+    const dialect = activeConnection?.input.type ?? null;
+    const version = /(\d+)\.(\d+)/.exec(activeVersion);
+    const major = version ? Number(version[1]) : 0;
+    const minor = version ? Number(version[2]) : 0;
+    const modern = (() => {
+      if (dialect === 'mysql' || dialect === 'percona') return !major || major >= 8;
+      if (dialect === 'mariadb') return !major || major > 10 || (major === 10 && minor >= 2);
+      if (dialect === 'sqlite') return !major || major > 3 || (major === 3 && minor >= 35);
+      return true;
+    })();
+    const keywords = modern
+      ? SQL_KEYWORD_LIST
+      : SQL_KEYWORD_LIST.filter(
+          (keyword) => !['WITH', 'OVER', 'PARTITION', 'RETURNING'].includes(keyword),
+        );
     return [
-      ...SQL_KEYWORD_LIST,
-      ...functionCompletions(activeConnection?.input.type ?? null),
+      ...keywords,
+      ...functionCompletions(dialect),
       ...activeSchema.map((object) => object.name),
       ...schemaNames,
       ...activeDatabases.map((database) => database.name),
       ...extractAttachedDatabases(activeTab.sql ?? ''),
     ];
-  }, [activeSchema, activeConnection?.input.type, activeDatabases, activeTab.sql]);
+  }, [activeSchema, activeConnection?.input.type, activeDatabases, activeTab.sql, activeVersion]);
 
   const requestCompletion = async (context: CompletionContext): Promise<string[]> => {
     const tab = activeTab;
@@ -689,9 +706,13 @@ export default function App() {
         if (!result.ok) {
           result = await api.schema.table(tab.id, tableName, 'view');
         }
-        const columns = result.ok ? result.meta.columns.map((column) => column.name) : [];
-        columnCache.current[key] = columns;
-        return columns;
+        const columns = result.ok ? result.meta.columns : [];
+        for (const column of columns) {
+          completionDetails.current[column.name] = column.declaredType;
+        }
+        const names = columns.map((column) => column.name);
+        columnCache.current[key] = names;
+        return names;
       } catch {
         return [];
       }
@@ -720,6 +741,12 @@ export default function App() {
       objects
         .filter((object) => (object.schema ?? '').toLowerCase() === schema.toLowerCase())
         .map((object) => object.name.split('.').slice(1).join('.'));
+
+    // `SELECT *` 后手动触发补全时，直接展开当前表/别名的列。
+    if (context.needle === '*') {
+      const reference = context.tables[0];
+      if (reference) return loadColumns(resolveTable(reference) ?? reference.table);
+    }
 
     if (context.qualifier) {
       const parts = splitQualifier(context.qualifier);
@@ -4070,6 +4097,7 @@ export default function App() {
           onOpenHistory={() => setHistoryOpen(true)}
           insertRequest={insertRequest}
           completionItems={completionItems}
+          completionDetails={completionDetails.current}
           onRequestCompletion={requestCompletion}
           onCancel={() => void cancelQuery()}
           onReconnect={() => void reconnectActive()}
