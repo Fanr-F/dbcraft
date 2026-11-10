@@ -5,6 +5,7 @@ import type {
   QueryMessage,
   TableDetail,
 } from '@shared/ipc-contract';
+import type { TableFilter } from '@shared/dialect/identifiers';
 
 /** 已持久化连接；密码留在主进程，渲染层只拿到不含密码的配置。 */
 export type SavedConnection = ConnectionRecord;
@@ -59,6 +60,8 @@ export interface QueryTab {
       column: string;
       value: string;
     };
+    /** 多条件过滤（AND）；存在时优先于 filter。 */
+    filters?: TableFilter[];
     /** 与当前 SQL 中的 `?` 对应，重跑时原样带回。 */
     params?: QueryCell[];
   };

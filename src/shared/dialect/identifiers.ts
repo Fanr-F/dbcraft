@@ -44,7 +44,25 @@ export interface TableSort {
 export interface TableFilter {
   column: string;
   value: string;
+  /**
+   * 过滤操作符；省略时按旧的「包含」LIKE 处理，兼容已有草稿。
+   * `isNull` / `isNotNull` 不需要值。
+   */
+  operator?: TableFilterOperator;
 }
+
+export type TableFilterOperator =
+  | 'contains'
+  | 'equals'
+  | 'notEquals'
+  | 'startsWith'
+  | 'endsWith'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'isNull'
+  | 'isNotNull';
 
 /** LIKE 通配符转义；用 `!` 而不是反斜杠，避免 MySQL 字符串字面量再转义一层。 */
 export function escapeLikeValue(value: string): string {
@@ -65,24 +83,79 @@ export function normalizeTableSorts(sort?: TableSort | TableSort[] | null): Tabl
     .map((item) => ({ column: item.column, direction: item.direction === 'desc' ? 'desc' : 'asc' }));
 }
 
-/** 表数据页查询：分页 + 服务端多列排序 + 服务端 LIKE 过滤（参数化）。 */
+/** 兼容单条件与多条件过滤；多条件之间是 AND。 */
+export function normalizeTableFilters(
+  filter?: TableFilter | TableFilter[] | null,
+): TableFilter[] {
+  if (!filter) return [];
+  return (Array.isArray(filter) ? filter : [filter]).filter((item) => item && item.column);
+}
+
+function filterPlaceholder(type: DatabaseType, index: number): string {
+  return type === 'mssql' ? `@p${index + 1}` : '?';
+}
+
+/** 单个过滤条件；返回 null 表示该条件无效（例如空值文本过滤）。 */
+function buildFilterClause(
+  type: DatabaseType,
+  filter: TableFilter,
+  params: QueryCell[],
+): string | null {
+  const column = quoteIdent(type, filter.column);
+  const operator = filter.operator ?? 'contains';
+
+  if (operator === 'isNull') return `${column} IS NULL`;
+  if (operator === 'isNotNull') return `${column} IS NOT NULL`;
+  if (filter.value === '') return null;
+
+  const placeholder = filterPlaceholder(type, params.length);
+  switch (operator) {
+    case 'equals':
+      params.push(filter.value);
+      return `${column} = ${placeholder}`;
+    case 'notEquals':
+      params.push(filter.value);
+      return `${column} <> ${placeholder}`;
+    case 'gt':
+      params.push(filter.value);
+      return `${column} > ${placeholder}`;
+    case 'gte':
+      params.push(filter.value);
+      return `${column} >= ${placeholder}`;
+    case 'lt':
+      params.push(filter.value);
+      return `${column} < ${placeholder}`;
+    case 'lte':
+      params.push(filter.value);
+      return `${column} <= ${placeholder}`;
+    case 'startsWith':
+      params.push(`${escapeLikeValue(filter.value)}%`);
+      return `${column} LIKE ${placeholder} ESCAPE '!'`;
+    case 'endsWith':
+      params.push(`%${escapeLikeValue(filter.value)}`);
+      return `${column} LIKE ${placeholder} ESCAPE '!'`;
+    case 'contains':
+    default:
+      params.push(`%${escapeLikeValue(filter.value)}%`);
+      return `${column} LIKE ${placeholder} ESCAPE '!'`;
+  }
+}
+
+/** 表数据页查询：分页 + 服务端多列排序 + 服务端多条件过滤（全部参数化）。 */
 export function buildTablePageQuery(
   type: DatabaseType,
   name: string,
   limit: number,
   offset: number,
   sort?: TableSort | TableSort[] | null,
-  filter?: TableFilter | null,
+  filter?: TableFilter | TableFilter[] | null,
 ): TablePageQuery {
   const target = quoteIdent(type, name);
   const params: QueryCell[] = [];
-  let where = '';
-
-  if (filter?.column && filter.value !== '') {
-    const placeholder = type === 'mssql' ? '@p1' : '?';
-    where = ` WHERE ${quoteIdent(type, filter.column)} LIKE ${placeholder} ESCAPE '!'`;
-    params.push(`%${escapeLikeValue(filter.value)}%`);
-  }
+  const conditions = normalizeTableFilters(filter)
+    .map((item) => buildFilterClause(type, item, params))
+    .filter((clause): clause is string => clause !== null);
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
 
   const sorts = normalizeTableSorts(sort);
   const order = sorts.length
@@ -115,7 +188,7 @@ export function buildTablePageSql(
   limit: number,
   offset: number,
   sort?: TableSort | TableSort[] | null,
-  filter?: TableFilter | null,
+  filter?: TableFilter | TableFilter[] | null,
 ): string {
   return buildTablePageQuery(type, name, limit, offset, sort, filter).sql;
 }

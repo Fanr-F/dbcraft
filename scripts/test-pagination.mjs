@@ -120,6 +120,45 @@ const unfiltered = buildTablePageQuery('sqlite', 'users', 200, 0, null, {
 });
 assert(!unfiltered.sql.includes('WHERE') && unfiltered.params.length === 0, 'empty filter wrong');
 
+const multiFiltered = buildTablePageQuery(
+  'mssql',
+  'users',
+  200,
+  0,
+  null,
+  [
+    { column: 'name', operator: 'contains', value: 'a' },
+    { column: 'age', operator: 'gt', value: '18' },
+    { column: 'deleted_at', operator: 'isNull', value: '' },
+  ],
+);
+assert(
+  multiFiltered.sql ===
+    'SELECT * FROM [users] WHERE [name] LIKE @p1 ESCAPE \'!\' AND [age] > @p2 AND [deleted_at] IS NULL ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 200 ROWS ONLY;',
+  `multi filter SQL wrong: ${multiFiltered.sql}`,
+);
+assert(
+  multiFiltered.params.length === 2 &&
+    multiFiltered.params[0] === '%a%' &&
+    multiFiltered.params[1] === '18',
+  `multi filter params wrong: ${JSON.stringify(multiFiltered.params)}`,
+);
+
+const operators = buildTablePageQuery('sqlite', 'users', 10, 0, null, [
+  { column: 'name', operator: 'startsWith', value: 'A%' },
+  { column: 'id', operator: 'lte', value: '9' },
+  { column: 'email', operator: 'notEquals', value: 'x' },
+]);
+assert(
+  operators.sql ===
+    'SELECT * FROM "users" WHERE "name" LIKE ? ESCAPE \'!\' AND "id" <= ? AND "email" <> ? LIMIT 10 OFFSET 0;',
+  `operator SQL wrong: ${operators.sql}`,
+);
+assert(
+  operators.params[0] === 'A!%%' && operators.params[1] === '9' && operators.params[2] === 'x',
+  `operator params wrong: ${JSON.stringify(operators.params)}`,
+);
+
 // 真实 SQLite 验证 ESCAPE 与参数绑定。
 const database = new Database(':memory:');
 database.exec('CREATE TABLE users (name TEXT)');
@@ -144,6 +183,16 @@ const underscoreRows = database.prepare(underscore.sql).all(...underscore.params
 assert(
   underscoreRows.length === 1 && underscoreRows[0].name === 'a_b',
   `LIKE _ escape failed: ${JSON.stringify(underscoreRows)}`,
+);
+
+const combined = buildTablePageQuery('sqlite', 'users', 200, 0, null, [
+  { column: 'name', operator: 'startsWith', value: '5' },
+  { column: 'name', operator: 'notEquals', value: '50%' },
+]);
+const combinedRows = database.prepare(combined.sql).all(...combined.params);
+assert(
+  combinedRows.length === 1 && combinedRows[0].name === '50x',
+  `combined filter failed: ${JSON.stringify(combinedRows)}`,
 );
 database.close();
 

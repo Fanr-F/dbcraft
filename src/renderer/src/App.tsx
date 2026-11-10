@@ -33,7 +33,7 @@ import {
 import { splitSqlStatements } from './utils/sql-script';
 import { formatSql } from './utils/sql-format';
 import { buildTablePageQuery, buildTablePreviewSql, quoteIdent } from '@shared/dialect/identifiers';
-import type { TableSort } from '@shared/dialect/identifiers';
+import type { TableFilter, TableSort } from '@shared/dialect/identifiers';
 import { inspectDangerousSql, type DangerMatch } from '@shared/dialect/safety';
 import { explainErrorText, explainQueryError } from '@shared/errors';
 import { serializeConnections } from '@shared/connection-export';
@@ -355,6 +355,13 @@ function tableSorts(
   if (!table) return [];
   if (table.sorts && table.sorts.length > 0) return table.sorts;
   return table.sort ? [table.sort] : [];
+}
+
+/** 表数据页当前过滤；filters 优先，兼容旧草稿里的单条件 filter。 */
+function tableFilters(table: QueryTab['table'] | undefined): TableFilter[] {
+  if (!table) return [];
+  if (table.filters && table.filters.length > 0) return table.filters;
+  return table.filter ? [table.filter] : [];
 }
 
 function createId(prefix: string): string {
@@ -2688,7 +2695,7 @@ export default function App() {
       tab.table.pageSize,
       page * tab.table.pageSize,
       tableSorts(tab.table),
-      tab.table.filter,
+      tableFilters(tab.table),
     );
     const nextTab: QueryTab = {
       ...tab,
@@ -2715,7 +2722,7 @@ export default function App() {
       pageSize,
       0,
       tableSorts(tab.table),
-      tab.table.filter,
+      tableFilters(tab.table),
     );
     const nextTab: QueryTab = {
       ...tab,
@@ -2762,7 +2769,7 @@ export default function App() {
       tab.table.pageSize,
       0,
       sorts,
-      tab.table.filter,
+      tableFilters(tab.table),
     );
     const nextTab: QueryTab = {
       ...tab,
@@ -2774,28 +2781,29 @@ export default function App() {
     await runQuery(query.sql, nextTab, query.params, { internal: true });
   };
 
-  const changeTableFilter = async (column: string, value: string) => {
+  const changeTableFilters = async (filters: TableFilter[]) => {
     const tab = activeTab;
     const connection = activeConnection;
-    if (!tab.table || !connection || !column) return;
+    if (!tab.table || !connection) return;
     if (countPendingEdits(pendingTableEdits[tab.id]) > 0) {
       showNotice('error', '有未提交的表格修改，请先提交或回滚。');
       return;
     }
 
-    const filter = value === '' ? undefined : { column, value };
+    const next = filters.filter((item) => item.column);
+    const filter = next[0];
     const query = buildTablePageQuery(
       connection.input.type,
       tab.table.name,
       tab.table.pageSize,
       0,
       tableSorts(tab.table),
-      filter,
+      next,
     );
     const nextTab: QueryTab = {
       ...tab,
       sql: query.sql,
-      table: { ...tab.table, page: 0, filter, params: query.params },
+      table: { ...tab.table, page: 0, filter, filters: next, params: query.params },
     };
 
     setTabs((current) => current.map((item) => (item.id === tab.id ? nextTab : item)));
@@ -3686,7 +3694,7 @@ export default function App() {
         10_000,
         0,
         tableSorts(tab.table),
-        tab.table.filter,
+        tableFilters(tab.table),
       );
       sql = query.sql;
       params = query.params;
@@ -4172,7 +4180,7 @@ export default function App() {
           onTablePageChange={(page) => void changeTablePage(page)}
           onTablePageSizeChange={(size) => void changeTablePageSize(size)}
           onTableSortChange={(column, direction) => void changeTableSort(column, direction)}
-          onTableFilterChange={(column, value) => void changeTableFilter(column, value)}
+          onTableFilterChange={(filters) => void changeTableFilters(filters)}
           onCellChange={editTableCell}
           onCellsChange={applyCellChanges}
           onRowFocus={(rowIndex) =>

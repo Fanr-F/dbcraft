@@ -9,6 +9,7 @@ import type {
 } from '@shared/ipc-contract';
 import type { QueryTab, RunState, SessionRuntime, TransactionRuntime } from '../types';
 import type { CompletionContext } from '../utils/sql-completion';
+import type { TableFilter, TableFilterOperator } from '@shared/dialect/identifiers';
 import { SqlEditor } from '../features/editor/SqlEditor';
 import { ResultGrid } from '../features/grid/ResultGrid';
 import { ContextMenu } from './ContextMenu';
@@ -22,6 +23,64 @@ const DIALECT_LABELS: Record<DatabaseType, string> = {
   mariadb: 'MariaDB',
   mssql: 'T-SQL',
 };
+
+interface FilterOperatorOption {
+  value: TableFilterOperator;
+  label: string;
+}
+
+const TEXT_OPERATORS: FilterOperatorOption[] = [
+  { value: 'contains', label: '包含' },
+  { value: 'equals', label: '等于' },
+  { value: 'notEquals', label: '不等于' },
+  { value: 'startsWith', label: '开头是' },
+  { value: 'endsWith', label: '结尾是' },
+  { value: 'isNull', label: '为 NULL' },
+  { value: 'isNotNull', label: '不为 NULL' },
+];
+
+const ORDERED_OPERATORS: FilterOperatorOption[] = [
+  { value: 'equals', label: '等于' },
+  { value: 'notEquals', label: '不等于' },
+  { value: 'gt', label: '大于' },
+  { value: 'gte', label: '大于等于' },
+  { value: 'lt', label: '小于' },
+  { value: 'lte', label: '小于等于' },
+  { value: 'isNull', label: '为 NULL' },
+  { value: 'isNotNull', label: '不为 NULL' },
+];
+
+const BOOLEAN_OPERATORS: FilterOperatorOption[] = [
+  { value: 'equals', label: '等于' },
+  { value: 'notEquals', label: '不等于' },
+  { value: 'isNull', label: '为 NULL' },
+  { value: 'isNotNull', label: '不为 NULL' },
+];
+
+/** 按数据库返回的声明类型给出可用操作符；类型未知时按文本处理。 */
+function filterOperators(declaredType: string | null | undefined): FilterOperatorOption[] {
+  const type = declaredType ?? '';
+  if (/bit|bool|boolean/i.test(type)) return BOOLEAN_OPERATORS;
+  if (/int|numeric|decimal|number|real|float|double|money|serial/i.test(type)) {
+    return ORDERED_OPERATORS;
+  }
+  if (/date|time|year/i.test(type)) return ORDERED_OPERATORS;
+  return TEXT_OPERATORS;
+}
+
+function filterOperatorLabel(operator: TableFilterOperator | undefined): string {
+  return (
+    [...TEXT_OPERATORS, ...ORDERED_OPERATORS, ...BOOLEAN_OPERATORS].find(
+      (item) => item.value === operator,
+    )?.label ?? '包含'
+  );
+}
+
+function backendFilters(table: QueryTab['table'] | undefined): TableFilter[] {
+  if (!table) return [];
+  if (table.filters && table.filters.length > 0) return table.filters;
+  return table.filter ? [table.filter] : [];
+}
 
 function runtimeBadge(
   runtime: SessionRuntime | null,
@@ -103,7 +162,7 @@ interface WorkspaceProps {
   onTablePageChange: (page: number) => void;
   onTablePageSizeChange: (pageSize: number) => void;
   onTableSortChange: (column: string, direction: 'asc' | 'desc', additive?: boolean) => void;
-  onTableFilterChange: (column: string, value: string) => void;
+  onTableFilterChange: (filters: TableFilter[]) => void;
   onCellChange: (rowIndex: number, columnIndex: number, value: QueryCell) => void;
   onCellsChange: (
     changes: Array<{ rowIndex: number; columnIndex: number; value: QueryCell }>,
@@ -240,25 +299,46 @@ export function Workspace({
   const scriptSuccessCount = scriptStatements
     ? scriptStatements.length - scriptErrorCount
     : 0;
-  const [filterColumn, setFilterColumn] = useState(
-    activeTab.table?.filter?.column ?? '',
-  );
-  const [filterValue, setFilterValue] = useState(activeTab.table?.filter?.value ?? '');
-  const activeSorts =
-    activeTab.table?.sorts ??
-    (activeTab.table?.sort ? [activeTab.table.sort] : []);
-  const primarySort = activeSorts[0];  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(
+  const [filterDraft, setFilterDraft] = useState<{
+    column: string;
+    operator: TableFilterOperator;
+    value: string;
+  }>({ column: '', operator: 'contains', value: '' });
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(
     null,
+  );
+  const activeSorts =
+    activeTab.table?.sorts ?? (activeTab.table?.sort ? [activeTab.table.sort] : []);
+  const primarySort = activeSorts[0];
+  const activeFilters = backendFilters(activeTab.table);
+  const draftColumn = run.columns.find((column) => column.name === filterDraft.column);
+  const draftOperators = filterOperators(draftColumn?.declaredType);
+  const draftNeedsValue =
+    filterDraft.operator !== 'isNull' && filterDraft.operator !== 'isNotNull';
+  const draftBoolean = /bit|bool|boolean/i.test(draftColumn?.declaredType ?? '');
+  const draftDate = /date|time|year/i.test(draftColumn?.declaredType ?? '');
+  const draftNumber = /int|numeric|decimal|number|real|float|double|money|serial/i.test(
+    draftColumn?.declaredType ?? '',
   );
 
   useEffect(() => {
-    setFilterColumn(activeTab.table?.filter?.column ?? '');
-    setFilterValue(activeTab.table?.filter?.value ?? '');
-  }, [activeTab.id, activeTab.table?.filter?.column, activeTab.table?.filter?.value]);
+    setFilterDraft({ column: '', operator: 'contains', value: '' });
+  }, [activeTab.id]);
 
-  const applyFilter = () => {
-    if (!filterColumn) return;
-    onTableFilterChange(filterColumn, filterValue);
+  const addFilter = () => {
+    if (!filterDraft.column) return;
+    const operator = filterDraft.operator;
+    const needsValue = operator !== 'isNull' && operator !== 'isNotNull';
+    if (needsValue && filterDraft.value === '') return;
+    onTableFilterChange([
+      ...activeFilters,
+      {
+        column: filterDraft.column,
+        operator,
+        value: needsValue ? filterDraft.value : '',
+      },
+    ]);
+    setFilterDraft((current) => ({ ...current, value: '' }));
   };
   const tlsFallback =
     sessionRuntime?.status === 'ready' && sessionMessage !== null && /TLS|回退/.test(sessionMessage);
@@ -819,9 +899,19 @@ export function Workspace({
             <select
               className="page-size"
               aria-label="过滤列"
-              value={filterColumn}
+              value={filterDraft.column}
               disabled={running || lockedByEdits || run.columns.length === 0}
-              onChange={(event) => setFilterColumn(event.target.value)}
+              onChange={(event) => {
+                const column = event.target.value;
+                const declaredType = run.columns.find((item) => item.name === column)
+                  ?.declaredType;
+                const operators = filterOperators(declaredType);
+                setFilterDraft({
+                  column,
+                  operator: operators[0]?.value ?? 'contains',
+                  value: '',
+                });
+              }}
             >
               <option value="">选择列</option>
               {run.columns.map((column) => (
@@ -830,38 +920,104 @@ export function Workspace({
                 </option>
               ))}
             </select>
-            <input
-              className="table-filter-input"
-              aria-label="过滤值"
-              placeholder="包含内容"
-              value={filterValue}
-              disabled={running || lockedByEdits || !filterColumn}
-              onChange={(event) => setFilterValue(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  applyFilter();
+            {filterDraft.column && (
+              <select
+                className="page-size"
+                aria-label="过滤操作符"
+                value={filterDraft.operator}
+                disabled={running || lockedByEdits}
+                onChange={(event) =>
+                  setFilterDraft((current) => ({
+                    ...current,
+                    operator: event.target.value as TableFilterOperator,
+                  }))
                 }
-              }}
-            />
+              >
+                {draftOperators.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {filterDraft.column && draftNeedsValue && (
+              draftBoolean ? (
+                <select
+                  className="page-size"
+                  aria-label="过滤值"
+                  value={filterDraft.value}
+                  disabled={running || lockedByEdits}
+                  onChange={(event) =>
+                    setFilterDraft((current) => ({ ...current, value: event.target.value }))
+                  }
+                >
+                  <option value="">选择</option>
+                  <option value="1">true / 1</option>
+                  <option value="0">false / 0</option>
+                </select>
+              ) : (
+                <input
+                  className="table-filter-input"
+                  type={draftDate ? 'date' : draftNumber ? 'number' : 'text'}
+                  aria-label="过滤值"
+                  placeholder={draftDate ? '日期' : draftNumber ? '数值' : '包含内容'}
+                  value={filterDraft.value}
+                  disabled={running || lockedByEdits}
+                  onChange={(event) =>
+                    setFilterDraft((current) => ({ ...current, value: event.target.value }))
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      addFilter();
+                    }
+                  }}
+                />
+              )
+            )}
             <button
               type="button"
               className="btn"
-              disabled={!filterColumn || running || lockedByEdits}
-              title="按当前列做 LIKE 过滤（服务端 WHERE）"
-              onClick={applyFilter}
+              disabled={
+                !filterDraft.column ||
+                running ||
+                lockedByEdits ||
+                (draftNeedsValue && filterDraft.value === '')
+              }
+              title="添加条件（多个条件之间是 AND）"
+              onClick={addFilter}
             >
-              应用
+              添加条件
             </button>
-            {activeTab.table.filter && (
+            {activeFilters.map((item, index) => (
+              <span
+                key={`filter-${item.column}-${index}`}
+                className="badge badge-ok"
+                title={`${item.column} ${filterOperatorLabel(item.operator)} ${item.value}`}
+              >
+                {item.column} {filterOperatorLabel(item.operator)}
+                {item.value ? ` ${item.value}` : ''}
+                <button
+                  type="button"
+                  className="tab-close"
+                  aria-label="移除条件"
+                  disabled={running || lockedByEdits}
+                  onClick={() =>
+                    onTableFilterChange(
+                      activeFilters.filter((_filter, filterIndex) => filterIndex !== index),
+                    )
+                  }
+                >
+                  <Icon name="close" size={10} />
+                </button>
+              </span>
+            ))}
+            {activeFilters.length > 0 && (
               <button
                 type="button"
                 className="btn"
                 disabled={running || lockedByEdits}
-                onClick={() => {
-                  setFilterValue('');
-                  onTableFilterChange(activeTab.table!.filter!.column, '');
-                }}
+                onClick={() => onTableFilterChange([])}
               >
                 清除
               </button>
