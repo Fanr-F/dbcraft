@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { DatabaseInfo, DatabaseType, TableDetail } from '@shared/ipc-contract';
 import { buildTableDesign, type TableDesignColumn } from '@shared/dialect/table-diff';
 import { ddlTransactionHint } from '@shared/dialect/ddl';
+import { splitSqlStatements } from '../utils/sql-script';
 import { Icon } from './Icon';
 
 interface TableDesignTabProps {
@@ -114,6 +115,7 @@ export function TableDesignTab({
     initialColumns(dialect, detail),
   );
   const [phase, setPhase] = useState<'edit' | 'preview'>('edit');
+  const [editedSql, setEditedSql] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     statements: string[];
     warnings: string[];
@@ -192,6 +194,7 @@ export function TableDesignTab({
       warnings: result.warnings,
       sqliteForeignKeysOff: result.sqliteForeignKeysOff,
     });
+    setEditedSql(null);
     setPhase('preview');
   };
 
@@ -210,7 +213,16 @@ export function TableDesignTab({
     setExecuting(true);
     setError(null);
     try {
-      const result = await onExecute(preview.statements, {
+      let statements = preview.statements;
+      if (editedSql !== null) {
+        const split = splitSqlStatements(editedSql, 200, dialect);
+        if (!split.ok) {
+          setError(split.message);
+          return;
+        }
+        statements = split.statements;
+      }
+      const result = await onExecute(statements, {
         sqliteForeignKeysOff: preview.sqliteForeignKeysOff,
       });
       if (result.ok) {
@@ -402,10 +414,19 @@ export function TableDesignTab({
             <textarea
               className="ddl-preview"
               aria-label="DDL 预览"
-              value={preview?.statements.join('\n\n') ?? ''}
-              readOnly
+              value={editedSql ?? preview?.statements.join('\n\n') ?? ''}
               spellCheck={false}
+              onChange={(event) => setEditedSql(event.target.value)}
             />
+            {editedSql !== null && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setEditedSql(null)}
+              >
+                恢复为 UI 生成结果
+              </button>
+            )}
             {needsDeleteConfirm && (
               <div className="ddl-warnings">
                 <div>
