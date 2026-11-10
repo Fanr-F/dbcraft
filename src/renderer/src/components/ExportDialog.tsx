@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { DatabaseType, ExportFormat, QueryCell, QueryColumn } from '@shared/ipc-contract';
 import { toCsv, toJson, toSqlInsert } from '@shared/export/formats';
 import { Icon } from './Icon';
@@ -15,6 +15,8 @@ interface ExportDialogProps {
   rows: QueryCell[][];
   /** 多语句执行时可选的结果集；提供后对话框内可切换。 */
   datasets?: ExportDataset[];
+  /** 表数据页可用：启用服务端流式 CSV（全部行）。 */
+  streamTable?: { sessionId: string; table: string };
   onClose: () => void;
   onSave: (
     content: string,
@@ -57,6 +59,7 @@ export function ExportDialog({
   columns,
   rows,
   datasets,
+  streamTable,
   onClose,
   onSave,
   onSaveXlsx,
@@ -76,7 +79,67 @@ export function ExportDialog({
   const [exportRows, setExportRows] = useState(datasets?.[0]?.rows ?? rows);
   const [loadMessage, setLoadMessage] = useState<string | null>(null);
   const [loadingAll, setLoadingAll] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [streamRequestId, setStreamRequestId] = useState<string | null>(null);
+  const [streamRows, setStreamRows] = useState(0);
+  const [streamBytes, setStreamBytes] = useState(0);
+  const [streamMessage, setStreamMessage] = useState<string | null>(null);
+  const [streamWarning, setStreamWarning] = useState(false);
   const canLoadAll = Boolean(onLoadAll) && datasetIndex === 0;
+
+  useEffect(() => {
+    const api = window.dbcraft;
+    if (!api || !streamTable) return;
+    return api.export.onStreamProgress((progress) => {
+      if (progress.requestId !== streamRequestId) return;
+      setStreamRows(progress.rows);
+      setStreamBytes(progress.bytes);
+      if (progress.warning === '100mb') setStreamWarning(true);
+    });
+  }, [streamTable, streamRequestId]);
+
+  const startStream = async () => {
+    const api = window.dbcraft;
+    if (!api || !streamTable || streaming) return;
+    const requestId = `stream-${Date.now().toString(36)}`;
+    setStreamRequestId(requestId);
+    setStreaming(true);
+    setStreamRows(0);
+    setStreamBytes(0);
+    setStreamWarning(false);
+    setStreamMessage('正在流式导出…');
+    try {
+      const result = await api.export.streamCsv({
+        requestId,
+        sessionId: streamTable.sessionId,
+        table: streamTable.table,
+        suggestedName: 'result.csv',
+        delimiter: csvDelimiter,
+        header: csvHeader,
+        nullMarker: csvNullMarker,
+      });
+      setStreamMessage(
+        result.ok
+          ? `已导出 ${result.rows} 行（${(result.bytes / 1024 / 1024).toFixed(1)} MB）到 ${result.path}`
+          : result.canceled
+            ? '已取消流式导出。'
+            : `流式导出失败：${result.message}`,
+      );
+    } catch (cause) {
+      setStreamMessage(
+        `流式导出失败：${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    } finally {
+      setStreaming(false);
+    }
+  };
+
+  const cancelStream = async () => {
+    const api = window.dbcraft;
+    if (!api || !streamRequestId) return;
+    await api.export.cancelStream(streamRequestId);
+    setStreamMessage('正在取消…');
+  };
 
   const chooseDataset = (index: number) => {
     setDatasetIndex(index);
@@ -286,6 +349,35 @@ export function ExportDialog({
             SQL Insert 按 {dialect} 方言转义标识符与字符串；Excel 生成单工作表 .xlsx，
             数字保持数值、NULL 留空。导出只包含已加载的 {exportRows.length} 行。
           </p>
+
+          {streamTable && (
+            <div className="export-load-all">
+              <button
+                type="button"
+                className="btn"
+                disabled={streaming || busy}
+                onClick={() => void startStream()}
+              >
+                {streaming
+                  ? `流式导出中… ${streamRows} 行`
+                  : '流式导出全部行（CSV）'}
+              </button>
+              {streaming && (
+                <button type="button" className="btn btn-danger" onClick={() => void cancelStream()}>
+                  取消
+                </button>
+              )}
+              {(streaming || streamRows > 0) && (
+                <span className="pane-hint">
+                  {streamRows} 行 · {(streamBytes / 1024 / 1024).toFixed(1)} MB
+                </span>
+              )}
+              {streamWarning && (
+                <span className="form-error">文件已超过 100 MB，请确认磁盘空间。</span>
+              )}
+              {streamMessage && <span className="pane-hint">{streamMessage}</span>}
+            </div>
+          )}
 
           {canLoadAll && (
             <div className="export-load-all">

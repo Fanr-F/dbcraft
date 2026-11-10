@@ -12,7 +12,7 @@ export interface CsvOptions {
   nullMarker?: string;
 }
 
-function csvCell(value: QueryCell, delimiter: string): string {
+export function csvCell(value: QueryCell, delimiter: string): string {
   const text = value === null ? '' : String(value);
   if (text.includes(delimiter) || /["\r\n]/.test(text)) {
     return `"${text.replace(/"/g, '""')}"`;

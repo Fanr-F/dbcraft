@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import {
   IPC_CHANNELS,
   type ConnectionInput,
@@ -89,6 +89,18 @@ const api: DBCraftApi = {
   export: {
     save: (request) => ipcRenderer.invoke(IPC_CHANNELS.exportSave, request),
     saveXlsx: (request) => ipcRenderer.invoke(IPC_CHANNELS.exportSaveXlsx, request),
+    streamCsv: (request) => ipcRenderer.invoke(IPC_CHANNELS.exportStreamCsv, request),
+    cancelStream: (requestId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.exportStreamCancel, { requestId }),
+    onStreamProgress: (handler) => {
+      const listener = (
+        _event: IpcRendererEvent,
+        progress: Parameters<typeof handler>[0],
+      ) => handler(progress);
+      ipcRenderer.on(IPC_CHANNELS.exportStreamProgress, listener);
+      return () =>
+        ipcRenderer.removeListener(IPC_CHANNELS.exportStreamProgress, listener);
+    },
   },
   history: {
     list: (options = {}) => ipcRenderer.invoke(IPC_CHANNELS.historyList, options),

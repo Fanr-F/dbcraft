@@ -28,6 +28,7 @@ import {
   type DiagnosticsOpenResult,
   type DiagnosticsRestoreResult,
   type ExportSaveResult,
+  type ExportStreamResult,
   type HistoryListResult,
   type QueryResponse,
   type QueryScriptResponse,
@@ -58,6 +59,8 @@ import {
   ddlExecuteSchema,
   ddlGetSchema,
   exportSaveSchema,
+  exportStreamSchema,
+  exportStreamCancelSchema,
   exportXlsxSchema,
   fileSaveSqlSchema,
   fileReadSqlSchema,
@@ -120,9 +123,11 @@ import {
 import { createLogger } from '../logging/logger';
 import { resolveLogDirectory } from '../logging/logger';
 import { buildXlsx } from '../export/xlsx';
+import { streamTableCsv } from '../export/stream-csv';
 
 let mainWindow: BrowserWindow | null = null;
 let closeApproved = false;
+const canceledExports = new Set<string>();
 const log = createLogger('ipc');
 
 /** 只接受主窗口主框架发起的 IPC，避免子帧/其他 WebContents 触碰数据库。 */
@@ -675,6 +680,52 @@ export function registerIpcHandlers(): void {
       }
     },
   );
+
+  handle(
+    IPC_CHANNELS.exportStreamCsv,
+    async (event, rawInput: unknown): Promise<ExportStreamResult> => {
+      const parsed = exportStreamSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: '流式导出参数无效。' };
+      }
+      const request = parsed.data;
+      const options = {
+        title: '流式导出 CSV',
+        defaultPath: request.suggestedName,
+        filters: [{ name: 'CSV 文件', extensions: ['csv'] }],
+      };
+      const picked = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options);
+      if (picked.canceled || !picked.filePath) {
+        return { ok: false, canceled: true, message: '已取消导出。' };
+      }
+      let filePath = picked.filePath;
+      if (!/\.\w+$/i.test(filePath)) filePath = `${filePath}.csv`;
+
+      canceledExports.delete(request.requestId);
+      const result = await streamTableCsv(
+        request,
+        filePath,
+        (progress) => {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send(IPC_CHANNELS.exportStreamProgress, progress);
+          }
+        },
+        () => canceledExports.has(request.requestId),
+      );
+      canceledExports.delete(request.requestId);
+      if (result.ok) {
+        log.info('流式 CSV 已导出', { rows: result.rows, bytes: result.bytes });
+      }
+      return result;
+    },
+  );
+
+  handle(IPC_CHANNELS.exportStreamCancel, (_event, rawInput: unknown): void => {
+    const parsed = exportStreamCancelSchema.safeParse(rawInput);
+    if (parsed.success) canceledExports.add(parsed.data.requestId);
+  });
 
   handle(
     IPC_CHANNELS.exportSaveXlsx,

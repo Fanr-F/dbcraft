@@ -1321,6 +1321,11 @@ export function getMssqlSession(sessionId: string): MssqlSession | null {
   return session instanceof MssqlSession ? session : null;
 }
 
+/** 流式导出等只读路径按 id 取当前会话；仍需调用方校验 alive。 */
+export function getSession(sessionId: string): DatabaseSession | null {
+  return sessions.get(sessionId) ?? null;
+}
+
 export async function closeSession(sessionId: string): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session) return;

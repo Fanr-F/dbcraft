@@ -236,16 +236,44 @@ export const exportXlsxSchema = z.object({
   rows: z.array(z.array(xlsxCellSchema).max(500)).max(100_000),
 });
 
+export const exportStreamSchema = z.object({
+  requestId: z.string().min(1).max(128),
+  sessionId: z.string().min(1).max(128),
+  table: z.string().min(1).max(256),
+  suggestedName: z.string().trim().min(1).max(120),
+  delimiter: z.string().min(1).max(4).optional(),
+  header: z.boolean().optional(),
+  nullMarker: z.string().max(64).optional(),
+});
+
+export const exportStreamCancelSchema = z.object({
+  requestId: z.string().min(1).max(128),
+});
+
 export const settingsSaveSchema = z.object({
   resultRowLimit: z.union([z.literal(0), z.literal(100), z.literal(500), z.literal(1000), z.literal(2000), z.literal(5000)]),
-  theme: z.enum(['dark', 'light']),
+  theme: z.enum(['dark', 'light', 'system']),
   editorFontSize: z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(16)]),
+  editorFontFamily: z.enum(['default', 'consolas', 'cascadia', 'jetbrains']),
+  editorTabSize: z.union([z.literal(2), z.literal(4), z.literal(8)]),
+  sqlKeywordCase: z.enum(['upper', 'lower', 'preserve']),
+  completionEnabled: z.boolean(),
+  completionDelayMs: z.union([z.literal(0), z.literal(100), z.literal(300), z.literal(500)]),
   historyRetention: z.union([z.literal(0), z.literal(1000), z.literal(5000), z.literal(10000), z.literal(50000)]),
   queryTimeoutMs: z.union([z.literal(0), z.literal(10000), z.literal(30000), z.literal(60000), z.literal(120000)]),
   connectTimeoutMs: z.union([z.literal(3000), z.literal(5000), z.literal(8000), z.literal(10000), z.literal(30000)]),
   historyEnabled: z.boolean(),
   historyDedupe: z.boolean(),
   historyMask: z.boolean(),
+  gridAutoCommit: z.boolean(),
+  gridConfirmCommit: z.boolean(),
+  shortcuts: z.object({
+    run: z.string().min(1).max(40),
+    complete: z.string().min(1).max(40),
+    format: z.string().min(1).max(40),
+    save: z.string().min(1).max(40),
+    history: z.string().min(1).max(40),
+  }),
 });
 
 export const fileSaveSqlSchema = z.object({

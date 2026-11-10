@@ -4782,6 +4782,11 @@ export default function App() {
                     : [],
                 )
           }
+          streamTable={
+            exportOverride || !activeTab.table
+              ? undefined
+              : { sessionId: activeTab.id, table: activeTab.table.name }
+          }
           onClose={() => {
             setExportOpen(false);
             setExportOverride(null);

@@ -568,6 +568,28 @@ export interface ExportXlsxRequest {
   rows: QueryCell[][];
 }
 
+export interface ExportStreamRequest {
+  requestId: string;
+  sessionId: string;
+  table: string;
+  suggestedName: string;
+  delimiter?: string;
+  header?: boolean;
+  nullMarker?: string;
+}
+
+export interface ExportStreamProgress {
+  requestId: string;
+  rows: number;
+  bytes: number;
+  /** 首次超过 100 MB 时提示一次。 */
+  warning?: '100mb';
+}
+
+export type ExportStreamResult =
+  | { ok: true; path: string; rows: number; bytes: number }
+  | { ok: false; canceled?: boolean; message: string };
+
 export interface ExportSaveRequest {
   suggestedName: string;
   content: string;
@@ -768,6 +790,10 @@ export interface DBCraftApi {
   export: {
     save: (request: ExportSaveRequest) => Promise<ExportSaveResult>;
     saveXlsx: (request: ExportXlsxRequest) => Promise<ExportSaveResult>;
+    streamCsv: (request: ExportStreamRequest) => Promise<ExportStreamResult>;
+    cancelStream: (requestId: string) => Promise<void>;
+    /** 流式导出进度；返回取消订阅函数。 */
+    onStreamProgress: (handler: (progress: ExportStreamProgress) => void) => () => void;
   };
   history: {
     list: (options?: HistoryListOptions) => Promise<HistoryListResult>;
@@ -832,6 +858,9 @@ export const IPC_CHANNELS = {
   ddlExecute: 'ddl:execute',
   exportSave: 'export:save',
   exportSaveXlsx: 'export:save-xlsx',
+  exportStreamCsv: 'export:stream-csv',
+  exportStreamCancel: 'export:stream-cancel',
+  exportStreamProgress: 'export:stream-progress',
   historyList: 'history:list',
   historyDelete: 'history:delete',
   historyClear: 'history:clear',
