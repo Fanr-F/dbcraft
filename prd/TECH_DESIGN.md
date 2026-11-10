@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 对应 PRD | `doc/PRD.md` v0.20（本文仍按 v0.16 需求基线设计；多语句/多结果、库/Schema 补全、结果集「不限制」档位、服务器实体、标签管理、事务面板、类/对象 session 模型已落地，设计说明待回填；版本感知补全待补） |
-| 关联审计 | `doc/PROJECT_MASTER.md` §2（连接/服务器/标签/会话模型） |
+| 对应 PRD | `prd/PRD.md` v0.20（本文仍按 v0.16 需求基线设计；多语句/多结果、库/Schema 补全、结果集「不限制」档位、服务器实体、标签管理、事务面板、类/对象 session 模型已落地，设计说明待回填；版本感知补全待补） |
+| 关联审计 | `prd/PROJECT_MASTER.md` §2（连接/服务器/标签/会话模型） |
 | 文档版本 | v0.11（评审修订稿） |
 | 文档状态 | 待复审 |
 | 创建日期 | 2026-11-05 |
@@ -117,7 +117,7 @@
 
 ```text
 dbcraft/
-├─ doc/
+├─ prd/
 │  ├─ PRD.md
 │  └─ TECH_DESIGN.md
 ├─ src/
@@ -1216,7 +1216,7 @@ CSV 安全：单元格以 `=`、`+`、`-`、`@`、Tab、CR 开头时，默认加
 
 ## 20. 参考
 
-- `doc/PRD.md` v0.16
+- `prd/PRD.md` v0.16
 - RevoGrid Core Spike：`spikes/revogrid/`
 - MySQL 系认证 Spike：`spikes/mysql-auth/`
 - Electron Security Checklist

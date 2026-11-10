@@ -156,14 +156,14 @@ src/
 - 开发/未打包写入项目根 `logs/dbcraft.log`（即当前工作目录下）；打包后写入 `<userData>/logs/dbcraft.log`；
   可用 `DBCRAFT_LOG_DIR` 覆盖。单文件 5 MB 轮转、保留 3 个历史文件；`logs/` 已加入 `.gitignore`。
 - 渲染进程日志经 `log:write` IPC 汇入同一文件，来源校验与长度校验在 IPC 层完成。
-- 日志不记录 SQL 文本、密码或连接串；敏感字段自动打码。详见 `doc/PROJECT_MASTER.md` §3.8「日志约定」。
+- 日志不记录 SQL 文本、密码或连接串；敏感字段自动打码。详见 `prd/PROJECT_MASTER.md` §3.8「日志约定」。
 
 ## 文档
 
-- `doc/PRD.md`：需求基线（只读；需求变更需单独评审）
-- `doc/FEATURE_MATRIX.md`：功能清单与实现状态（✅/🟡/❌/⏸ 总表）
-- `doc/TECH_DESIGN.md`：技术设计（进程、IPC、驱动、存储、安全）
-- `doc/PROJECT_MASTER.md`：项目主文档：文档定位、连接/服务器/标签/会话模型、实现现状与验收、未完成项、UI 真机验收、变更记录
+- `prd/PRD.md`：需求基线（只读；需求变更需单独评审）
+- `prd/FEATURE_MATRIX.md`：功能清单与实现状态（✅/🟡/❌/⏸ 总表）
+- `prd/TECH_DESIGN.md`：技术设计（进程、IPC、驱动、存储、安全）
+- `prd/PROJECT_MASTER.md`：项目主文档：文档定位、连接/服务器/标签/会话模型、实现现状与验收、未完成项、UI 真机验收、变更记录
 
 ## 许可证
 

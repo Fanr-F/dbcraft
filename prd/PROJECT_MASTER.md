@@ -2,10 +2,10 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档定位 | 合并原 `doc/README.md`、`CONNECTION_TAB_MODEL.md`、`PROJECT_STATUS.md`、`UNFINISHED_ITEMS.md`、`UI_TODO.md`、`WORKLOG.md`，作为「模型 + 现状 + 缺口 + 验收 + 变更」的单一入口 |
-| 需求基线 | `doc/PRD.md` v0.20（只读；需求变更需单独评审） |
-| 功能总表 | `doc/FEATURE_MATRIX.md`（✅/🟡/❌/⏸ 状态快照） |
-| 技术路线 | `doc/TECH_DESIGN.md`（进程、IPC、驱动、存储、安全） |
+| 文档定位 | 合并原 `prd/README.md`、`CONNECTION_TAB_MODEL.md`、`PROJECT_STATUS.md`、`UNFINISHED_ITEMS.md`、`UI_TODO.md`、`WORKLOG.md`，作为「模型 + 现状 + 缺口 + 验收 + 变更」的单一入口 |
+| 需求基线 | `prd/PRD.md` v0.20（只读；需求变更需单独评审） |
+| 功能总表 | `prd/FEATURE_MATRIX.md`（✅/🟡/❌/⏸ 状态快照） |
+| 技术路线 | `prd/TECH_DESIGN.md`（进程、IPC、驱动、存储、安全） |
 | 代码基线 | 2026-11-09 工作区（整理时 `git log -1` = `f635064`；功能表记 `6d7f77e` M1 功能提交 + 文档改动） |
 | 最近更新 | 2026-11-09（W-20261109-28 文档合并） |
 | 更新方式 | 状态/缺口/UI 验收直接改本文；变更流水追加到 §6；功能有无仍以 `FEATURE_MATRIX.md` 为准 |
@@ -1463,10 +1463,10 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-23 MySQL / MSSQL UI E2E**：新增 `scripts/e2e-mysql.mjs`（预建临时库 + `items`，UI 新建连接/测试/保存，校验版本/对象树/查询/多语句/消息面板，退出删库）与 `scripts/e2e-mssql.mjs`（读取 `.env.local`，预建表，UI 新建连接/测试/保存，校验版本/对象树/查询/`GO` 两结果页签，退出删表）；`package.json` 增加 `e2e:mysql`/`e2e:mssql`；README/AGENTS/状态文档同步。验证：两个 E2E 真机通过。遗留：依赖便携实例/`.env.local`；未覆盖取消/超时/DDL/表编辑。
 - **W-20261109-24 结果集「不限制」档位**：`shared/settings.ts` 增加 `0` 哨兵与 `resolveRowLimit`；四个驱动改用 `resolveRowLimit`；IPC 允许 `maxRows=0`；设置面板增加「不限制」与内存风险提示；E2E 断言 2001 行不截断；`test-settings` 覆盖哨兵/Infinity/负值回退。验证：`typecheck`/`test:settings`/`build`/`e2e:sqlite` 通过。遗留：真正无限加载，大结果集可能卡顿；无执行前二次确认；导出仍最多 1 万行。
 - **W-20261109-25 未完成项与隐藏需求清单**：新增未完成项清单（现并入本文 §4）：H 组 11 项、K 组 10 项、R 组 9 项、文档/代码冲突、三波实施顺序、验收门槛、证据索引；README/状态/UI 清单同步。验证：文档交叉核对。遗留：基于代码走查，未逐项真机复现；H-02/H-06 需拍板。
-- **W-20261109-26 doc 目录整理与功能状态总表**：新增 `FEATURE_MATRIX.md`（164 行，`✅ 81 / 🟡 23 / ❌ 52 / ⏸ 8`）与 doc 目录索引（现并入本文 §1）；README/UNFINISHED/PROJECT_STATUS 同步；PRD 未改动。验证：交叉核对、脚本统计行数、PRD SHA256 一致。遗留：功能表是代码快照，UI 仍需真机验收。
-- **W-20261109-27 清理过时需求审计文档**：删除 `doc/REQUIREMENTS_AUDIT.md`（基线停留在 v0.16/v0.17，状态已被功能表取代，明细已由未完成项承接）；更新 README/doc 索引/状态/未完成项/模型审计引用；记录恢复方式。验证：无引用残留，PRD SHA256 不变。遗留：只删除明确过时的一份。
-- **W-20261109-28 六份文档合并为项目主文档**：诉求是把除 `PRD.md`、`FEATURE_MATRIX.md`、`TECH_DESIGN.md` 外的文档整理成一个，随后删除源文件。变更：新增 `doc/PROJECT_MASTER.md`，合并原 `doc/README.md`、`CONNECTION_TAB_MODEL.md`、`PROJECT_STATUS.md`、`UNFINISHED_ITEMS.md`、`UI_TODO.md`、`WORKLOG.md` 的内容，去重后按「文档定位 / 模型 / 现状与验收 / 未完成项 / UI 清单 / 变更记录」重排；删除六份源文件；更新 `README.md`、`AGENTS.md`、`FEATURE_MATRIX.md`、`TECH_DESIGN.md` 中的引用，并把 `PRD.md` 两处旧链接改指本文 §2（仅链接维护，未改需求内容）。验证：交叉核对合并内容与源文件；纯文档改动，未运行构建/测试。遗留：无；合并后 `doc/` 只保留 PRD、FEATURE_MATRIX、TECH_DESIGN、PROJECT_MASTER 四份文档。
-- **W-20261109-29 功能总表事实核对**：诉求是检查 `FEATURE_MATRIX.md` 的描述与代码是否一致。变更：修正 M01-07「系统对象仅 MSSQL 有开关」为 SQLite/MSSQL 均可开关；M08-02 手动刷新由 ✅ 改为 🟡（作业树与详情页均无显式刷新入口）；M08-11 作业右键菜单由 🟡 改为 ❌（树内没有右键菜单，启停需打开详情页）；补充 M01-08 状态点是会话状态聚合而非主动健康检查；补全 M02-11 未完成边界；M04-18 改为明确「当前未识别/阻止」；M06-06 明确 SQLite 只有 result code 不伪造 SQLSTATE；代码基线从 `9233262` 更新为 `6d7f77e`；统计更新为 `✅80 / 🟡23 / ❌53 / ⏸8`（MOD-08 为 `6/2/4/3`）。涉及 `doc/FEATURE_MATRIX.md`、`doc/PROJECT_MASTER.md`。验证：用脚本按表格行统计状态，与 §0 总览、§12 统计一致；对照 `App.tsx`（`systemObjectsSupported`）、`Sidebar.tsx`（作业树无刷新/右键菜单）、`AgentTabPanel.tsx`（详情页刷新、100/500 历史）、`Workspace.tsx`（分页档位/单行删除）核对。遗留：M08-06 的共享计划/多服务器只读仍按「代码路径可用」标 ✅，没有真实多服务器实例回归，后续可按真机结果收紧为 🟡。
+- **W-20261109-26 prd 目录整理与功能状态总表**：新增 `FEATURE_MATRIX.md`（164 行，`✅ 81 / 🟡 23 / ❌ 52 / ⏸ 8`）与 prd 目录索引（现并入本文 §1）；README/UNFINISHED/PROJECT_STATUS 同步；PRD 未改动。验证：交叉核对、脚本统计行数、PRD SHA256 一致。遗留：功能表是代码快照，UI 仍需真机验收。
+- **W-20261109-27 清理过时需求审计文档**：删除 `prd/REQUIREMENTS_AUDIT.md`（基线停留在 v0.16/v0.17，状态已被功能表取代，明细已由未完成项承接）；更新 README/prd 索引/状态/未完成项/模型审计引用；记录恢复方式。验证：无引用残留，PRD SHA256 不变。遗留：只删除明确过时的一份。
+- **W-20261109-28 六份文档合并为项目主文档**：诉求是把除 `PRD.md`、`FEATURE_MATRIX.md`、`TECH_DESIGN.md` 外的文档整理成一个，随后删除源文件。变更：新增 `prd/PROJECT_MASTER.md`，合并原 `prd/README.md`、`CONNECTION_TAB_MODEL.md`、`PROJECT_STATUS.md`、`UNFINISHED_ITEMS.md`、`UI_TODO.md`、`WORKLOG.md` 的内容，去重后按「文档定位 / 模型 / 现状与验收 / 未完成项 / UI 清单 / 变更记录」重排；删除六份源文件；更新 `README.md`、`AGENTS.md`、`FEATURE_MATRIX.md`、`TECH_DESIGN.md` 中的引用，并把 `PRD.md` 两处旧链接改指本文 §2（仅链接维护，未改需求内容）。验证：交叉核对合并内容与源文件；纯文档改动，未运行构建/测试。遗留：无；合并后 `prd/` 只保留 PRD、FEATURE_MATRIX、TECH_DESIGN、PROJECT_MASTER 四份文档。
+- **W-20261109-29 功能总表事实核对**：诉求是检查 `FEATURE_MATRIX.md` 的描述与代码是否一致。变更：修正 M01-07「系统对象仅 MSSQL 有开关」为 SQLite/MSSQL 均可开关；M08-02 手动刷新由 ✅ 改为 🟡（作业树与详情页均无显式刷新入口）；M08-11 作业右键菜单由 🟡 改为 ❌（树内没有右键菜单，启停需打开详情页）；补充 M01-08 状态点是会话状态聚合而非主动健康检查；补全 M02-11 未完成边界；M04-18 改为明确「当前未识别/阻止」；M06-06 明确 SQLite 只有 result code 不伪造 SQLSTATE；代码基线从 `9233262` 更新为 `6d7f77e`；统计更新为 `✅80 / 🟡23 / ❌53 / ⏸8`（MOD-08 为 `6/2/4/3`）。涉及 `prd/FEATURE_MATRIX.md`、`prd/PROJECT_MASTER.md`。验证：用脚本按表格行统计状态，与 §0 总览、§12 统计一致；对照 `App.tsx`（`systemObjectsSupported`）、`Sidebar.tsx`（作业树无刷新/右键菜单）、`AgentTabPanel.tsx`（详情页刷新、100/500 历史）、`Workspace.tsx`（分页档位/单行删除）核对。遗留：M08-06 的共享计划/多服务器只读仍按「代码路径可用」标 ✅，没有真实多服务器实例回归，后续可按真机结果收紧为 🟡。
 - **W-20261109-30 M01-13 保存密码开关与已存密码测试**：诉求是实现「保存密码开关 / 清除已保存密码」，并让编辑连接测试时无需重输密码。变更：`ipc-contract.ts` 增加 `ConnectionSaveOptions.rememberPassword`，`connection.test` 增加可选连接 id；`schemas.ts` 增加 `connectionTestSchema` 与保存选项；`metadata.saveConnection` 在 `rememberPassword=false` 时清除 secret 并返回提示；`ConnectionManager.testConnection` 在密码为空且提供 id 时从主进程读取已存密码；`ConnectionDialog` 增加「保存到本地」开关、移除测试前必须重输密码的限制、保存时传递选项；`App.saveConnection` 透传选项。涉及文件：`src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`、`src/main/storage/metadata.ts`、`src/main/services/ConnectionManager.ts`、`src/renderer/src/features/connections/ConnectionDialog.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工点击。遗留：清除密码采用「取消勾选并保存」两步操作，没有单独的立即清除按钮；未补连接保存/密码读取的自动化测试。
 - **W-20261109-31 M01-02 SQLite 测试连接只读口径**：诉求是让 SQLite「测试连接」和真实会话一致处理只读/被占用文件。变更：`ConnectionTestResult` 增加 `readonly`；`testSqliteFile()` 在锁/权限错误时回退 `readonly: true` 重开并返回版本与只读标记；成功提示改为「只读模式（文件被占用或无写权限）」；不可读文件仍失败。涉及 `src/shared/ipc-contract.ts`、`src/main/services/ConnectionManager.ts`。验证：`npm run typecheck`、`npm run build` 通过；未构造只读文件做真机验证。遗留：只读测试尚未纳入 `e2e:sqlite`。
 - **W-20261109-32 M01-15 新建连接不再改绑当前标签**：诉求是让新建连接只保存配置，不影响当前 tab 的 SQL/结果/session。变更：`App.saveConnection` 新建分支删除改绑 tab、清空 runs/tableMetas/pending/undo/noPk、关闭旧 session、自动打开 browse session 的逻辑；保存后仅提示「双击连接打开对象树，右击查询创建标签」。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中手工验收。遗留：新建连接暂不自动展开左侧树，需要用户双击；既有 `e2e:sqlite` 未覆盖「新建连接不影响当前 tab」。
@@ -1478,7 +1478,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-38 H-05 关闭标签先取消查询**：诉求是关闭正在执行查询的标签时先取消服务端查询。变更：`cancelQueryForTab` 增加 `silent` 参数；`closeTab` 在关闭 session 前 `await` 取消；`closeTabsByIds` 批量关闭时逐个取消；取消失败不阻塞关闭。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未用 MySQL `SLEEP` 做真机验证。遗留：主进程 `MysqlSession.close()` 仍是 `connection.end()`，取消依赖关闭前的 `query.cancel`；SQLite 取消仍会终止 Worker。
 - **W-20261109-39 H-11 清理死文件**：诉求是移除无引用 shim 与临时探针脚本。变更：确认 `AgentJobsDialog.tsx` 无引用后删除；当前工作区未发现 `scripts/tmp-probe-*.mjs`。涉及 `src/renderer/src/components/AgentJobsDialog.tsx`（删除）。验证：`npm run typecheck`、`npm run build` 通过。遗留：无。
 - **W-20261109-40 H-06 补齐历史来源**：诉求是让表数据浏览和导出重查在历史里显示真实来源，而不是一律「编辑器」。变更：`QuerySource` 增加 `table-page` / `export`，同步 zod、history-store、历史弹窗/详情标签；`runQuery` 对 `tab.table` 的内部查询自动用 `table-page`，导出重查用 `export`。涉及 `src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/storage/history-store.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/HistoryDialog.tsx`、`HistoryDetailDialog.tsx`。验证：`npm run typecheck`、`npm run test:history`、`npm run test:sql-mask`、`npm run build` 通过。遗留：内部表数据查询仍会写历史（只改来源，没有做「不记录」策略）；未做真机点击验收。
-- **W-20261109-41 功能表状态同步（H 组收口）**：诉求是把已完成的 H 组修复同步回功能表与模型文档。变更：M02-15 说明改为自定义标签名已持久化；X-10 改为 ✅；统计更新为 `✅88 / 🟡21 / ❌47 / ⏸8`；模型 §2.1 结论、连接导入/导出、断开 browse、标签自定义名、§4.1 建议顺序同步；H-01～H-11 均标记已修复。涉及 `doc/FEATURE_MATRIX.md`、`doc/PROJECT_MASTER.md`。验证：脚本按表格行统计，结果与 §0/§12 一致。遗留：H 组已收口，K/R/C 组仍有大量未完成项。
+- **W-20261109-41 功能表状态同步（H 组收口）**：诉求是把已完成的 H 组修复同步回功能表与模型文档。变更：M02-15 说明改为自定义标签名已持久化；X-10 改为 ✅；统计更新为 `✅88 / 🟡21 / ❌47 / ⏸8`；模型 §2.1 结论、连接导入/导出、断开 browse、标签自定义名、§4.1 建议顺序同步；H-01～H-11 均标记已修复。涉及 `prd/FEATURE_MATRIX.md`、`prd/PROJECT_MASTER.md`。验证：脚本按表格行统计，结果与 §0/§12 一致。遗留：H 组已收口，K/R/C 组仍有大量未完成项。
 - **W-20261109-42 M05-01 表数据分页补 1000**：诉求是支持 50/200/500/1000 四档分页。变更：`Workspace.tsx` 每页下拉增加 1000；`type` 仍为 number，无需改协议。涉及 `src/renderer/src/components/Workspace.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中切到 1000 行验收。遗留：分页 SQL 与后端未变；未补 E2E。
 - **W-20261109-43 M02-17 超长 SQL 保护**：诉求是 >1MB SQL 执行前给出明确提示。变更：`runQuery` 在空 SQL 检查后增加 `sql.length > 1_000_000` 拦截，提示拆分语句或保存为 `.sql` 文件。涉及 `src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未构造 1MB SQL 做真机验证。遗留：编辑器格式化/补全仍未对超长 SQL 做降级。
 - **W-20261109-44 M06-12 导出敏感数据提示**：诉求是导出前提示文件包含完整数据及敏感数据风险。变更：`ExportDialog` 顶部增加固定提示「导出文件将包含完整查询结果；如包含密码、令牌或个人数据，请妥善保管并在必要时脱敏」。涉及 `src/renderer/src/components/ExportDialog.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击。遗留：提示只是文本，没有按内容检测敏感列。
@@ -1497,6 +1497,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-57 M07-02 跟随系统主题**：诉求是主题可跟随系统。变更：`AppSettings.theme` 增加 `system`；设置归一化允许 system；设置面板增加「跟随系统」；App 监听 `prefers-color-scheme` 计算有效主题并设置 `data-theme`，RevoGrid 使用有效主题。涉及 `src/shared/ipc-contract.ts`、`src/shared/settings.ts`、`src/renderer/src/components/SettingsDialog.tsx`、`src/renderer/src/App.tsx`。验证：`npm run typecheck`、`npm run test:settings`、`npm run build` 通过；未在真实 Electron 中切换系统主题验收。遗留：主题切换只影响 CSS 与网格，窗口原生主题未处理。
 - **W-20261109-58 M02-11 补全增强**：诉求是补版本感知、类型提示和 `SELECT *` 展开。变更：`completionItems` 按连接版本过滤 `WITH/OVER/PARTITION/RETURNING`；列补全加载时记录 `declaredType`，补全弹层右侧显示类型；`SELECT *` 后手动补全展开当前表/别名列；`SqlEditor`/`Workspace` 增加 `completionDetails`。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/styles.css`。验证：`npm run typecheck`、`npm run build` 通过；未真机点击补全。遗留：SQLite ATTACH 库内对象和 MySQL 跨库列仍未做；版本过滤只按主/次版本粗筛。
 - **W-20261109-59 M03-11 INSERT 值脱敏**：诉求是历史脱敏覆盖 INSERT 列值。变更：`maskSensitiveSql` 改为 token 替换模型，覆盖赋值型与 `INSERT INTO t(cols) VALUES (...)`（含多行值）；只有敏感列对应的字符串/数字值替换为 `'***'`；`test-sql-mask` 增加单行/多行/非敏感 INSERT 用例。涉及 `src/renderer/src/utils/sql-mask.ts`、`scripts/test-sql-mask.mjs`。验证：`npm run typecheck`、`npm run test:sql-mask`、`npm run build` 通过。遗留：嵌套函数、JSON 文本中的密钥仍不识别。
+- **W-20261109-60 文档目录 doc → prd**：诉求是把文档目录改名为 `prd/`。变更：`git mv doc prd`；更新 `README.md`、`AGENTS.md` 与四份文档中的 `prd/` 路径引用及历史记录中的目录文字。涉及 `prd/PRD.md`、`prd/FEATURE_MATRIX.md`、`prd/TECH_DESIGN.md`、`prd/PROJECT_MASTER.md`、`README.md`、`AGENTS.md`。验证：`grep` 无残留 `doc/` 路径；纯文档改动，未运行构建/测试。遗留：Git 历史中的旧路径仍为 `doc/`。
 
 ---
 
@@ -1504,11 +1505,11 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 
 | 原文档 | 合并后位置 | 说明 |
 |---|---|---|
-| `doc/README.md` | §1 | 文档地图、权威边界、阅读顺序、维护规则 |
-| `doc/CONNECTION_TAB_MODEL.md` | §2 | 模型结论、代码事实、术语、隐藏需求、目标模型、Q21～Q28、AC |
-| `doc/PROJECT_STATUS.md` | §3 | 可运行链路、模块完成度、决策、模块差距、缺陷、测试/验收、DDL、日志、里程碑、交付快照 |
-| `doc/UNFINISHED_ITEMS.md` | §4 | H/K/R/C 分组、证据、建议顺序、验收门槛 |
-| `doc/UI_TODO.md` | §5 | UI 逐项清单、状态标记、真机验收记录 |
-| `doc/WORKLOG.md` | §6 | 追加式变更流水（W-20261106-01 ～ W-20261109-28） |
+| `prd/README.md` | §1 | 文档地图、权威边界、阅读顺序、维护规则 |
+| `prd/CONNECTION_TAB_MODEL.md` | §2 | 模型结论、代码事实、术语、隐藏需求、目标模型、Q21～Q28、AC |
+| `prd/PROJECT_STATUS.md` | §3 | 可运行链路、模块完成度、决策、模块差距、缺陷、测试/验收、DDL、日志、里程碑、交付快照 |
+| `prd/UNFINISHED_ITEMS.md` | §4 | H/K/R/C 分组、证据、建议顺序、验收门槛 |
+| `prd/UI_TODO.md` | §5 | UI 逐项清单、状态标记、真机验收记录 |
+| `prd/WORKLOG.md` | §6 | 追加式变更流水（W-20261106-01 ～ W-20261109-28） |
 
 > 文件已删除，内容以上表位置为准；Git 历史仍可追溯原文。
