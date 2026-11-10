@@ -24,7 +24,7 @@ import type {
   TableExtrasResult,
   TableMetaResult,
 } from '../../shared/ipc-contract';
-import { buildTableEditStatements } from '../../shared/dialect/dml';
+import { buildConflictCheckStatement, buildTableEditStatements } from '../../shared/dialect/dml';
 import { quoteIdent } from '../../shared/dialect/identifiers';
 import type { DatabaseSession } from './DatabaseSession';
 import { MariaSession } from './mariadb/MariaSession';
@@ -1161,6 +1161,8 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
   if (request.edits.length === 0) return failed('没有待提交的修改。');
 
   let statements;
+  let edits = request.edits;
+  let skipped = 0;
   let identityInsertNeeded = false;
   try {
     const meta = await session.getTableMeta(request.table, 'table');
@@ -1188,8 +1190,38 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
       allowPrimaryKeyChange: request.allowPrimaryKeyChange === true,
       allowIdentityInsert: request.allowIdentityInsert === true,
     });
+
+    // 冲突预检：用同样的乐观锁条件确认目标行仍然存在；跳过模式只剔除冲突项。
+    const conflicted = new Set<number>();
+    for (let index = 0; index < edits.length; index += 1) {
+      const check = buildConflictCheckStatement(
+        session.dialect,
+        request.table,
+        meta,
+        edits[index]!,
+      );
+      if (!check) continue;
+      const found = await session.query(check.sql, check.params);
+      if (found.rows.length === 0) conflicted.add(index);
+    }
+    if (conflicted.size > 0) {
+      if (request.skipConflicts !== true) {
+        return failed(
+          `冲突预检发现 ${conflicted.size} 行已被其他会话修改或删除；未提交任何修改。`,
+          0,
+          true,
+        );
+      }
+      skipped = conflicted.size;
+      statements = statements.filter((_statement, index) => !conflicted.has(index));
+      edits = edits.filter((_edit, index) => !conflicted.has(index));
+    }
   } catch (error) {
     return failed(error instanceof Error ? error.message : String(error));
+  }
+
+  if (statements.length === 0) {
+    return { ok: true, applied: 0, skipped, elapsedMs: Date.now() - startedAt };
   }
 
   const beginSql =
@@ -1220,11 +1252,16 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
 
     for (let index = 0; index < statements.length; index += 1) {
       const statement = statements[index]!;
-      const edit = request.edits[index]!;
+      const edit = edits[index]!;
       const result = await session.query(statement.sql, statement.params);
 
-      // UPDATE/DELETE 影响 0 行说明目标行已变化（或已删除），按冲突处理。
+      // UPDATE/DELETE 影响 0 行说明目标行已变化（或已删除）；
+      // 跳过模式继续提交其他行，否则整体回滚。
       if (edit.kind !== 'insert' && (result.changes ?? 0) === 0) {
+        if (request.skipConflicts === true) {
+          skipped += 1;
+          continue;
+        }
         conflict = true;
         throw new Error(
           `第 ${index + 1} 项修改未命中任何行：数据可能已被其他会话修改或删除。`,
@@ -1257,7 +1294,7 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
   const elapsedMs = Date.now() - startedAt;
   log.info('表格编辑已提交', {
     sessionId: request.sessionId,
-    edits: request.edits.length,
+    edits: edits.length,
     elapsedMs,
   });
 
@@ -1276,7 +1313,7 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
     executedAt: new Date().toISOString(),
   });
 
-  return { ok: true, applied, elapsedMs };
+  return { ok: true, applied, skipped: skipped > 0 ? skipped : undefined, elapsedMs };
 }
 
 export function getMssqlSession(sessionId: string): MssqlSession | null {

@@ -133,6 +133,42 @@ export function buildUpdateStatement(
   };
 }
 
+/** 提交前的冲突预检：用与 UPDATE 相同的乐观锁条件查一行是否存在。 */
+export function buildConflictCheckStatement(
+  type: DatabaseType,
+  table: string,
+  meta: TableMeta,
+  edit: TableEdit,
+): BuiltStatement | null {
+  if (edit.kind === 'insert') return null;
+  const keys = requirePlainObject(edit.keys, '主键');
+  assertKnownColumns(meta, Object.keys(keys), '冲突预检');
+  assertPrimaryKey(meta, keys);
+
+  const params: QueryCell[] = [];
+  const conditions = Object.keys(keys).map((name) => {
+    params.push(keys[name] ?? null);
+    return `${quoteIdent(type, name)} = ${placeholder(type, params.length - 1)}`;
+  });
+
+  if (edit.kind === 'update') {
+    const original = requirePlainObject(edit.original, '原始值');
+    assertKnownColumns(meta, Object.keys(original), '冲突预检');
+    for (const name of Object.keys(original)) {
+      if (!(name in (edit.values ?? {}))) {
+        throw new Error(`原始值列「${name}」不在本次更新范围内。`);
+      }
+      params.push(original[name] ?? null);
+      conditions.push(sameValue(type, name, placeholder(type, params.length - 1)));
+    }
+  }
+
+  return {
+    sql: `SELECT 1 AS hit FROM ${quoteIdent(type, table)} WHERE ${conditions.join(' AND ')}`,
+    params,
+  };
+}
+
 export function buildDeleteStatement(
   type: DatabaseType,
   table: string,

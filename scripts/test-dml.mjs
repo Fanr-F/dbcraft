@@ -5,6 +5,7 @@
  */
 import Database from 'better-sqlite3';
 import {
+  buildConflictCheckStatement,
   buildDeleteStatement,
   buildInsertStatement,
   buildTableEditStatements,
@@ -199,6 +200,30 @@ expectThrows(
       { kind: 'delete', keys: { nope: 1 } },
     ]),
   '第 2 项编辑无效',
+);
+
+// 冲突预检使用与 UPDATE 相同的乐观锁条件；INSERT 不需要预检。
+expectSql(
+  buildConflictCheckStatement('sqlite', 'users', meta, {
+    kind: 'update',
+    keys: { id: 1 },
+    values: { name: 'alice' },
+    original: { name: 'old' },
+  }),
+  'SELECT 1 AS hit FROM "users" WHERE "id" = ? AND "name" IS ?',
+  [1, 'old'],
+);
+assert(
+  buildConflictCheckStatement('sqlite', 'users', meta, { kind: 'insert', values: {} }) === null,
+  'insert should not need conflict precheck',
+);
+expectSql(
+  buildConflictCheckStatement('mssql', 'users', meta, {
+    kind: 'delete',
+    keys: { id: 3 },
+  }),
+  'SELECT 1 AS hit FROM [users] WHERE [id] = @p1',
+  [3],
 );
 
 // 主键默认只读；显式开启后才允许 UPDATE 主键。

@@ -419,6 +419,8 @@ export default function App() {
   const [autoCommitMode, setAutoCommitMode] = useState<Record<string, boolean>>({});
   /** 提交前二次确认（对自动提交尤其重要）。 */
   const [commitConfirmMode, setCommitConfirmMode] = useState<Record<string, boolean>>({});
+  /** 冲突行跳过并继续提交，而不是整体回滚。 */
+  const [skipConflictsMode, setSkipConflictsMode] = useState<Record<string, boolean>>({});
   const [focusedCells, setFocusedCells] = useState<
     Record<string, { rowIndex: number; columnIndex: number } | null>
   >({});
@@ -2235,6 +2237,7 @@ export default function App() {
         allowNoPrimaryKeyInsert: activeNoPkMode,
         allowPrimaryKeyChange: activePkEditMode,
         allowIdentityInsert: activeIdentityInsert,
+        skipConflicts: skipConflictsMode[tab.id] === true,
         connectionId: connection?.id,
         connectionName: connection?.input.name,
         database:
@@ -2258,7 +2261,12 @@ export default function App() {
         delete next[tab.id];
         return next;
       });
-      showNotice('info', `已提交 ${result.applied} 行修改。`);
+      showNotice(
+        'info',
+        result.skipped
+          ? `已提交 ${result.applied} 行修改，跳过 ${result.skipped} 行冲突。`
+          : `已提交 ${result.applied} 行修改。`,
+      );
       await runQuery(tab.sql, tab, tab.table.params, { internal: true });
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : String(error));
@@ -4374,6 +4382,10 @@ export default function App() {
           committing={committing}
           autoCommit={autoCommitMode[activeTab.id] === true}
           confirmCommit={commitConfirmMode[activeTab.id] === true}
+          skipConflicts={skipConflictsMode[activeTab.id] === true}
+          onToggleSkipConflicts={(next) =>
+            setSkipConflictsMode((current) => ({ ...current, [activeTab.id]: next }))
+          }
           onToggleAutoCommit={(next) =>
             setAutoCommitMode((current) => ({ ...current, [activeTab.id]: next }))
           }

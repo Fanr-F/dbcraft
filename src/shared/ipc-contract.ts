@@ -401,13 +401,15 @@ export interface TableApplyRequest {
   allowPrimaryKeyChange?: boolean;
   /** 允许 INSERT 显式写入自增/IDENTITY 列；MSSQL 会包裹 SET IDENTITY_INSERT。 */
   allowIdentityInsert?: boolean;
+  /** 冲突行跳过并继续提交其余修改；默认 false 时整体回滚。 */
+  skipConflicts?: boolean;
   connectionId?: string;
   connectionName?: string;
   database?: string;
 }
 
 export type TableApplyResult =
-  | { ok: true; applied: number; elapsedMs: number }
+  | { ok: true; applied: number; skipped?: number; elapsedMs: number }
   | {
       ok: false;
       message: string;

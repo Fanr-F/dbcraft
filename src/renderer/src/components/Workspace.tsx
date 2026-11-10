@@ -125,8 +125,10 @@ interface WorkspaceProps {
   committing: boolean;
   autoCommit: boolean;
   confirmCommit: boolean;
+  skipConflicts: boolean;
   onToggleAutoCommit: (next: boolean) => void;
   onToggleConfirmCommit: (next: boolean) => void;
+  onToggleSkipConflicts: (next: boolean) => void;
   selectedRow: number | null;
   selectedRowRange?: { start: number; end: number } | null;
   onRowRangeChange: (start: number, end: number) => void;
@@ -233,8 +235,10 @@ export function Workspace({
   committing,
   autoCommit,
   confirmCommit,
+  skipConflicts,
   onToggleAutoCommit,
   onToggleConfirmCommit,
+  onToggleSkipConflicts,
   selectedRow,
   selectedRowRange,
   onRowRangeChange,
@@ -1141,6 +1145,15 @@ export function Workspace({
                 onChange={(event) => onToggleConfirmCommit(event.target.checked)}
               />
               提交前确认
+            </label>
+            <label className="pane-hint" title="冲突行跳过并继续提交其余修改；关闭时整体回滚">
+              <input
+                type="checkbox"
+                checked={skipConflicts}
+                disabled={running}
+                onChange={(event) => onToggleSkipConflicts(event.target.checked)}
+              />
+              跳过冲突行
             </label>
             <button
               type="button"

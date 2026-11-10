@@ -173,6 +173,7 @@ export const tableApplySchema = z.object({
   allowNoPrimaryKeyInsert: z.boolean().optional(),
   allowPrimaryKeyChange: z.boolean().optional(),
   allowIdentityInsert: z.boolean().optional(),
+  skipConflicts: z.boolean().optional(),
   connectionId: z.string().max(128).optional(),
   connectionName: z.string().max(120).optional(),
   database: z.string().max(128).optional(),
