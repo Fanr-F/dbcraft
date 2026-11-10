@@ -30,11 +30,16 @@ const BREAK_BEFORE = new Set([
 /** 这些关键字后保留空格再接左括号；函数名（COUNT 等）保持紧凑。 */
 const SPACE_BEFORE_PAREN = new Set(['in', 'values', 'exists']);
 
+export interface FormatSqlOptions {
+  keywordCase?: 'upper' | 'lower' | 'preserve';
+}
+
 /**
  * 保守的 SQL 格式化：只处理关键字大小写、分块换行与空格。
  * 字符串、注释内容原样保留（由 tokenizer 保证）。
  */
-export function formatSql(sql: string): string {
+export function formatSql(sql: string, options: FormatSqlOptions = {}): string {
+  const keywordCase = options.keywordCase ?? 'upper';
   const tokens = tokenizeSql(sql);
   const lines: string[] = [];
   let current = '';
@@ -82,13 +87,19 @@ export function formatSql(sql: string): string {
 
     if (token.type === 'keyword') {
       const upper = token.text.toUpperCase();
+      const rendered =
+        keywordCase === 'lower'
+          ? token.text.toLowerCase()
+          : keywordCase === 'preserve'
+            ? token.text
+            : upper;
       lastKeyword = upper.toLowerCase();
       if (BREAK_BEFORE.has(lastKeyword)) {
         newLine();
-        current = upper;
+        current = rendered;
         pendingSpace = true;
       } else {
-        append(upper);
+        append(rendered);
         pendingSpace = true;
       }
       continue;

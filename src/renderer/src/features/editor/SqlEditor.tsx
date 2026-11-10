@@ -31,6 +31,10 @@ interface SqlEditorProps {
   completionItems?: string[];
   /** 补全项的类型详情（列名 → 类型）。 */
   completionDetails?: Record<string, string>;
+  /** 是否启用补全。 */
+  completionEnabled?: boolean;
+  /** 自动补全延迟（毫秒）。 */
+  completionDelayMs?: number;
   /** 按光标上下文异步补充列/别名等候选。 */
   onRequestCompletion?: (context: CompletionContext) => Promise<string[]>;
   /** 当前连接的方言；用于函数签名提示。 */
@@ -54,6 +58,8 @@ export function SqlEditor({
   insertRequest,
   completionItems = [],
   completionDetails,
+  completionEnabled = true,
+  completionDelayMs = 0,
   onRequestCompletion,
   dialect = null,
   shortcuts = DEFAULT_SHORTCUTS,
@@ -113,6 +119,7 @@ export function SqlEditor({
   };
 
   const openCompletion = async () => {
+    if (!completionEnabled) return;
     const element = textareaRef.current;
     if (!element) return;
     const context = extractCompletionContext(element.value, element.selectionStart);
@@ -252,7 +259,7 @@ export function SqlEditor({
             (next.endsWith('.') ||
               shouldAutoTriggerCompletion(next, event.target.selectionStart))
           ) {
-            window.setTimeout(() => void openCompletion(), 0);
+            window.setTimeout(() => void openCompletion(), completionDelayMs);
           }
         }}
         onScroll={(event) => {

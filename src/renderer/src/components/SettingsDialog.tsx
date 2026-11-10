@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { AppSettings, LocalStats, ShortcutAction, ShortcutMap } from '@shared/ipc-contract';
 import {
+  COMPLETION_DELAY_OPTIONS,
   CONNECT_TIMEOUT_OPTIONS,
   DEFAULT_SHORTCUTS,
+  EDITOR_FONT_FAMILY_OPTIONS,
   EDITOR_FONT_SIZE_OPTIONS,
+  EDITOR_TAB_SIZE_OPTIONS,
   HISTORY_RETENTION_OPTIONS,
   QUERY_TIMEOUT_OPTIONS,
   RESULT_ROW_LIMIT_OPTIONS,
@@ -37,12 +40,19 @@ export function SettingsDialog({
   const [resultRowLimit, setResultRowLimit] = useState(settings.resultRowLimit);
   const [theme, setTheme] = useState(settings.theme);
   const [editorFontSize, setEditorFontSize] = useState(settings.editorFontSize);
+  const [editorFontFamily, setEditorFontFamily] = useState(settings.editorFontFamily);
+  const [editorTabSize, setEditorTabSize] = useState(settings.editorTabSize);
+  const [sqlKeywordCase, setSqlKeywordCase] = useState(settings.sqlKeywordCase);
+  const [completionEnabled, setCompletionEnabled] = useState(settings.completionEnabled);
+  const [completionDelayMs, setCompletionDelayMs] = useState(settings.completionDelayMs);
   const [historyRetention, setHistoryRetention] = useState(settings.historyRetention);
   const [queryTimeoutMs, setQueryTimeoutMs] = useState(settings.queryTimeoutMs);
   const [connectTimeoutMs, setConnectTimeoutMs] = useState(settings.connectTimeoutMs);
   const [historyEnabled, setHistoryEnabled] = useState(settings.historyEnabled);
   const [historyDedupe, setHistoryDedupe] = useState(settings.historyDedupe);
   const [historyMask, setHistoryMask] = useState(settings.historyMask);
+  const [gridAutoCommit, setGridAutoCommit] = useState(settings.gridAutoCommit);
+  const [gridConfirmCommit, setGridConfirmCommit] = useState(settings.gridConfirmCommit);
   const [shortcuts, setShortcuts] = useState<ShortcutMap>({ ...settings.shortcuts });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,12 +164,19 @@ export function SettingsDialog({
     setResultRowLimit(DEFAULT_APP_SETTINGS.resultRowLimit);
     setTheme(DEFAULT_APP_SETTINGS.theme);
     setEditorFontSize(DEFAULT_APP_SETTINGS.editorFontSize);
+    setEditorFontFamily(DEFAULT_APP_SETTINGS.editorFontFamily);
+    setEditorTabSize(DEFAULT_APP_SETTINGS.editorTabSize);
+    setSqlKeywordCase(DEFAULT_APP_SETTINGS.sqlKeywordCase);
+    setCompletionEnabled(DEFAULT_APP_SETTINGS.completionEnabled);
+    setCompletionDelayMs(DEFAULT_APP_SETTINGS.completionDelayMs);
     setHistoryRetention(DEFAULT_APP_SETTINGS.historyRetention);
     setQueryTimeoutMs(DEFAULT_APP_SETTINGS.queryTimeoutMs);
     setConnectTimeoutMs(DEFAULT_APP_SETTINGS.connectTimeoutMs);
     setHistoryEnabled(DEFAULT_APP_SETTINGS.historyEnabled);
     setHistoryDedupe(DEFAULT_APP_SETTINGS.historyDedupe);
     setHistoryMask(DEFAULT_APP_SETTINGS.historyMask);
+    setGridAutoCommit(DEFAULT_APP_SETTINGS.gridAutoCommit);
+    setGridConfirmCommit(DEFAULT_APP_SETTINGS.gridConfirmCommit);
     setShortcuts({ ...DEFAULT_SHORTCUTS });
     setDiagnosticsMessage('已恢复默认值，点击「保存」后生效。');
   };
@@ -184,12 +201,19 @@ export function SettingsDialog({
         resultRowLimit,
         theme,
         editorFontSize,
+        editorFontFamily,
+        editorTabSize,
+        sqlKeywordCase,
+        completionEnabled,
+        completionDelayMs,
         historyRetention,
         queryTimeoutMs,
         connectTimeoutMs,
         historyEnabled,
         historyDedupe,
         historyMask,
+        gridAutoCommit,
+        gridConfirmCommit,
         shortcuts: normalizedShortcuts,
       });
       if (result.ok) {
@@ -250,6 +274,73 @@ export function SettingsDialog({
               {EDITOR_FONT_SIZE_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {option} px
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>编辑器字体</span>
+            <select
+              value={editorFontFamily}
+              onChange={(event) => setEditorFontFamily(event.target.value)}
+            >
+              {EDITOR_FONT_FAMILY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Tab 宽度</span>
+            <select
+              value={editorTabSize}
+              onChange={(event) => setEditorTabSize(Number(event.target.value))}
+            >
+              {EDITOR_TAB_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>格式化关键字大小写</span>
+            <select
+              value={sqlKeywordCase}
+              onChange={(event) =>
+                setSqlKeywordCase(
+                  event.target.value as AppSettings['sqlKeywordCase'],
+                )
+              }
+            >
+              <option value="upper">大写</option>
+              <option value="lower">小写</option>
+              <option value="preserve">保持原样</option>
+            </select>
+          </label>
+
+          <label className="field field-check">
+            <span>启用 SQL 补全</span>
+            <input
+              type="checkbox"
+              checked={completionEnabled}
+              onChange={(event) => setCompletionEnabled(event.target.checked)}
+            />
+          </label>
+          <label className="field">
+            <span>自动补全延迟</span>
+            <select
+              value={completionDelayMs}
+              disabled={!completionEnabled}
+              onChange={(event) => setCompletionDelayMs(Number(event.target.value))}
+            >
+              {COMPLETION_DELAY_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option === 0 ? '立即' : `${option} ms`}
                 </option>
               ))}
             </select>
@@ -388,6 +479,29 @@ export function SettingsDialog({
             该设置被 `DBCRAFT_CONNECT_TIMEOUT_MS` 环境变量覆盖。
           </p>
 
+          <label className="field field-check">
+            <span>表数据默认自动提交</span>
+            <input
+              type="checkbox"
+              checked={gridAutoCommit}
+              onChange={(event) => setGridAutoCommit(event.target.checked)}
+            />
+          </label>
+          <p className="form-note">
+            开启后，已有行的修改在停止编辑 800ms 后自动提交；新增行仍需手动提交或关闭自动提交。
+          </p>
+          <label className="field field-check">
+            <span>表数据提交前确认</span>
+            <input
+              type="checkbox"
+              checked={gridConfirmCommit}
+              onChange={(event) => setGridConfirmCommit(event.target.checked)}
+            />
+          </label>
+          <p className="form-note">
+            每次提交前弹出确认，自动提交时尤其建议开启；每个标签仍可单独切换。
+          </p>
+
           <div className="field">
             <span>快捷键</span>
             <div className="shortcut-grid">
@@ -481,12 +595,19 @@ export function SettingsDialog({
               (resultRowLimit === settings.resultRowLimit &&
                 theme === settings.theme &&
                 editorFontSize === settings.editorFontSize &&
+                editorFontFamily === settings.editorFontFamily &&
+                editorTabSize === settings.editorTabSize &&
+                sqlKeywordCase === settings.sqlKeywordCase &&
+                completionEnabled === settings.completionEnabled &&
+                completionDelayMs === settings.completionDelayMs &&
                 historyRetention === settings.historyRetention &&
                 queryTimeoutMs === settings.queryTimeoutMs &&
                 connectTimeoutMs === settings.connectTimeoutMs &&
                 historyEnabled === settings.historyEnabled &&
                 historyDedupe === settings.historyDedupe &&
                 historyMask === settings.historyMask &&
+                gridAutoCommit === settings.gridAutoCommit &&
+                gridConfirmCommit === settings.gridConfirmCommit &&
                 JSON.stringify(shortcuts) === JSON.stringify(settings.shortcuts))
             }
             onClick={() => void save()}

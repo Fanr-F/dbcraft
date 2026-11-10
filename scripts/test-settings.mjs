@@ -99,6 +99,57 @@ assert(
   'history mask should default to enabled',
 );
 assert(
+  normalizeAppSettings({ resultRowLimit: 500, gridAutoCommit: true }).gridAutoCommit === true,
+  'grid auto commit should be accepted',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500 }).gridAutoCommit === false,
+  'grid auto commit should default to off',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500, gridConfirmCommit: true }).gridConfirmCommit ===
+    true,
+  'grid commit confirm should be accepted',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500 }).gridConfirmCommit === false,
+  'grid commit confirm should default to off',
+);
+assert(
+  normalizeAppSettings({
+    resultRowLimit: 500,
+    editorFontFamily: 'consolas',
+    editorTabSize: 4,
+    sqlKeywordCase: 'lower',
+    completionEnabled: false,
+    completionDelayMs: 300,
+  }).editorFontFamily === 'consolas' &&
+    normalizeAppSettings({
+      resultRowLimit: 500,
+      editorTabSize: 4,
+    }).editorTabSize === 4 &&
+    normalizeAppSettings({
+      resultRowLimit: 500,
+      sqlKeywordCase: 'lower',
+    }).sqlKeywordCase === 'lower' &&
+    normalizeAppSettings({
+      resultRowLimit: 500,
+      completionEnabled: false,
+    }).completionEnabled === false &&
+    normalizeAppSettings({
+      resultRowLimit: 500,
+      completionDelayMs: 300,
+    }).completionDelayMs === 300,
+  'editor/completion settings should normalize',
+);
+assert(
+  normalizeAppSettings({ resultRowLimit: 500, editorTabSize: 3 }).editorTabSize === 2 &&
+    normalizeAppSettings({ resultRowLimit: 500, editorFontFamily: 'x' }).editorFontFamily ===
+      'default' &&
+    normalizeAppSettings({ resultRowLimit: 500, completionDelayMs: 42 }).completionDelayMs === 0,
+  'invalid editor/completion settings should fall back',
+);
+assert(
   normalizeAppSettings({ resultRowLimit: 500, theme: 'neon' }).theme === 'dark',
   'unknown theme should fall back',
 );

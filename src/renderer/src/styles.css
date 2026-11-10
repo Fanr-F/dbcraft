@@ -943,15 +943,10 @@ button:disabled {
   margin: 0;
   padding: 12px 14px 12px var(--sql-gutter-width, 44px);
   border: none;
-  font-family:
-    "Cascadia Code",
-    "JetBrains Mono",
-    Consolas,
-    "Microsoft YaHei",
-    monospace;
+  font-family: var(--sql-font-family, "Cascadia Code", "JetBrains Mono", Consolas, monospace);
   font-size: var(--editor-font-size, 13px);
   line-height: 1.7;
-  tab-size: 2;
+  tab-size: var(--sql-tab-size, 2);
   font-variant-ligatures: none;
 }
 

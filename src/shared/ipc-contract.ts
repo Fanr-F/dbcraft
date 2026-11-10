@@ -614,6 +614,20 @@ export interface AppSettings {
   historyDedupe: boolean;
   /** 历史列表/详情默认脱敏显示。 */
   historyMask: boolean;
+  /** 表数据页默认开启自动提交。 */
+  gridAutoCommit: boolean;
+  /** 表数据页提交前默认二次确认。 */
+  gridConfirmCommit: boolean;
+  /** SQL 编辑器字体族键。 */
+  editorFontFamily: string;
+  /** SQL 编辑器 Tab 宽度。 */
+  editorTabSize: number;
+  /** 格式化时关键字大小写。 */
+  sqlKeywordCase: 'upper' | 'lower' | 'preserve';
+  /** 是否启用补全（含自动与快捷键触发）。 */
+  completionEnabled: boolean;
+  /** 自动补全延迟（毫秒）。 */
+  completionDelayMs: number;
   /** 可自定义快捷键；与设置面板共用同一映射。 */
   shortcuts: ShortcutMap;
 }

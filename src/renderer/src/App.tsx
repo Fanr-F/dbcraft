@@ -21,7 +21,7 @@ import type {
   TableExtras,
   TableMeta,
 } from '@shared/ipc-contract';
-import { DEFAULT_APP_SETTINGS } from '@shared/settings';
+import { DEFAULT_APP_SETTINGS, EDITOR_FONT_FAMILIES } from '@shared/settings';
 import { matchesShortcut } from './utils/shortcuts';
 import { SQL_KEYWORD_LIST } from './utils/sql-highlight';
 import {
@@ -587,13 +587,18 @@ export default function App() {
     document.documentElement.dataset.theme = effectiveTheme;
   }, [effectiveTheme]);
 
-  // 编辑器字号通过 CSS 变量生效，避免每个组件单独传参。
+  // 编辑器字号/字体/Tab 宽度通过 CSS 变量生效，避免每个组件单独传参。
   useEffect(() => {
-    document.documentElement.style.setProperty(
-      '--editor-font-size',
-      `${settings.editorFontSize}px`,
+    const root = document.documentElement.style;
+    root.setProperty('--editor-font-size', `${settings.editorFontSize}px`);
+    root.setProperty(
+      '--sql-font-family',
+      EDITOR_FONT_FAMILIES[
+        settings.editorFontFamily as keyof typeof EDITOR_FONT_FAMILIES
+      ] ?? EDITOR_FONT_FAMILIES.default,
     );
-  }, [settings.editorFontSize]);
+    root.setProperty('--sql-tab-size', String(settings.editorTabSize));
+  }, [settings.editorFontSize, settings.editorFontFamily, settings.editorTabSize]);
 
   // 启动时从主进程元数据库载入已保存连接；密码不会回到渲染层。
   useEffect(() => {
@@ -2248,7 +2253,7 @@ export default function App() {
     if (edits.length === 0) return false;
 
     if (
-      commitConfirmMode[targetTabId] &&
+      (commitConfirmMode[targetTabId] ?? settings.gridConfirmCommit) &&
       !window.confirm(`提交 ${edits.length} 项表格修改？`)
     ) {
       return false;
@@ -2353,7 +2358,8 @@ export default function App() {
   // 自动提交：编辑停止 800ms 后提交；有新增行时等待用户手动提交。
   useEffect(() => {
     const tab = activeTab;
-    if (!tab.table || !autoCommitMode[tab.id]) return;
+    const autoCommit = autoCommitMode[tab.id] ?? settings.gridAutoCommit;
+    if (!tab.table || !autoCommit) return;
     const state = pendingTableEdits[tab.id];
     if (!state || countPendingEdits(state) === 0) return;
     if (Object.keys(state.inserts).length > 0) return;
@@ -2366,6 +2372,7 @@ export default function App() {
   }, [
     activeTabId,
     autoCommitMode,
+    settings.gridAutoCommit,
     pendingTableEdits,
     runningTabs,
     committingTabs,
@@ -4327,7 +4334,9 @@ export default function App() {
       showNotice('info', '当前 SQL 为空，无需格式化。');
       return;
     }
-    const formatted = formatSql(tab.sql);
+    const formatted = formatSql(tab.sql, {
+      keywordCase: settings.sqlKeywordCase,
+    });
     if (formatted === tab.sql) {
       showNotice('info', 'SQL 已是格式化状态。');
       return;
@@ -4545,8 +4554,10 @@ export default function App() {
           onToggleNoPk={toggleNoPkMode}
           pendingEdits={pendingEditCount}
           committing={committing}
-          autoCommit={autoCommitMode[activeTab.id] === true}
-          confirmCommit={commitConfirmMode[activeTab.id] === true}
+          autoCommit={autoCommitMode[activeTab.id] ?? settings.gridAutoCommit}
+          confirmCommit={
+            commitConfirmMode[activeTab.id] ?? settings.gridConfirmCommit
+          }
           skipConflicts={skipConflictsMode[activeTab.id] === true}
           onToggleSkipConflicts={(next) =>
             setSkipConflictsMode((current) => ({ ...current, [activeTab.id]: next }))
@@ -4589,6 +4600,8 @@ export default function App() {
           insertRequest={insertRequest}
           completionItems={completionItems}
           completionDetails={completionDetails.current}
+          completionEnabled={settings.completionEnabled}
+          completionDelayMs={settings.completionDelayMs}
           shortcuts={settings.shortcuts}
           onRequestCompletion={requestCompletion}
           onCancel={() => void cancelQuery()}

@@ -53,5 +53,13 @@ expectFormatted(
 const once = formatSql("select a,b from t where x='y'");
 const twice = formatSql(once);
 assert(once === twice, 'formatting should be idempotent');
+assert(
+  formatSql('select A from T', { keywordCase: 'lower' }) === 'select A\n  from T',
+  'lower keyword case should only affect keywords',
+);
+assert(
+  formatSql('SeLeCt A from T', { keywordCase: 'preserve' }) === 'SeLeCt A\n  from T',
+  'preserve keyword case should keep original keyword text',
+);
 
 console.log('sql format check passed');

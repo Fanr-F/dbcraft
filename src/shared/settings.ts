@@ -34,6 +34,25 @@ export const QUERY_TIMEOUT_OPTIONS = [0, 10_000, 30_000, 60_000, 120_000] as con
 /** 连接/测试连接超时档位（毫秒）。 */
 export const CONNECT_TIMEOUT_OPTIONS = [3_000, 5_000, 8_000, 10_000, 30_000] as const;
 
+/** 编辑器字体族键；值为 CSS font-family。 */
+export const EDITOR_FONT_FAMILIES = {
+  default: '"Cascadia Code", "JetBrains Mono", Consolas, "Microsoft YaHei", monospace',
+  consolas: 'Consolas, "Courier New", monospace',
+  cascadia: '"Cascadia Code", Consolas, monospace',
+  jetbrains: '"JetBrains Mono", Consolas, monospace',
+} as const;
+
+export const EDITOR_FONT_FAMILY_OPTIONS = [
+  { value: 'default', label: '默认（Cascadia Code）' },
+  { value: 'consolas', label: 'Consolas' },
+  { value: 'cascadia', label: 'Cascadia Code' },
+  { value: 'jetbrains', label: 'JetBrains Mono' },
+] as const;
+
+export const EDITOR_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
+
+export const COMPLETION_DELAY_OPTIONS = [0, 100, 300, 500] as const;
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   resultRowLimit: 2000,
   theme: 'dark',
@@ -44,6 +63,13 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   historyEnabled: true,
   historyDedupe: true,
   historyMask: true,
+  gridAutoCommit: false,
+  gridConfirmCommit: false,
+  editorFontFamily: 'default',
+  editorTabSize: 2,
+  sqlKeywordCase: 'upper',
+  completionEnabled: true,
+  completionDelayMs: 0,
   shortcuts: { ...DEFAULT_SHORTCUTS },
 };
 
@@ -102,6 +128,30 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
     historyEnabled: record.historyEnabled !== false,
     historyDedupe: record.historyDedupe !== false,
     historyMask: record.historyMask !== false,
+    gridAutoCommit: record.gridAutoCommit === true,
+    gridConfirmCommit: record.gridConfirmCommit === true,
+    editorFontFamily:
+      typeof record.editorFontFamily === 'string' &&
+      record.editorFontFamily in EDITOR_FONT_FAMILIES
+        ? record.editorFontFamily
+        : DEFAULT_APP_SETTINGS.editorFontFamily,
+    editorTabSize: EDITOR_TAB_SIZE_OPTIONS.some(
+      (option) => option === Number(record.editorTabSize),
+    )
+      ? Number(record.editorTabSize)
+      : DEFAULT_APP_SETTINGS.editorTabSize,
+    sqlKeywordCase:
+      record.sqlKeywordCase === 'lower' ||
+      record.sqlKeywordCase === 'preserve' ||
+      record.sqlKeywordCase === 'upper'
+        ? record.sqlKeywordCase
+        : DEFAULT_APP_SETTINGS.sqlKeywordCase,
+    completionEnabled: record.completionEnabled !== false,
+    completionDelayMs: COMPLETION_DELAY_OPTIONS.some(
+      (option) => option === Number(record.completionDelayMs),
+    )
+      ? Number(record.completionDelayMs)
+      : DEFAULT_APP_SETTINGS.completionDelayMs,
     shortcuts: normalizeShortcuts(record.shortcuts),
   };
 }

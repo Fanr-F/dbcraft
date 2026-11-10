@@ -162,6 +162,8 @@ interface WorkspaceProps {
   insertRequest: { text: string; token: number } | null;
   completionItems: string[];
   completionDetails?: Record<string, string>;
+  completionEnabled: boolean;
+  completionDelayMs: number;
   shortcuts: ShortcutMap;
   onRequestCompletion: (context: CompletionContext) => Promise<string[]>;
   onCancel: () => void;
@@ -269,6 +271,8 @@ export function Workspace({
   insertRequest,
   completionItems,
   completionDetails,
+  completionEnabled,
+  completionDelayMs,
   shortcuts,
   onRequestCompletion,
   onCancel,
@@ -731,6 +735,8 @@ export function Workspace({
           insertRequest={insertRequest}
           completionItems={completionItems}
           completionDetails={completionDetails}
+          completionEnabled={completionEnabled}
+          completionDelayMs={completionDelayMs}
           shortcuts={shortcuts}
           onRequestCompletion={onRequestCompletion}
           dialect={connectionType}
