@@ -156,6 +156,13 @@ export function ResultGrid({
     rowIndex: number;
     columnIndex: number;
   } | null>(null);
+  const [selectedRange, setSelectedRange] = useState<{
+    x: number;
+    y: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setLayout(readLayout(layoutKey));
@@ -333,6 +340,12 @@ export function ResultGrid({
         const columnIndex = Number(detail.prop.slice(1));
         if (Number.isInteger(columnIndex) && columnIndex >= 0) {
           onCellFocus?.(detail.rowIndex, columnIndex);
+          setSelectedRange({
+            x: columnIndex,
+            y: detail.rowIndex,
+            x1: columnIndex,
+            y1: detail.rowIndex,
+          });
         }
       }
     };
@@ -341,10 +354,10 @@ export function ResultGrid({
     return () => element.removeEventListener('beforecellfocus', handler);
   }, [onRowFocus, onCellFocus]);
 
-  // 右键菜单：设为 NULL / 使用默认值（仅新增行）。
+  // 右键菜单：复制区域，以及可编辑时的 NULL/默认值操作。
   useEffect(() => {
     const element = gridRef.current;
-    if (!element || !editable || (!onSetCellNull && !onSetCellDefault)) return;
+    if (!element) return;
 
     const handler = (event: MouseEvent) => {
       if (!focusedCell) return;
@@ -359,7 +372,53 @@ export function ResultGrid({
 
     element.addEventListener('contextmenu', handler);
     return () => element.removeEventListener('contextmenu', handler);
-  }, [editable, focusedCell, onSetCellNull, onSetCellDefault]);
+  }, [focusedCell]);
+
+  const copySelection = async () => {
+    const range =
+      selectedRange ??
+      (focusedCell
+        ? {
+            x: focusedCell.columnIndex,
+            y: focusedCell.rowIndex,
+            x1: focusedCell.columnIndex,
+            y1: focusedCell.rowIndex,
+          }
+        : null);
+    if (!range) return;
+    const x = Math.min(range.x, range.x1);
+    const x1 = Math.max(range.x, range.x1);
+    const y = Math.min(range.y, range.y1);
+    const y1 = Math.max(range.y, range.y1);
+    const text = rows
+      .slice(y, y1 + 1)
+      .map((row) =>
+        row
+          .slice(x, x1 + 1)
+          .map((value) =>
+            value === null || value === undefined
+              ? ''
+              : String(value).replace(/\t/g, ' ').replace(/\r?\n/g, ' '),
+          )
+          .join('\t'),
+      )
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyNotice(`已复制 ${y1 - y + 1} 行 × ${x1 - x + 1} 列`);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopyNotice(copied ? '已复制到剪贴板' : '复制失败');
+    }
+    window.setTimeout(() => setCopyNotice(null), 1600);
+  };
 
   const menuColumn = cellMenu ? columns[cellMenu.columnIndex] : undefined;
   const menuReadOnly = menuColumn ? readOnlySet.has(menuColumn.name) : true;
@@ -373,11 +432,17 @@ export function ResultGrid({
     const handler = (event: Event) => {
       const detail = (
         event as CustomEvent<{
-          newRange?: { y?: number; y1?: number };
+          newRange?: { x?: number; y?: number; x1?: number; y1?: number };
         }>
       ).detail;
       const range = detail?.newRange;
       if (!range || typeof range.y !== 'number' || typeof range.y1 !== 'number') return;
+      if (
+        typeof range.x === 'number' &&
+        typeof range.x1 === 'number'
+      ) {
+        setSelectedRange({ x: range.x, y: range.y, x1: range.x1, y1: range.y1 });
+      }
       onRowRangeChange(Math.min(range.y, range.y1), Math.max(range.y, range.y1));
     };
 
@@ -426,6 +491,7 @@ export function ResultGrid({
 
   return (
     <div className="grid-host">
+      {copyNotice && <div className="grid-copy-toast">{copyNotice}</div>}
       {cellMenu && (
         <ContextMenu
           x={cellMenu.x}
@@ -433,13 +499,26 @@ export function ResultGrid({
           onClose={() => setCellMenu(null)}
           items={[
             {
+              label: '复制区域（TSV）',
+              onSelect: () => void copySelection(),
+            },
+            {
+              label: '复制单元格',
+              onSelect: () => {
+                const value = rows[cellMenu.rowIndex]?.[cellMenu.columnIndex];
+                void navigator.clipboard
+                  .writeText(value === null || value === undefined ? '' : String(value))
+                  .catch(() => undefined);
+              },
+            },
+            {
               label: '设为 NULL',
-              disabled: menuReadOnly,
+              disabled: !editable || menuReadOnly,
               onSelect: () => onSetCellNull?.(cellMenu.rowIndex, cellMenu.columnIndex),
             },
             {
               label: '使用默认值',
-              disabled: menuReadOnly || !menuIsInsert,
+              disabled: !editable || menuReadOnly || !menuIsInsert,
               onSelect: () =>
                 onSetCellDefault?.(cellMenu.rowIndex, cellMenu.columnIndex),
             },

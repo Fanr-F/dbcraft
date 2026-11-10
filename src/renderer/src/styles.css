@@ -1263,6 +1263,21 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+.grid-copy-toast {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
 .grid-cell-null {
   color: #64748b;
   font-style: italic;
