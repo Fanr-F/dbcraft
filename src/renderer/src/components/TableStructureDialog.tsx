@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { DatabaseType, TableDetail } from '@shared/ipc-contract';
-import { buildAddForeignKey, buildCreateIndex, buildDropForeignKey, buildDropIndex, buildTableComment } from '@shared/dialect/ddl';
+import { buildAddCheck, buildAddForeignKey, buildCreateIndex, buildDropCheck, buildDropForeignKey, buildDropIndex, buildTableComment } from '@shared/dialect/ddl';
 import { Icon } from './Icon';
 
 interface TableStructureDialogProps {
@@ -33,6 +33,8 @@ export function TableStructureDialog({
   const [fkOnUpdate, setFkOnUpdate] = useState('NO ACTION');
   const [uniqueName, setUniqueName] = useState('');
   const [uniqueColumns, setUniqueColumns] = useState('');
+  const [checkName, setCheckName] = useState('');
+  const [checkExpression, setCheckExpression] = useState('');
 
   const generated = editing ? buildTableComment(dialect, detail.name, draft) : null;
 
@@ -113,6 +115,22 @@ export function TableStructureDialog({
     await executeConstraint(
       buildDropIndex(dialect, name, detail.name),
       '唯一索引已删除；请关闭后重新打开查看最新结构。',
+      true,
+    );
+  };
+
+  const addCheck = async () => {
+    await executeConstraint(
+      buildAddCheck(dialect, detail.name, checkName, checkExpression),
+      'CHECK 约束已添加；请关闭后重新打开查看最新结构。',
+    );
+  };
+
+  const dropCheck = async (name: string) => {
+    if (!window.confirm(`删除 CHECK 约束「${name}」？`)) return;
+    await executeConstraint(
+      buildDropCheck(dialect, detail.name, name),
+      'CHECK 约束已删除；请关闭后重新打开查看最新结构。',
       true,
     );
   };
@@ -248,10 +266,44 @@ export function TableStructureDialog({
                 <li key={`${check.name ?? 'check'}-${index}`}>
                   <strong>{check.name ?? `CHECK ${index + 1}`}</strong>
                   <span>{check.expression}</span>
+                  {check.name && (
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      disabled={busy || !onExecute}
+                      onClick={() => void dropCheck(check.name!)}
+                    >
+                      删除
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           )}
+
+          <h3>添加 CHECK</h3>
+          <div className="structure-constraint-form">
+            <label className="field">
+              <span>约束名</span>
+              <input value={checkName} onChange={(event) => setCheckName(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>表达式</span>
+              <input
+                value={checkExpression}
+                placeholder="如 amount > 0"
+                onChange={(event) => setCheckExpression(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !onExecute}
+              onClick={() => void addCheck()}
+            >
+              添加 CHECK
+            </button>
+          </div>
 
           <h3>外键（{detail.foreignKeys.length}）</h3>
           {detail.foreignKeys.length === 0 ? (

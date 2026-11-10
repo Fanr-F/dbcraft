@@ -1172,7 +1172,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 
 | ID | 缺口 | 来源 | 优先级 | 状态 |
 |---|---|---|---|---|
-| K-01 | DDL：唯一约束/索引变更进设计页签、CHECK/外键编辑、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
+| K-01 | DDL：唯一约束/索引变更进设计页签、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
 | K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid` | §5、§3.4.5 | P1 | 🟡 |
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出 | §3.6.4 | P2 | ❌ |
 | K-04 | 编辑器：SQLite ATTACH 库内对象、MySQL 跨库列、错误波浪线、代码折叠、`GO 5`、驱动级多结果集、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
@@ -1504,6 +1504,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-64 M04-07 MSSQL 表注释编辑**：诉求是 MSSQL 表注释也能在 UI 编辑。变更：`buildTableComment('mssql', ...)` 生成 `sp_addextendedproperty` / `sp_updateextendedproperty` / `sp_dropextendedproperty` 条件脚本，支持 `schema.table` 与引号转义；表结构弹窗头部文案改为注释可直接编辑；`test-ddl` 增加 MSSQL 注释用例。涉及 `src/shared/dialect/ddl.ts`、`src/renderer/src/components/TableStructureDialog.tsx`、`scripts/test-ddl.mjs`。验证：`npm run typecheck`、`npm run test:ddl`、`npm run build` 通过；未在真实 SQL Server 上验证扩展属性。遗留：SQLite 本身没有表注释；MSSQL 扩展属性依赖当前账号权限。
 - **W-20261109-65 M04-05 外键/唯一约束编辑**：诉求是表结构弹窗不再只展示约束。变更：`ddl.ts` 新增 `buildAddForeignKey` / `buildDropForeignKey`（MySQL 系 `DROP FOREIGN KEY`、MSSQL `DROP CONSTRAINT`、SQLite 明确要求重建）；`TableStructureDialog` 增加外键表单（列/引用表/引用列/ON DELETE/ON UPDATE）与唯一索引表单、删除按钮；新增约束表单样式；`test-ddl` 增加外键用例。涉及 `src/shared/dialect/ddl.ts`、`src/renderer/src/components/TableStructureDialog.tsx`、`src/renderer/src/styles.css`、`scripts/test-ddl.mjs`。验证：`npm run typecheck`、`npm run test:ddl`、`npm run build` 通过；未在真实 MySQL/MSSQL 上执行。遗留：主键仍只读；SQLite 外键增删仍需重建，UI 只提示；唯一约束以唯一索引实现。
 - **W-20261109-66 M04-11 可编辑 DDL 预览**：诉求是表设计预览可编辑并恢复默认。变更：`TableDesignTab` 增加 `editedSql` 状态，预览 textarea 可编辑；执行时按方言用 `splitSqlStatements` 重新分句；提供「恢复为 UI 生成结果」。涉及 `src/renderer/src/components/TableDesignTab.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中编辑预览执行。遗留：其他小型 DDL 弹窗仍未全部开放编辑。
+- **W-20261109-67 M04-06 CHECK 约束编辑**：诉求是表结构弹窗可增删 CHECK。变更：`ddl.ts` 新增 `buildAddCheck` / `buildDropCheck`（MySQL `DROP CHECK`、MariaDB/MSSQL `DROP CONSTRAINT`、SQLite 明确要求重建）；`TableStructureDialog` 增加 CHECK 表单与删除按钮；`test-ddl` 增加用例。涉及 `src/shared/dialect/ddl.ts`、`src/renderer/src/components/TableStructureDialog.tsx`、`scripts/test-ddl.mjs`。验证：`npm run typecheck`、`npm run test:ddl`、`npm run build` 通过；未在真实 MySQL/MSSQL 上执行。遗留：SQLite CHECK 增删仍需重建；无编辑（只能删后重加）。
 
 ---
 

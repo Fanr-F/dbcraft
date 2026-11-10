@@ -411,8 +411,7 @@ export function buildAddForeignKey(
 }
 
 /** 删除外键；SQLite 需要重建表，返回明确错误。 */
-export function buildDropForeignKey(
-  dialect: DatabaseType,
+export function buildDropForeignKey(  dialect: DatabaseType,
   tableName: string,
   name: string,
 ): DdlGenerateResult {
@@ -434,6 +433,59 @@ export function buildDropForeignKey(
       dialect === 'mysql' || dialect === 'percona' || dialect === 'mariadb'
         ? `ALTER TABLE ${quoteQualified(dialect, table.name)} DROP FOREIGN KEY ${quoteIdent(dialect, constraint.name)};`
         : `ALTER TABLE ${quoteQualified(dialect, table.name)} DROP CONSTRAINT ${quoteIdent(dialect, constraint.name)};`,
+    warnings: [],
+  };
+}
+
+/** ALTER TABLE ... ADD/DROP CHECK；SQLite 需要重建表。 */
+export function buildAddCheck(
+  dialect: DatabaseType,
+  tableName: string,
+  name: string,
+  expression: string,
+): DdlGenerateResult {
+  if (dialect === 'sqlite') {
+    return {
+      ok: false,
+      message: 'SQLite 添加 CHECK 约束需要重建表；请使用表设计页签或 SQL 编辑器。',
+      warnings: [],
+    };
+  }
+  const table = requireName(tableName, '表名');
+  if (!table.ok) return { ok: false, message: table.message, warnings: [] };
+  const constraint = requireName(name, '约束名');
+  if (!constraint.ok) return { ok: false, message: constraint.message, warnings: [] };
+  const body = expression.trim();
+  if (!body) return { ok: false, message: 'CHECK 表达式不能为空。', warnings: [] };
+
+  return {
+    ok: true,
+    sql: `ALTER TABLE ${quoteQualified(dialect, table.name)} ADD CONSTRAINT ${quoteIdent(dialect, constraint.name)} CHECK (${body});`,
+    warnings: [],
+  };
+}
+
+export function buildDropCheck(
+  dialect: DatabaseType,
+  tableName: string,
+  name: string,
+): DdlGenerateResult {
+  if (dialect === 'sqlite') {
+    return {
+      ok: false,
+      message: 'SQLite 删除 CHECK 约束需要重建表；请使用表设计页签或 SQL 编辑器。',
+      warnings: [],
+    };
+  }
+  const table = requireName(tableName, '表名');
+  if (!table.ok) return { ok: false, message: table.message, warnings: [] };
+  const constraint = requireName(name, '约束名');
+  if (!constraint.ok) return { ok: false, message: constraint.message, warnings: [] };
+
+  const action = dialect === 'mysql' || dialect === 'percona' ? 'DROP CHECK' : 'DROP CONSTRAINT';
+  return {
+    ok: true,
+    sql: `ALTER TABLE ${quoteQualified(dialect, table.name)} ${action} ${quoteIdent(dialect, constraint.name)};`,
     warnings: [],
   };
 }

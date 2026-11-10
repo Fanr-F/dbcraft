@@ -5,11 +5,13 @@
  */
 import { buildTableDesign } from '../src/shared/dialect/table-diff.ts';
 import {
+  buildAddCheck,
   buildAddColumn,
   buildAddForeignKey,
   buildCreateIndex,
   buildCreateTable,
   buildCreateView,
+  buildDropCheck,
   buildDropColumn,
   buildDropForeignKey,
   buildDropIndex,
@@ -445,6 +447,30 @@ assert(
 );
 
 console.log('ddl foreign key check passed');
+
+// CHECK
+expectSql(
+  buildAddCheck('mysql', 'orders', 'ck_amount', 'amount > 0'),
+  'ALTER TABLE `orders` ADD CONSTRAINT `ck_amount` CHECK (amount > 0);',
+);
+expectSql(
+  buildDropCheck('mysql', 'orders', 'ck_amount'),
+  'ALTER TABLE `orders` DROP CHECK `ck_amount`;',
+);
+expectSql(
+  buildDropCheck('mariadb', 'orders', 'ck_amount'),
+  'ALTER TABLE `orders` DROP CONSTRAINT `ck_amount`;',
+);
+expectSql(
+  buildDropCheck('mssql', 'dbo.orders', 'ck_amount'),
+  'ALTER TABLE [dbo].[orders] DROP CONSTRAINT [ck_amount];',
+);
+assert(
+  !buildAddCheck('sqlite', 'orders', 'ck_amount', 'amount > 0').ok,
+  'sqlite check should require rebuild',
+);
+
+console.log('ddl check constraint check passed');
 
 // TABLE DESIGN：新建与编辑差异
 const detail = {
