@@ -818,6 +818,8 @@ export interface DBCraftApi {
     openSql: () => Promise<SqlFileOpenResult>;
     readSql: (path: string) => Promise<SqlFileOpenResult>;
     saveSql: (request: SqlFileSaveRequest) => Promise<SqlFileSaveResult>;
+    /** 拖入的 File 对象转本地路径；沙箱渲染层不能直接读取 path。 */
+    getPathForFile: (file: unknown) => string;
   };
   log: {
     write: (level: LogLevel, scope: string, message: string, meta?: string) => void;

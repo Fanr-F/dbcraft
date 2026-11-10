@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import {
   IPC_CHANNELS,
   type ConnectionInput,
@@ -126,6 +126,7 @@ const api: DBCraftApi = {
     openSql: () => ipcRenderer.invoke(IPC_CHANNELS.fileOpenSql),
     readSql: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.fileReadSql, { path }),
     saveSql: (request) => ipcRenderer.invoke(IPC_CHANNELS.fileSaveSql, request),
+    getPathForFile: (file) => webUtils.getPathForFile(file as File),
   },
   log: {
     write: (level, scope, message, meta) =>

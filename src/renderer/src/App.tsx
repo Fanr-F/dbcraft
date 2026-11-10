@@ -638,6 +638,41 @@ export default function App() {
     };
   }, []);
 
+  // 拖入 SQLite 文件时直接打开新建连接对话框。
+  useEffect(() => {
+    const api = window.dbcraft;
+    if (!api) return;
+    const onDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    };
+    const onDrop = (event: DragEvent) => {
+      const file = event.dataTransfer?.files?.[0];
+      if (!file) return;
+      event.preventDefault();
+      const path = api.file.getPathForFile(file);
+      if (!path || !/\.(db|sqlite|sqlite3)$/i.test(path)) {
+        showNotice('error', '只支持拖入 .db / .sqlite / .sqlite3 文件。');
+        return;
+      }
+      setConnectionDialog({
+        mode: 'create',
+        initial: {
+          type: 'sqlite',
+          filePath: path,
+          name: file.name.replace(/\.(db|sqlite|sqlite3)$/i, '') || 'SQLite',
+          group: '',
+          env: 'dev',
+        },
+      });
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, []);
+
   // 重启后恢复标签会话与结果：重新打开保存连接并执行草稿 SQL（不缓存旧结果）。
   useEffect(() => {
     if (restoredSessions.current || connections.length === 0) return;
