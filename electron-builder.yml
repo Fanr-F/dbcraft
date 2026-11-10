@@ -12,6 +12,12 @@ files:
 
 asar: true
 
+# better-sqlite3 是 N-API 预编译，不需要也不应让 electron-builder 重新 node-gyp 编译。
+npmRebuild: false
+
+# 离线环境直接复用 npm 安装的 Electron，避免 electron-builder 再下载 zip。
+electronDist: node_modules/electron/dist
+
 asarUnpack:
   - out/main/**
   - "**/*.node"
