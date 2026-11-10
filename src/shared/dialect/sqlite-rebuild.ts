@@ -97,10 +97,11 @@ export function buildSqliteRebuild(
     createSql = create.sql;
   }
 
+  createSql = injectSqliteConstraints(createSql, detail);
+
   const columnList = detail.columns
     .map((column) => quoteIdent('sqlite', column.name))
-    .join(', ');
-  const statements = [
+    .join(', ');  const statements = [
     createSql,
     `INSERT INTO ${quoteIdent('sqlite', tempName)} (${columnList}) SELECT ${columnList} FROM ${quoteIdent(
       'sqlite',
@@ -133,9 +134,9 @@ export function buildSqliteRebuild(
   }
 
   if (detail.foreignKeys.length > 0) {
-    warnings.push(`原表有 ${detail.foreignKeys.length} 个外键定义，重建后不会保留。`);
+    warnings.push(`已保留 ${detail.foreignKeys.length} 个外键定义。`);
   }
-  warnings.push('重建不会保留 CHECK 约束、触发器和表注释；请在预览中核对这些差异。');
+  warnings.push('重建会保留外键与 CHECK；触发器、视图和表注释不会保留，请在预览中核对这些差异。');
   warnings.push('外键检查通过后才会提交；失败会整体回滚。');
 
   return { ok: true, statements, warnings };
@@ -222,6 +223,8 @@ export function buildSqliteRebuildTable(
     createSql = create.sql;
   }
 
+  createSql = injectSqliteConstraints(createSql, detail);
+
   const originalNames = new Set(detail.columns.map((column) => column.name));
   const pairs = columns
     .filter((column) => column.originalName && originalNames.has(column.originalName))
@@ -278,12 +281,40 @@ export function buildSqliteRebuildTable(
     warnings.push('新增的非空列没有默认值：迁移已有数据可能失败。');
   }
   if (detail.foreignKeys.length > 0) {
-    warnings.push(`原表有 ${detail.foreignKeys.length} 个外键定义，重建后不会保留。`);
+    warnings.push(`已保留 ${detail.foreignKeys.length} 个外键定义。`);
   }
-  warnings.push('重建不会保留 CHECK 约束、触发器和表注释；请在预览中核对这些差异。');
+  warnings.push('重建会保留外键与 CHECK；触发器、视图和表注释不会保留，请在预览中核对这些差异。');
   warnings.push('外键检查通过后才会提交；失败会整体回滚。');
 
   return { ok: true, statements, warnings };
+}
+
+function injectSqliteConstraints(sql: string, detail: TableDetail): string {
+  const lines: string[] = [];
+  for (const foreignKey of detail.foreignKeys ?? []) {
+    const columns = foreignKey.columns.map((column) => quoteIdent('sqlite', column)).join(', ');
+    const referenced = foreignKey.referencedColumns
+      .map((column) => quoteIdent('sqlite', column))
+      .join(', ');
+    const actions = [
+      foreignKey.onDelete ? `ON DELETE ${foreignKey.onDelete}` : '',
+      foreignKey.onUpdate ? `ON UPDATE ${foreignKey.onUpdate}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    lines.push(
+      `FOREIGN KEY (${columns}) REFERENCES ${quoteIdent(
+        'sqlite',
+        foreignKey.referencedTable,
+      )} (${referenced})${actions ? ` ${actions}` : ''}`,
+    );
+  }
+  for (const check of detail.checks ?? []) {
+    const name = check.name ? `CONSTRAINT ${quoteIdent('sqlite', check.name)} ` : '';
+    lines.push(`${name}CHECK (${check.expression})`);
+  }
+  if (lines.length === 0) return sql;
+  return sql.replace(/\);\s*$/, `,\n  ${lines.join(',\n  ')}\n);`);
 }
 
 function renderCompositeColumn(column: DdlColumnDefinition): string {

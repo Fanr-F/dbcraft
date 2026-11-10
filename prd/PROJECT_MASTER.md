@@ -1172,7 +1172,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 
 | ID | 缺口 | 来源 | 优先级 | 状态 |
 |---|---|---|---|---|
-| K-01 | DDL：唯一约束/索引变更进设计页签、列序调整、可编辑预览、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
+| K-01 | DDL：唯一约束/索引变更进设计页签、列序调整、SQLite 重建保留触发器/视图、MSSQL 默认值/computed/rowversion | §3.4.4 / §3.7、§5 | P1/P2 | ❌/⏸ |
 | K-02 | 表数据：类型化编辑器、多列排序、多条件 AND 过滤、NULL vs 默认值、`IDENTITY_INSERT`、BLOB 查看器、多行删除、SQLite `rowid` | §5、§3.4.5 | P1 | 🟡 |
 | K-03 | 结果/导出：真流式写文件、进度/取消、>1 万行、选中区域/全部结果集导出 | §3.6.4 | P2 | ❌ |
 | K-04 | 编辑器：SQLite ATTACH 库内对象、MySQL 跨库列、错误波浪线、代码折叠、`GO 5`、驱动级多结果集、参数化执行 | §3.4.2、§5 | P1/P2 | 🟡 |
@@ -1506,6 +1506,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-66 M04-11 可编辑 DDL 预览**：诉求是表设计预览可编辑并恢复默认。变更：`TableDesignTab` 增加 `editedSql` 状态，预览 textarea 可编辑；执行时按方言用 `splitSqlStatements` 重新分句；提供「恢复为 UI 生成结果」。涉及 `src/renderer/src/components/TableDesignTab.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中编辑预览执行。遗留：其他小型 DDL 弹窗仍未全部开放编辑。
 - **W-20261109-67 M04-06 CHECK 约束编辑**：诉求是表结构弹窗可增删 CHECK。变更：`ddl.ts` 新增 `buildAddCheck` / `buildDropCheck`（MySQL `DROP CHECK`、MariaDB/MSSQL `DROP CONSTRAINT`、SQLite 明确要求重建）；`TableStructureDialog` 增加 CHECK 表单与删除按钮；`test-ddl` 增加用例。涉及 `src/shared/dialect/ddl.ts`、`src/renderer/src/components/TableStructureDialog.tsx`、`scripts/test-ddl.mjs`。验证：`npm run typecheck`、`npm run test:ddl`、`npm run build` 通过；未在真实 MySQL/MSSQL 上执行。遗留：SQLite CHECK 增删仍需重建；无编辑（只能删后重加）。
 - **W-20261109-68 M04-18 阻止不安全 SQLite 重建**：诉求是识别 `WITHOUT ROWID`/STRICT/生成列并阻止重建。变更：`TableDetail` 增加 `tableSql`，SQLite `getTableDetail` 返回原始 `CREATE TABLE`；`buildSqliteRebuild`/`buildSqliteRebuildTable` 检测到这些结构时返回明确错误；`test-sqlite-rebuild` 增加三类阻止用例。涉及 `src/shared/ipc-contract.ts`、`src/main/services/sqlite/SqliteSession.ts`、`src/shared/dialect/sqlite-rebuild.ts`、`scripts/test-sqlite-rebuild.mjs`。验证：`npm run typecheck`、`npm run test:sqlite-rebuild`、`npm run build` 通过。遗留：只做阻止，不提供手工重建向导；正则可能对包含 `AS (` 的复杂默认值误判。
+- **W-20261109-69 M04-16 SQLite 重建保留外键/CHECK**：诉求是重建表时不再丢外键和 CHECK。变更：`injectSqliteConstraints` 把 `detail.foreignKeys` 与 `detail.checks` 注入新 `CREATE TABLE`；两个重建入口都调用；警告改为「外键/CHECK 已保留，触发器/视图/注释不保留」；`test-sqlite-rebuild` 增加保留断言。涉及 `src/shared/dialect/sqlite-rebuild.ts`、`scripts/test-sqlite-rebuild.mjs`。验证：`npm run typecheck`、`npm run test:sqlite-rebuild` 通过；未做真实 SQLite 回放外键/CHECK。遗留：触发器、视图仍不保留；外键表名未处理 schema 前缀。
 
 ---
 

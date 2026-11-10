@@ -69,6 +69,35 @@ for (const [tableSql, label] of [
   assert(blocked.message.includes('不支持安全重建'), `${label} message wrong`);
 }
 
+const withConstraints = buildSqliteRebuild(
+  {
+    ...detail,
+    foreignKeys: [
+      {
+        name: 'fk_users_team',
+        columns: ['name'],
+        referencedTable: 'teams',
+        referencedColumns: ['name'],
+        onDelete: 'CASCADE',
+        onUpdate: null,
+      },
+    ],
+    checks: [{ name: 'ck_users_name', expression: "length(name) > 0" }],
+  },
+  change,
+);
+assert(withConstraints.ok, 'constraint rebuild failed');
+assert(
+  withConstraints.statements[0].includes(
+    'FOREIGN KEY ("name") REFERENCES "teams" ("name") ON DELETE CASCADE',
+  ),
+  'foreign key not preserved',
+);
+assert(
+  withConstraints.statements[0].includes('CONSTRAINT "ck_users_name" CHECK (length(name) > 0)'),
+  'check constraint not preserved',
+);
+
 const composite = buildSqliteRebuild(
   {
     ...detail,
