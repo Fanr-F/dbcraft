@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { QueryCell, QueryColumn } from '@shared/ipc-contract';
 import { Icon } from '../../components/Icon';
@@ -19,6 +19,50 @@ interface ResultGridProps {
   onHeaderClick?: (columnName: string, additive: boolean) => void;
   onRowFocus?: (rowIndex: number) => void;
   onCellFocus?: (rowIndex: number, columnIndex: number) => void;
+  /** 表数据页的布局记忆键；为空时不做持久化（普通查询结果）。 */
+  layoutKey?: string;
+}
+
+/** 按表记忆的列布局：拖动后的宽度、隐藏列、固定前 N 列。 */
+interface GridColumnLayout {
+  widths: Record<string, number>;
+  hidden: string[];
+  pinned: number;
+}
+
+function emptyLayout(): GridColumnLayout {
+  return { widths: {}, hidden: [], pinned: 1 };
+}
+
+function readLayout(key: string | undefined): GridColumnLayout {
+  if (!key) return emptyLayout();
+  try {
+    const raw = window.localStorage.getItem(`dbcraft.gridLayout.${key}`);
+    if (!raw) return emptyLayout();
+    const parsed = JSON.parse(raw) as Partial<GridColumnLayout>;
+    return {
+      widths:
+        parsed.widths && typeof parsed.widths === 'object' ? parsed.widths : {},
+      hidden: Array.isArray(parsed.hidden)
+        ? parsed.hidden.filter((item): item is string => typeof item === 'string')
+        : [],
+      pinned:
+        typeof parsed.pinned === 'number' && parsed.pinned >= 0
+          ? Math.floor(parsed.pinned)
+          : 1,
+    };
+  } catch {
+    return emptyLayout();
+  }
+}
+
+function writeLayout(key: string | undefined, layout: GridColumnLayout): void {
+  if (!key) return;
+  try {
+    window.localStorage.setItem(`dbcraft.gridLayout.${key}`, JSON.stringify(layout));
+  } catch {
+    // localStorage 不可用时只影响记忆，不影响本次布局。
+  }
 }
 
 interface AfterEditDetail {
@@ -82,19 +126,42 @@ export function ResultGrid({
   onHeaderClick,
   onRowFocus,
   onCellFocus,
+  layoutKey,
 }: ResultGridProps) {
   const gridRef = useRef<HTMLElement | null>(null);
   const readOnlySet = useMemo(() => new Set(readOnlyColumns), [readOnlyColumns]);
+  const [layout, setLayout] = useState<GridColumnLayout>(() => readLayout(layoutKey));
+
+  useEffect(() => {
+    setLayout(readLayout(layoutKey));
+  }, [layoutKey]);
+
+  const updateLayout = (next: GridColumnLayout) => {
+    setLayout(next);
+    writeLayout(layoutKey, next);
+  };
+
+  const toggleColumn = (name: string) => {
+    const visible = columns.filter((column) => !layout.hidden.includes(column.name));
+    if (!layout.hidden.includes(name) && visible.length <= 1) return;
+    const hidden = layout.hidden.includes(name)
+      ? layout.hidden.filter((item) => item !== name)
+      : [...layout.hidden, name];
+    updateLayout({ ...layout, hidden });
+  };
 
   const gridColumns = useMemo(() => {
     const sample = rows.slice(0, 50);
+    let visibleIndex = 0;
 
-    return columns.map((column, index) => {
+    return columns.flatMap((column, index) => {
+      if (layout.hidden.includes(column.name)) return [];
       const contentWidth = sample.reduce(
         (width, row) => Math.max(width, String(row[index] ?? '').length * 8 + 28),
         0,
       );
-      const size = Math.min(360, Math.max(120, column.name.length * 9 + 56, contentWidth));
+      const autoSize = Math.min(360, Math.max(120, column.name.length * 9 + 56, contentWidth));
+      const size = layout.widths[column.name] ?? autoSize;
       const sortIndex = sorts.findIndex((item) => item.column === column.name);
       const sorted = sortIndex >= 0;
       const sortLabel = sorted
@@ -104,33 +171,48 @@ export function ResultGrid({
         : '';
       const label = sorted ? `${column.name} ${sortLabel}` : column.name;
       const dateLike = /date|time|year/i.test(column.declaredType ?? '');
+      const pinned = visibleIndex < layout.pinned;
+      visibleIndex += 1;
 
-      return {
-        prop: `c${index}`,
-        name: label,
-        size,
-        ...(index === 0 ? { pin: 'colPinStart' } : {}),
-        filter: 'string',
-        // 普通查询结果使用网格本地排序；表数据页由列头点击触发服务端 ORDER BY。
-        sortable: !onHeaderClick,
-        cellProperties: ((props: never) => cellProperties(props, dateLike)) as never,
-        readonly:
-          !editable || readOnlySet.has(column.name)
-            ? true
-            : typeof editableFromRow === 'number'
-              ? (params: { rowIndex: number }) => params.rowIndex < editableFromRow
-              : false,
-        // 列头悬停展示数据库返回的类型；没有类型信息时不伪造。
-        ...(column.declaredType
-          ? {
-              columnProperties: () => ({
-                title: `${column.name} · ${column.declaredType}`,
-              }),
-            }
-          : {}),
-      };
+      return [
+        {
+          prop: `c${index}`,
+          name: label,
+          size,
+          ...(pinned ? { pin: 'colPinStart' } : {}),
+          filter: 'string',
+          // 普通查询结果使用网格本地排序；表数据页由列头点击触发服务端 ORDER BY。
+          sortable: !onHeaderClick,
+          cellProperties: ((props: never) => cellProperties(props, dateLike)) as never,
+          readonly:
+            !editable || readOnlySet.has(column.name)
+              ? true
+              : typeof editableFromRow === 'number'
+                ? (params: { rowIndex: number }) => params.rowIndex < editableFromRow
+                : false,
+          // 列头悬停展示数据库返回的类型；没有类型信息时不伪造。
+          ...(column.declaredType
+            ? {
+                columnProperties: () => ({
+                  title: `${column.name} · ${column.declaredType}`,
+                }),
+              }
+            : {}),
+        },
+      ];
     }) as any[];
-  }, [columns, rows, editable, readOnlySet, editableFromRow, sorts]);
+  }, [
+    columns,
+    rows,
+    editable,
+    readOnlySet,
+    editableFromRow,
+    sorts,
+    layout.hidden,
+    layout.widths,
+    layout.pinned,
+    onHeaderClick,
+  ]);
 
   const source = useMemo(
     () =>
@@ -227,6 +309,33 @@ export function ResultGrid({
     return () => element.removeEventListener('beforecellfocus', handler);
   }, [onRowFocus, onCellFocus]);
 
+  // 列宽拖动结束后按表记忆。
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || !layoutKey) return;
+
+    const handler = (event: Event) => {
+      const detail = (
+        event as CustomEvent<Record<string, { prop?: string; size?: number }>>
+      ).detail;
+      if (!detail) return;
+      const widths = { ...layout.widths };
+      let changed = false;
+      for (const item of Object.values(detail)) {
+        if (!item || typeof item.prop !== 'string' || typeof item.size !== 'number') continue;
+        const index = Number(item.prop.slice(1));
+        const column = Number.isInteger(index) ? columns[index] : undefined;
+        if (!column) continue;
+        widths[column.name] = item.size;
+        changed = true;
+      }
+      if (changed) updateLayout({ ...layout, widths });
+    };
+
+    element.addEventListener('aftercolumnresize', handler);
+    return () => element.removeEventListener('aftercolumnresize', handler);
+  }, [layoutKey, layout, columns]);
+
   if (columns.length === 0) {
     return (
       <div className="grid-host">
@@ -241,6 +350,51 @@ export function ResultGrid({
 
   return (
     <div className="grid-host">
+      {layoutKey && (
+        <div className="grid-layout">
+          <details>
+            <summary>列</summary>
+            <div className="grid-layout-panel">
+              <label className="grid-layout-pin">
+                固定前
+                <select
+                  value={layout.pinned}
+                  aria-label="固定前几列"
+                  onChange={(event) =>
+                    updateLayout({ ...layout, pinned: Number(event.target.value) })
+                  }
+                >
+                  {[0, 1, 2, 3, 4, 5].map((count) => (
+                    <option key={count} value={count}>
+                      {count}
+                    </option>
+                  ))}
+                </select>
+                列
+              </label>
+              <div className="grid-layout-columns">
+                {columns.map((column) => (
+                  <label key={column.name} title={column.declaredType ?? undefined}>
+                    <input
+                      type="checkbox"
+                      checked={!layout.hidden.includes(column.name)}
+                      onChange={() => toggleColumn(column.name)}
+                    />
+                    {column.name}
+                  </label>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => updateLayout(emptyLayout())}
+              >
+                重置列宽与隐藏
+              </button>
+            </div>
+          </details>
+        </div>
+      )}
       <RevoGrid
         key={columns.map((column) => column.name).join('|')}
         ref={gridRef as never}
@@ -249,6 +403,7 @@ export function ResultGrid({
         source={source}
         range={true}
         useClipboard={true}
+        resize={true}
         readonly={!editable}
         rowHeaders={true}
         filter={true}

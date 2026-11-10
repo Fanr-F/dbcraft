@@ -1184,6 +1184,11 @@ export function Workspace({
               []
             }
             sorts={activeSorts}
+            layoutKey={
+              activeTab.table
+                ? `${activeTab.connectionId ?? 'none'}:${activeTab.table.database ?? ''}:${activeTab.table.name}`
+                : undefined
+            }
             theme={theme}
             onCellChange={onCellChange}
             onCellsChange={onCellsChange}
