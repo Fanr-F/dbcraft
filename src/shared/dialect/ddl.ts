@@ -688,6 +688,7 @@ export function buildModifyColumn(
   tableName: string,
   columnName: string,
   column: DdlColumnDefinition,
+  position: { after?: string; first?: boolean } = {},
 ): DdlGenerateResult {
   if (dialect === 'sqlite') {
     return {
@@ -740,12 +741,17 @@ export function buildModifyColumn(
     };
   }
 
+  const positionSql = position.first
+    ? ' FIRST'
+    : position.after
+      ? ` AFTER ${quoteIdent(dialect, position.after)}`
+      : '';
   return {
     ok: true,
     sql: `ALTER TABLE ${quoteIdent(dialect, table.name)} MODIFY COLUMN ${renderColumn(
       dialect,
       { ...column, name: name.name },
-    )};`,
+    )}${positionSql};`,
     warnings,
   };
 }

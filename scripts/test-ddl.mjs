@@ -810,3 +810,50 @@ for (const [result, expected] of designFailures) {
 }
 
 console.log('ddl table design check passed');
+
+// COLUMN ORDER
+const orderDetail = {
+  ...detail,
+  primaryKey: [],
+  columns: detail.columns
+    .filter((column) => column.name !== 'id')
+    .map((column) => ({ ...column, primaryKey: false, autoIncrement: false })),
+};
+const mysqlOrder = buildTableDesign({
+  dialect: 'mysql',
+  mode: 'edit',
+  tableName: 'users',
+  detail: orderDetail,
+  columns: [
+    { name: 'note', type: 'TEXT', originalName: 'note' },
+    { name: 'name', type: 'VARCHAR(10)', originalName: 'name' },
+    { name: 'old_col', type: 'TEXT', originalName: 'old_col' },
+  ],
+});
+assert(mysqlOrder.ok, `mysql order change failed: ${mysqlOrder.ok ? '' : mysqlOrder.message}`);
+assert(
+  mysqlOrder.ok && mysqlOrder.statements[0].includes('MODIFY COLUMN `note` TEXT FIRST'),
+  'mysql first column reorder missing',
+);
+assert(
+  mysqlOrder.ok && mysqlOrder.statements[1].includes('AFTER `note`'),
+  'mysql reorder AFTER missing',
+);
+
+const sqliteOrder = buildTableDesign({
+  dialect: 'sqlite',
+  mode: 'edit',
+  tableName: 'users',
+  detail: orderDetail,
+  columns: [
+    { name: 'note', type: 'TEXT', originalName: 'note' },
+    { name: 'name', type: 'VARCHAR(10)', originalName: 'name' },
+    { name: 'old_col', type: 'TEXT', originalName: 'old_col' },
+  ],
+});
+assert(sqliteOrder.ok, 'sqlite order change failed');
+assert(
+  sqliteOrder.ok && sqliteOrder.statements[0].includes('"note" TEXT') &&
+    sqliteOrder.statements[0].indexOf('"note"') < sqliteOrder.statements[0].indexOf('"name"'),
+  'sqlite column order not applied',
+);

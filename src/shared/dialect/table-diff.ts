@@ -205,6 +205,76 @@ export function buildTableDesign(input: TableDesignInput): TableDesignResult {
     );
   });
 
+  const orderedExisting = resolved
+    .filter((column) => column.originalName)
+    .map((column) => column.originalName!);
+  const originalExisting = detail.columns
+    .filter((column) => usedOriginalNames.has(column.name))
+    .map((column) => column.name);
+  const orderChanged =
+    orderedExisting.length === originalExisting.length &&
+    orderedExisting.some((name, index) => name !== originalExisting[index]);
+
+  if (orderChanged) {
+    if (added.length > 0 || removed.length > 0 || renamed.length > 0 || modified.length > 0) {
+      return {
+        ok: false,
+        message: '列顺序调整请单独保存；不要与新增/删除/重命名/改列定义混在一起。',
+        warnings,
+      };
+    }
+    if (input.dialect === 'mssql') {
+      return {
+        ok: false,
+        message: 'MSSQL 不支持直接调整列顺序；请使用 SQL 编辑器重建表。',
+        warnings,
+      };
+    }
+    if (input.dialect === 'sqlite') {
+      const rebuilt = buildSqliteRebuildTable(detail, resolved, tableName);
+      if (!rebuilt.ok) {
+        return { ok: false, message: rebuilt.message, warnings: [...warnings, ...rebuilt.warnings] };
+      }
+      return {
+        ok: true,
+        statements: rebuilt.statements,
+        warnings: [...warnings, ...rebuilt.warnings, 'SQLite 通过重建表调整列顺序。'],
+        sqliteForeignKeysOff: true,
+      };
+    }
+    if (resolved.some((column) => column.primaryKey || column.autoIncrement)) {
+      return {
+        ok: false,
+        message: '包含主键/自增列的列顺序调整请使用 SQL 编辑器。',
+        warnings,
+      };
+    }
+    const statements: string[] = [];
+    for (let index = 0; index < resolved.length; index += 1) {
+      const column = resolved[index]!;
+      const built = buildModifyColumn(
+        input.dialect,
+        targetName,
+        column.name,
+        {
+          name: column.name,
+          type: column.type,
+          primaryKey: false,
+          autoIncrement: false,
+          notNull: column.notNull,
+          defaultValue: column.defaultValue,
+        },
+        index === 0 ? { first: true } : { after: resolved[index - 1]!.name },
+      );
+      if (!built.ok) {
+        return { ok: false, message: built.message, warnings: [...warnings, ...built.warnings] };
+      }
+      statements.push(built.sql);
+    }
+    warnings.push('列顺序调整通过逐列 MODIFY COLUMN 完成；请确认生成 SQL。');
+    return { ok: true, statements, warnings, sqliteForeignKeysOff: false };
+  }
+
   if (input.dialect === 'mssql') {
     const defaultChanged = modified.some((column) => {
       const original = column.originalName ? originals.get(column.originalName) : undefined;

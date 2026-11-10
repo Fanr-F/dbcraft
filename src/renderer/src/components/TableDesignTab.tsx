@@ -168,6 +168,16 @@ export function TableDesignTab({
     setColumns((current) => [...current, newColumn(dialect)]);
   };
 
+  const moveColumn = (index: number, delta: number) => {
+    setColumns((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
+  };
+
   const removeColumn = (index: number) => {
     setColumns((current) =>
       current.length <= 1 ? current : current.filter((_, position) => position !== index),
@@ -359,6 +369,26 @@ export function TableDesignTab({
                       updateColumn(index, 'defaultValue', event.target.value)
                     }
                   />
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="上移列"
+                    aria-label={`上移第 ${index + 1} 列`}
+                    disabled={index === 0}
+                    onClick={() => moveColumn(index, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="下移列"
+                    aria-label={`下移第 ${index + 1} 列`}
+                    disabled={index === columns.length - 1}
+                    onClick={() => moveColumn(index, 1)}
+                  >
+                    ↓
+                  </button>
                   <button
                     type="button"
                     className="icon-btn"
