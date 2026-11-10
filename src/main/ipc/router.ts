@@ -493,7 +493,12 @@ export function registerIpcHandlers(): void {
       if (!session) {
         return { ok: false, message: '当前标签不是 MSSQL 会话，请先连接 MSSQL。' };
       }
-      return listAgentJobs(session, parsed.data.search);
+      return listAgentJobs(
+        session,
+        parsed.data.search,
+        parsed.data.page,
+        parsed.data.pageSize,
+      );
     },
   );
 

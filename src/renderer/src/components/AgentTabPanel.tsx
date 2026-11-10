@@ -136,6 +136,9 @@ function AgentJobListView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(200);
+  const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<PanelNotice | null>(null);
@@ -143,42 +146,46 @@ function AgentJobListView({
   const api = window.dbcraft;
 
   const loadJobs = useCallback(
-    async (term: string) => {
+    async (term: string, nextPage = 0) => {
       if (!api || !ready) return;
       setLoading(true);
       setError(null);
       try {
-        const result = await api.agent.list(sessionId, term);
+        const result = await api.agent.list(sessionId, term, nextPage, pageSize);
         if (!result.ok) {
           setError(result.message);
           setJobs([]);
+          setTotal(0);
           return;
         }
         setJobs(result.jobs);
+        setTotal(result.total);
+        setPage(result.page);
         setSelected((current) =>
           current && result.jobs.some((job) => job.name === current) ? current : null,
         );
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
         setJobs([]);
+        setTotal(0);
       } finally {
         setLoading(false);
       }
     },
-    [api, ready, sessionId],
+    [api, ready, sessionId, pageSize],
   );
 
   useEffect(() => {
     if (!ready) return;
-    const timer = window.setTimeout(() => void loadJobs(search), 250);
+    const timer = window.setTimeout(() => void loadJobs(search, page), 250);
     return () => window.clearTimeout(timer);
-  }, [search, loadJobs, refreshToken, refreshKey, ready]);
+  }, [search, page, loadJobs, refreshToken, refreshKey, ready]);
 
   const selectedJob = jobs.find((job) => job.name === selected) ?? null;
   const multiServer = selectedJob?.multiServer === true;
 
   const refreshAll = async () => {
-    await loadJobs(search);
+    await loadJobs(search, page);
   };
 
   const runAction = async (action: AgentJobAction) => {
@@ -233,7 +240,10 @@ function AgentJobListView({
             value={search}
             placeholder="搜索作业名称…"
             aria-label="搜索作业"
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(0);
+            }}
           />
         </div>
         <button
@@ -359,6 +369,45 @@ function AgentJobListView({
               )}
             </tbody>
           </table>
+          <div className="table-pager">
+            <span className="pane-hint">共 {total} 个作业</span>
+            <button
+              type="button"
+              className="btn"
+              disabled={loading || page === 0}
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+            >
+              上一页
+            </button>
+            <span className="pane-hint">
+              第 {page + 1} / {Math.max(1, Math.ceil(total / pageSize))} 页
+            </span>
+            <button
+              type="button"
+              className="btn"
+              disabled={loading || (page + 1) * pageSize >= total}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              下一页
+            </button>
+            <span className="pane-hint">每页</span>
+            <select
+              className="page-size"
+              aria-label="每页作业数"
+              value={pageSize}
+              disabled={loading}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(0);
+              }}
+            >
+              {[200, 500, 1000].map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
     </div>

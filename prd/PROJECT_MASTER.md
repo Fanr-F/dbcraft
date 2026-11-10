@@ -1536,6 +1536,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261109-96 M07-06 网格提交设置**：诉求是把自动提交与提交前确认放进设置。变更：`AppSettings` 增加 `gridAutoCommit/gridConfirmCommit`（默认关闭）；设置面板可配置默认值；表标签仍可单独覆盖；自动提交 effect 与确认逻辑改为「标签覆盖值 ?? 设置默认值」。涉及 `src/shared/ipc-contract.ts`、`src/shared/settings.ts`、`src/renderer/src/components/SettingsDialog.tsx`、`src/renderer/src/App.tsx`、`scripts/test-settings.mjs`。验证：`npm run test:settings`、`npm run build` 通过；未在真实 Electron 中验证默认值生效。
 - **W-20261109-97 M07-15 快捷键复核**：诉求是快捷键自定义与冲突检测。核对现有实现：设置面板已支持执行/补全/格式化/保存/历史快捷键编辑、规范化与重复检测，与 M02-20 为同一实现。本次只修正矩阵状态并引用 W-20261109-62；无代码变更。
 - **W-20261109-98 M08-09 Agent 运行状态**：诉求是显示作业运行中/空闲。变更：`AgentJobSummary` 增加 `running`；作业查询增加 `sysjobactivity.stop_execution_date IS NULL` 判定；列表名称旁显示「运行中」标签，详情页增加「状态」项；补充运行中标签样式。涉及 `src/shared/ipc-contract.ts`、`src/main/services/mssql/agent-queries.ts`、`src/renderer/src/components/AgentTabPanel.tsx`、`src/renderer/src/styles.css`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 SQL Server Agent 上验证。
+- **W-20261109-99 M08-10 Agent 列表分页**：诉求是作业数 >1000 时不一次拉全量。变更：`AgentListResult` 增加 `total/page/pageSize`；`fetchJobs` 先 COUNT 再 `OFFSET/FETCH`；IPC/preload/schema 增加分页参数；列表页增加页码状态、200/500/1000 页大小与上一页/下一页，搜索时回到第一页。涉及 `src/shared/ipc-contract.ts`、`src/preload/index.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/main/services/mssql/agent-queries.ts`、`src/renderer/src/components/AgentTabPanel.tsx`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Agent 上验证 >1000 作业。
 
 ---
 

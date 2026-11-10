@@ -548,7 +548,7 @@ export interface AgentJobDetail extends AgentJobSummary {
 }
 
 export type AgentListResult =
-  | { ok: true; jobs: AgentJobSummary[] }
+  | { ok: true; jobs: AgentJobSummary[]; total: number; page: number; pageSize: number }
   | { ok: false; message: string };
 
 export type AgentDetailResult =
@@ -728,7 +728,12 @@ export interface DBCraftApi {
     apply: (request: TableApplyRequest) => Promise<TableApplyResult>;
   };
   agent: {
-    list: (sessionId: string, search?: string) => Promise<AgentListResult>;
+    list: (
+      sessionId: string,
+      search?: string,
+      page?: number,
+      pageSize?: number,
+    ) => Promise<AgentListResult>;
     detail: (sessionId: string, jobName: string, historyLimit?: number) => Promise<AgentDetailResult>;
     action: (
       sessionId: string,

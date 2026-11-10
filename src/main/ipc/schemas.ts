@@ -194,6 +194,8 @@ export const ddlExecuteSchema = z.object({  sessionId: z.string().min(1).max(128
 export const agentListSchema = z.object({
   sessionId: z.string().min(1).max(128),
   search: z.string().max(200).optional().default(''),
+  page: z.number().int().min(0).max(100_000).optional().default(0),
+  pageSize: z.number().int().min(1).max(1000).optional().default(200),
 });
 
 export const agentDetailSchema = z.object({

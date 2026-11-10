@@ -62,8 +62,8 @@ const api: DBCraftApi = {
     apply: (request) => ipcRenderer.invoke(IPC_CHANNELS.tableApply, request),
   },
   agent: {
-    list: (sessionId: string, search = '') =>
-      ipcRenderer.invoke(IPC_CHANNELS.agentList, { sessionId, search }),
+    list: (sessionId: string, search = '', page = 0, pageSize = 200) =>
+      ipcRenderer.invoke(IPC_CHANNELS.agentList, { sessionId, search, page, pageSize }),
     detail: (sessionId: string, jobName: string, historyLimit?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.agentDetail, { sessionId, jobName, historyLimit }),
     action: (sessionId, jobName, action, context = {}) =>

@@ -83,24 +83,44 @@ function mapSummary(row: readonly unknown[]): AgentJobSummary {
 export async function fetchJobs(
   session: MssqlSession,
   search: string,
-): Promise<AgentJobSummary[]> {
+  page = 0,
+  pageSize = 200,
+): Promise<{ jobs: AgentJobSummary[]; total: number }> {
   const pattern = search.trim() ? `%${escapeLikeValue(search.trim())}%` : null;
+  const safePage = Math.max(0, Math.floor(page));
+  const safeSize = Math.min(1000, Math.max(1, Math.floor(pageSize)));
+  const count = await session.query(
+    `SELECT COUNT(*) AS total FROM msdb.dbo.sysjobs j
+     WHERE (@p1 IS NULL OR j.name LIKE @p1 ESCAPE '!')`,
+    [pattern],
+  );
+  const total = number(count.rows[0]?.[0]);
   const result = await session.query(
     `SELECT ${JOB_COLUMNS}
      ${JOB_FROM}
      WHERE (@p1 IS NULL OR j.name LIKE @p1 ESCAPE '!')
-     ORDER BY j.name`,
-    [pattern],
+     ORDER BY j.name
+     OFFSET @p2 ROWS FETCH NEXT @p3 ROWS ONLY`,
+    [pattern, safePage * safeSize, safeSize],
   );
-  return result.rows.map(mapSummary);
+  return { jobs: result.rows.map(mapSummary), total };
 }
 
 export async function listAgentJobs(
   session: MssqlSession,
   search = '',
+  page = 0,
+  pageSize = 200,
 ): Promise<AgentListResult> {
   try {
-    return { ok: true, jobs: await fetchJobs(session, search) };
+    const result = await fetchJobs(session, search, page, pageSize);
+    return {
+      ok: true,
+      jobs: result.jobs,
+      total: result.total,
+      page: Math.max(0, Math.floor(page)),
+      pageSize: Math.min(1000, Math.max(1, Math.floor(pageSize))),
+    };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
