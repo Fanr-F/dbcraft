@@ -2023,10 +2023,8 @@ export default function App() {
       changed = true;
 
       if (isInsert) {
-        const values = { ...state.inserts[rowIndex], [columnMeta.name]: next };
-        // 留空的新增列交给数据库默认值，而不是显式写 NULL。
-        if (next === null) delete values[columnMeta.name];
-        state.inserts[rowIndex] = values;
+        // 新增行只有被实际编辑的列才写入 INSERT；显式 NULL 也会保留为列值。
+        state.inserts[rowIndex] = { ...state.inserts[rowIndex], [columnMeta.name]: next };
         continue;
       }
 
@@ -2063,6 +2061,101 @@ export default function App() {
 
   const editTableCell = (rowIndex: number, columnIndex: number, value: QueryCell) => {
     applyCellChanges([{ rowIndex, columnIndex, value }]);
+  };
+
+  /** 右键「设为 NULL」/「使用默认值」：绕过编辑器的空串归一化。 */
+  const setFocusedCellSpecial = (
+    mode: 'null' | 'default',
+    targetRow?: number,
+    targetColumn?: number,
+  ) => {
+    const tab = activeTab;
+    const meta = tableMetas[tab.id];
+    const run = runs[tab.id];
+    const focus =
+      targetRow !== undefined && targetColumn !== undefined
+        ? { rowIndex: targetRow, columnIndex: targetColumn }
+        : focusedCells[tab.id];
+    if (!tab.table || !meta || !run || !focus || !tableEditable) return;
+
+    const { rowIndex, columnIndex } = focus;
+    const column = run.columns[columnIndex];
+    const columnMeta = column
+      ? meta.columns.find((item) => item.name === column.name)
+      : undefined;
+    const row = run.rows[rowIndex];
+    if (!column || !columnMeta || !row) return;
+
+    const state: PendingTableEdits = structuredClone(
+      pendingTableEdits[tab.id] ?? emptyPendingTableEdits(),
+    );
+    const isInsert = state.inserts[rowIndex] !== undefined;
+    const identityEditable =
+      activeIdentityInsert && columnMeta.autoIncrement && isInsert;
+    const readOnly =
+      columnMeta.readOnly &&
+      !(activePkEditMode && columnMeta.primaryKey) &&
+      !identityEditable;
+    if (readOnly) {
+      showNotice('error', `列「${columnMeta.name}」为只读列。`);
+      return;
+    }
+    if (activeNoPkMode && !isInsert) {
+      showNotice('error', '无主键表只能修改本次新增的行。');
+      return;
+    }
+    if (mode === 'default' && !isInsert) {
+      showNotice('error', '只有新增行可以使用数据库默认值。');
+      return;
+    }
+
+    snapshotTableEdit(tab.id);
+    const rows = run.rows.map((item) => [...item]);
+    rows[rowIndex]![columnIndex] = null;
+
+    if (isInsert) {
+      const values = { ...state.inserts[rowIndex] };
+      if (mode === 'null') values[columnMeta.name] = null;
+      else delete values[columnMeta.name];
+      state.inserts[rowIndex] = values;
+    } else {
+      const existing = state.updates[rowIndex];
+      const keys: Record<string, QueryCell> = existing ? { ...existing.keys } : {};
+      if (!existing) {
+        const keyIndexes = meta.primaryKey.map((name) =>
+          run.columns.findIndex((item) => item.name === name),
+        );
+        if (keyIndexes.some((index) => index < 0)) {
+          showNotice('error', '无法定位主键列，已取消本次操作。');
+          return;
+        }
+        meta.primaryKey.forEach((name, index) => {
+          keys[name] = rows[rowIndex]?.[keyIndexes[index]!] ?? null;
+        });
+      }
+      const previous = run.rows[rowIndex]?.[columnIndex] ?? null;
+      const original: Record<string, QueryCell> = { ...(existing?.original ?? {}) };
+      if (!(columnMeta.name in original)) original[columnMeta.name] = previous;
+      const values: Record<string, QueryCell> = { ...(existing?.values ?? {}) };
+      if (mode === 'null' && previous === null) {
+        // 原本就是 NULL，右键设为 NULL 不产生数据库写入。
+        if (Object.keys(values).length === 0) return;
+      } else if (mode === 'null' && previous !== null) {
+        values[columnMeta.name] = null;
+      }
+      if (Object.keys(values).length === 0) {
+        delete state.updates[rowIndex];
+      } else {
+        state.updates[rowIndex] = { keys, values, original };
+      }
+    }
+
+    setRuns((current) => {
+      const target = current[tab.id];
+      if (!target) return current;
+      return { ...current, [tab.id]: { ...target, rows } };
+    });
+    setPendingTableEdits((current) => ({ ...current, [tab.id]: state }));
   };
 
   const commitTableEdits = async () => {
@@ -4255,6 +4348,13 @@ export default function App() {
           onExport={() => setExportOpen(true)}
           onCopyColumnNames={() => void copyColumnNames()}
           focusedCell={focusedCells[activeTab.id] ?? null}
+          insertRows={Object.keys(pendingTableEdits[activeTab.id]?.inserts ?? {}).map(Number)}
+          onSetCellNull={(rowIndex, columnIndex) =>
+            setFocusedCellSpecial('null', rowIndex, columnIndex)
+          }
+          onSetCellDefault={(rowIndex, columnIndex) =>
+            setFocusedCellSpecial('default', rowIndex, columnIndex)
+          }
           onCellFocus={(rowIndex, columnIndex) =>
             setFocusedCells((current) => ({
               ...current,

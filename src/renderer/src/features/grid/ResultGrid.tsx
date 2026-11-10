@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { QueryCell, QueryColumn } from '@shared/ipc-contract';
 import { Icon } from '../../components/Icon';
+import { ContextMenu } from '../../components/ContextMenu';
 import { typedEditor } from './typed-editor';
 
 interface ResultGridProps {
@@ -20,6 +21,12 @@ interface ResultGridProps {
   onHeaderClick?: (columnName: string, additive: boolean) => void;
   onRowFocus?: (rowIndex: number) => void;
   onCellFocus?: (rowIndex: number, columnIndex: number) => void;
+  /** 当前聚焦单元格；右键菜单据此定位。 */
+  focusedCell?: { rowIndex: number; columnIndex: number } | null;
+  /** 待新增的行号集合；这些行可使用数据库默认值。 */
+  insertRows?: number[];
+  onSetCellNull?: (rowIndex: number, columnIndex: number) => void;
+  onSetCellDefault?: (rowIndex: number, columnIndex: number) => void;
   /** 表数据页的布局记忆键；为空时不做持久化（普通查询结果）。 */
   layoutKey?: string;
 }
@@ -127,11 +134,21 @@ export function ResultGrid({
   onHeaderClick,
   onRowFocus,
   onCellFocus,
+  focusedCell,
+  insertRows = [],
+  onSetCellNull,
+  onSetCellDefault,
   layoutKey,
 }: ResultGridProps) {
   const gridRef = useRef<HTMLElement | null>(null);
   const readOnlySet = useMemo(() => new Set(readOnlyColumns), [readOnlyColumns]);
   const [layout, setLayout] = useState<GridColumnLayout>(() => readLayout(layoutKey));
+  const [cellMenu, setCellMenu] = useState<{
+    x: number;
+    y: number;
+    rowIndex: number;
+    columnIndex: number;
+  } | null>(null);
 
   useEffect(() => {
     setLayout(readLayout(layoutKey));
@@ -312,6 +329,30 @@ export function ResultGrid({
     return () => element.removeEventListener('beforecellfocus', handler);
   }, [onRowFocus, onCellFocus]);
 
+  // 右键菜单：设为 NULL / 使用默认值（仅新增行）。
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || !editable || (!onSetCellNull && !onSetCellDefault)) return;
+
+    const handler = (event: MouseEvent) => {
+      if (!focusedCell) return;
+      event.preventDefault();
+      setCellMenu({
+        x: event.clientX,
+        y: event.clientY,
+        rowIndex: focusedCell.rowIndex,
+        columnIndex: focusedCell.columnIndex,
+      });
+    };
+
+    element.addEventListener('contextmenu', handler);
+    return () => element.removeEventListener('contextmenu', handler);
+  }, [editable, focusedCell, onSetCellNull, onSetCellDefault]);
+
+  const menuColumn = cellMenu ? columns[cellMenu.columnIndex] : undefined;
+  const menuReadOnly = menuColumn ? readOnlySet.has(menuColumn.name) : true;
+  const menuIsInsert = cellMenu ? insertRows.includes(cellMenu.rowIndex) : false;
+
   // 列宽拖动结束后按表记忆。
   useEffect(() => {
     const element = gridRef.current;
@@ -353,6 +394,26 @@ export function ResultGrid({
 
   return (
     <div className="grid-host">
+      {cellMenu && (
+        <ContextMenu
+          x={cellMenu.x}
+          y={cellMenu.y}
+          onClose={() => setCellMenu(null)}
+          items={[
+            {
+              label: '设为 NULL',
+              disabled: menuReadOnly,
+              onSelect: () => onSetCellNull?.(cellMenu.rowIndex, cellMenu.columnIndex),
+            },
+            {
+              label: '使用默认值',
+              disabled: menuReadOnly || !menuIsInsert,
+              onSelect: () =>
+                onSetCellDefault?.(cellMenu.rowIndex, cellMenu.columnIndex),
+            },
+          ]}
+        />
+      )}
       {layoutKey && (
         <div className="grid-layout">
           <details>

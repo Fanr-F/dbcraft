@@ -161,6 +161,10 @@ interface WorkspaceProps {
   onExport: () => void;
   onCopyColumnNames: () => void;
   focusedCell: { rowIndex: number; columnIndex: number } | null;
+  /** 待新增行号，用于右键「使用默认值」。 */
+  insertRows?: number[];
+  onSetCellNull: (rowIndex: number, columnIndex: number) => void;
+  onSetCellDefault: (rowIndex: number, columnIndex: number) => void;
   onCellFocus: (rowIndex: number, columnIndex: number) => void;
   onViewCell: () => void;
   onCopyCell: () => void;
@@ -255,6 +259,9 @@ export function Workspace({
   onExport,
   onCopyColumnNames,
   focusedCell,
+  insertRows,
+  onSetCellNull,
+  onSetCellDefault,
   onCellFocus,
   onViewCell,
   onCopyCell,
@@ -1234,6 +1241,10 @@ export function Workspace({
             onCellsChange={onCellsChange}
             onRowFocus={onRowFocus}
             onCellFocus={onCellFocus}
+            focusedCell={focusedCell}
+            insertRows={insertRows}
+            onSetCellNull={onSetCellNull}
+            onSetCellDefault={onSetCellDefault}
             onHeaderClick={(column, additive) => {
               if (!activeTab.table || lockedByEdits) return;
               const current = activeSorts.find((item) => item.column === column);
