@@ -173,6 +173,7 @@ interface WorkspaceProps {
   insertRows?: number[];
   onSetCellNull: (rowIndex: number, columnIndex: number) => void;
   onSetCellDefault: (rowIndex: number, columnIndex: number) => void;
+  onExportRange: (columns: import('@shared/ipc-contract').QueryColumn[], rows: QueryCell[][]) => void;
   onCellFocus: (rowIndex: number, columnIndex: number) => void;
   onViewCell: () => void;
   onCopyCell: () => void;
@@ -278,6 +279,7 @@ export function Workspace({
   insertRows,
   onSetCellNull,
   onSetCellDefault,
+  onExportRange,
   onCellFocus,
   onViewCell,
   onCopyCell,
@@ -1303,6 +1305,7 @@ export function Workspace({
             insertRows={insertRows}
             onSetCellNull={onSetCellNull}
             onSetCellDefault={onSetCellDefault}
+            onExportRange={onExportRange}
             onRowRangeChange={onRowRangeChange}
             onHeaderClick={(column, additive) => {
               if (!activeTab.table || lockedByEdits) return;

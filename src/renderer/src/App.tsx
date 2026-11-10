@@ -461,6 +461,11 @@ export default function App() {
   } | null>(null);
   const [createViewOpen, setCreateViewOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportOverride, setExportOverride] = useState<{
+    columns: import('@shared/ipc-contract').QueryColumn[];
+    rows: QueryCell[][];
+    label: string;
+  } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [insertRequest, setInsertRequest] = useState<{
     text: string;
@@ -4598,6 +4603,10 @@ export default function App() {
           onSetCellDefault={(rowIndex, columnIndex) =>
             setFocusedCellSpecial('default', rowIndex, columnIndex)
           }
+          onExportRange={(columns, rows) => {
+            setExportOverride({ columns, rows, label: '选中区域' });
+            setExportOpen(true);
+          }}
           onCellFocus={(rowIndex, columnIndex) =>
             setFocusedCells((current) => ({
               ...current,
@@ -4715,15 +4724,35 @@ export default function App() {
         />
       )}
 
-      {exportOpen && activeConnection && activeRun.columns.length > 0 && (
+      {exportOpen && activeConnection && (exportOverride || activeRun.columns.length > 0) && (
         <ExportDialog
           dialect={activeConnection.input.type}
-          columns={activeRun.columns}
-          rows={activeRun.rows}
-          onClose={() => setExportOpen(false)}
+          columns={exportOverride?.columns ?? activeRun.columns}
+          rows={exportOverride?.rows ?? activeRun.rows}
+          datasets={
+            exportOverride
+              ? undefined
+              : activeRun.statements?.flatMap((statement, index) =>
+                  statement.statementType === 'select' &&
+                  !statement.error &&
+                  statement.columns.length > 0
+                    ? [
+                        {
+                          label: `结果 ${index + 1}`,
+                          columns: statement.columns,
+                          rows: statement.rows,
+                        },
+                      ]
+                    : [],
+                )
+          }
+          onClose={() => {
+            setExportOpen(false);
+            setExportOverride(null);
+          }}
           onSave={saveExport}
           onSaveXlsx={saveExportXlsx}
-          onLoadAll={loadAllForExport}
+          onLoadAll={exportOverride ? undefined : loadAllForExport}
         />
       )}
 

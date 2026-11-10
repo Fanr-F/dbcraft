@@ -3,10 +3,18 @@ import type { DatabaseType, ExportFormat, QueryCell, QueryColumn } from '@shared
 import { toCsv, toJson, toSqlInsert } from '@shared/export/formats';
 import { Icon } from './Icon';
 
+interface ExportDataset {
+  label: string;
+  columns: QueryColumn[];
+  rows: QueryCell[][];
+}
+
 interface ExportDialogProps {
   dialect: DatabaseType;
   columns: QueryColumn[];
   rows: QueryCell[][];
+  /** 多语句执行时可选的结果集；提供后对话框内可切换。 */
+  datasets?: ExportDataset[];
   onClose: () => void;
   onSave: (
     content: string,
@@ -48,6 +56,7 @@ export function ExportDialog({
   dialect,
   columns,
   rows,
+  datasets,
   onClose,
   onSave,
   onSaveXlsx,
@@ -60,10 +69,22 @@ export function ExportDialog({
   const [csvNullMarker, setCsvNullMarker] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [exportColumns, setExportColumns] = useState(columns);
-  const [exportRows, setExportRows] = useState(rows);
+  const [datasetIndex, setDatasetIndex] = useState(0);
+  const [exportColumns, setExportColumns] = useState(
+    datasets?.[0]?.columns ?? columns,
+  );
+  const [exportRows, setExportRows] = useState(datasets?.[0]?.rows ?? rows);
   const [loadMessage, setLoadMessage] = useState<string | null>(null);
   const [loadingAll, setLoadingAll] = useState(false);
+  const canLoadAll = Boolean(onLoadAll) && datasetIndex === 0;
+
+  const chooseDataset = (index: number) => {
+    setDatasetIndex(index);
+    const dataset = datasets?.[index];
+    setExportColumns(dataset?.columns ?? columns);
+    setExportRows(dataset?.rows ?? rows);
+    setLoadMessage(null);
+  };
 
   const loadAll = async () => {
     if (!onLoadAll || loadingAll) return;
@@ -165,6 +186,21 @@ export function ExportDialog({
             <p>
               将 {exportRows.length} 行 × {exportColumns.length} 列导出为文件；数据以数据库返回值为准。
             </p>
+            {datasets && datasets.length > 0 && (
+              <label className="field">
+                <span>结果集</span>
+                <select
+                  value={datasetIndex}
+                  onChange={(event) => chooseDataset(Number(event.target.value))}
+                >
+                  {datasets.map((dataset, index) => (
+                    <option key={`${dataset.label}-${index}`} value={index}>
+                      {dataset.label}（{dataset.rows.length} 行）
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
           <button
             type="button"
@@ -251,7 +287,7 @@ export function ExportDialog({
             数字保持数值、NULL 留空。导出只包含已加载的 {exportRows.length} 行。
           </p>
 
-          {onLoadAll && (
+          {canLoadAll && (
             <div className="export-load-all">
               <button
                 type="button"

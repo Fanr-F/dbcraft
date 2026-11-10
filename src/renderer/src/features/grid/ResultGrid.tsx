@@ -31,6 +31,8 @@ interface ResultGridProps {
   onSetCellDefault?: (rowIndex: number, columnIndex: number) => void;
   /** 拖拽/Shift 选择的行区间（含端点）。 */
   onRowRangeChange?: (start: number, end: number) => void;
+  /** 把当前选中区域交给上层打开导出对话框。 */
+  onExportRange?: (columns: QueryColumn[], rows: QueryCell[][]) => void;
   /** 表数据页的布局记忆键；为空时不做持久化（普通查询结果）。 */
   layoutKey?: string;
 }
@@ -144,6 +146,7 @@ export function ResultGrid({
   onSetCellNull,
   onSetCellDefault,
   onRowRangeChange,
+  onExportRange,
   layoutKey,
 }: ResultGridProps) {
   const gridRef = useRef<HTMLElement | null>(null);
@@ -420,6 +423,28 @@ export function ResultGrid({
     window.setTimeout(() => setCopyNotice(null), 1600);
   };
 
+  const exportSelection = () => {
+    const range =
+      selectedRange ??
+      (focusedCell
+        ? {
+            x: focusedCell.columnIndex,
+            y: focusedCell.rowIndex,
+            x1: focusedCell.columnIndex,
+            y1: focusedCell.rowIndex,
+          }
+        : null);
+    if (!range || !onExportRange) return;
+    const x = Math.min(range.x, range.x1);
+    const x1 = Math.max(range.x, range.x1);
+    const y = Math.min(range.y, range.y1);
+    const y1 = Math.max(range.y, range.y1);
+    onExportRange(
+      columns.slice(x, x1 + 1),
+      rows.slice(y, y1 + 1).map((row) => row.slice(x, x1 + 1)),
+    );
+  };
+
   const menuColumn = cellMenu ? columns[cellMenu.columnIndex] : undefined;
   const menuReadOnly = menuColumn ? readOnlySet.has(menuColumn.name) : true;
   const menuIsInsert = cellMenu ? insertRows.includes(cellMenu.rowIndex) : false;
@@ -510,6 +535,11 @@ export function ResultGrid({
                   .writeText(value === null || value === undefined ? '' : String(value))
                   .catch(() => undefined);
               },
+            },
+            {
+              label: '导出选中区域…',
+              disabled: !onExportRange,
+              onSelect: exportSelection,
             },
             {
               label: '设为 NULL',
