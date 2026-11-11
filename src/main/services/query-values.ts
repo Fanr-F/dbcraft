@@ -16,8 +16,10 @@ export function encodeCell(value: unknown): QueryCell {
   }
   if (value instanceof Uint8Array) {
     const buffer = Buffer.from(value);
-    const head = buffer.subarray(0, 32).toString('hex');
-    return `0x${head}${buffer.length > 32 ? '…' : ''}`;
+    // 网格只承载可显示的十六进制；限制 4 KB，完整二进制导出需要独立通道。
+    const limit = 4096;
+    const head = buffer.subarray(0, limit).toString('hex');
+    return `0x${head}${buffer.length > limit ? '…' : ''}`;
   }
   if (value instanceof Date) {
     return value.toISOString();

@@ -1436,6 +1436,12 @@ button:disabled {
   width: min(760px, 100%);
 }
 
+.cell-viewer-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 .cell-viewer-value {
   max-height: 52vh;
   margin: 0;

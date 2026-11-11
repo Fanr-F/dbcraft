@@ -122,7 +122,7 @@ function cellProperties(
     return { class: 'grid-cell-date', style: { textAlign: 'right' } };
   }
   if (typeof value === 'string' && value.length > 120) {
-    return { title: value };
+    return { title: value.length > 4096 ? `${value.slice(0, 4096)}…` : value };
   }
   return undefined;
 }
