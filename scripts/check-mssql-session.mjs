@@ -80,6 +80,12 @@ try {
   assert(duplicate.rows[0].length === 3, 'duplicate row cells lost');
   console.log('[重复列] ok');
 
+  const multi = await session.query('SELECT 1 AS a; SELECT 2 AS b;');
+  assert(multi.resultSets?.length === 2, `multi result sets lost: ${multi.resultSets?.length}`);
+  assert(multi.resultSets?.[0]?.rows[0]?.[0] === 1, 'first result set wrong');
+  assert(multi.resultSets?.[1]?.rows[0]?.[0] === 2, 'second result set wrong');
+  console.log('[多结果集] ok');
+
   const schema = await session.schema();
   assert(schema.some((item) => item.name === 'dbcraft_check'), 'schema missing test table');
   assert(

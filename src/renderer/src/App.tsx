@@ -1883,6 +1883,46 @@ export default function App() {
       });
 
       if (response.ok) {
+        const resultSets = response.result.resultSets;
+        if (resultSets && resultSets.length > 1) {
+          const outcomes = resultSets.map((set, index) => ({
+            sql: executableSql,
+            columns: set.columns,
+            rows: set.rows,
+            rowCount: set.rowCount,
+            elapsedMs: index === 0 ? response.result.elapsedMs : 0,
+            statementType: (set.columns.length > 0 ? 'select' : 'change') as
+              | 'select'
+              | 'change',
+            changes: set.columns.length > 0 ? null : set.rowCount,
+            truncated: set.truncated,
+            error: null,
+            errorMeta: null,
+            errorHint: null,
+          }));
+          const firstSelect = outcomes.findIndex(
+            (outcome) => outcome.statementType === 'select',
+          );
+          setRuns((current) => ({
+            ...current,
+            [tab.id]: {
+              ...(outcomes[firstSelect] ?? EMPTY_RUN),
+              executedAt: Date.now(),
+              error: null,
+              errorMeta: null,
+              errorHint: null,
+              statements: outcomes,
+              scriptTotal: outcomes.length,
+              activeResult: firstSelect >= 0 ? firstSelect : -1,
+            },
+          }));
+          clearEditHistory(tab.id);
+          if (outcomes.some((outcome) => outcome.truncated)) {
+            showNotice('info', '部分结果集超过行数上限，仅显示已加载行。');
+          }
+          return;
+        }
+
         setRuns((current) => ({
           ...current,
           [tab.id]: {

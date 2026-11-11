@@ -36,12 +36,19 @@ interface RawCell {
   metadata: ColumnMeta;
 }
 
+interface ExecResultSet {
+  columns: ColumnMeta[];
+  rows: RawCell[][];
+  truncated: boolean;
+}
+
 interface ExecResult {
   columns: ColumnMeta[];
   rows: RawCell[][];
   rowCount: number;
   truncated: boolean;
   messages: QueryMessage[];
+  resultSets: ExecResultSet[];
 }
 
 interface ObjectInfo {
@@ -233,38 +240,43 @@ export class MssqlSession implements DatabaseSession {
     const startedAt = Date.now();
     const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     const result = await this.run(sql, params ?? [], rowLimit);
-    const hasColumns = result.columns.length > 0;
     const formatRow = (row: RawCell[]): QueryCell[] =>
       row.map((cell) => formatMssqlCell(cell.value, cell.metadata?.type?.name ?? ''));
+    const resultSets = result.resultSets.map((set) => {
+      const rows = set.rows.map(formatRow);
+      const columns: QueryColumn[] = set.columns.map((column) => ({
+        name: column.colName,
+        declaredType: column.type?.name ?? null,
+      }));
+      return {
+        columns,
+        rows,
+        rowCount: rows.length,
+        truncated: set.truncated,
+      };
+    });
+    const primary =
+      resultSets.find((set) => set.columns.length > 0) ?? resultSets[0] ?? null;
 
-    if (!hasColumns) {
-      const changes = result.rowCount;
+    if (!primary || primary.columns.length === 0) {
       return {
         columns: [],
         rows: [],
-        rowCount: changes,
+        rowCount: result.rowCount,
         elapsedMs: Date.now() - startedAt,
         statementType: 'change',
-        changes,
+        changes: result.rowCount,
         truncated: false,
         ...(result.messages.length > 0 ? { messages: result.messages } : {}),
       };
     }
 
-    const rows = result.rows.map(formatRow);
-    const columns: QueryColumn[] = result.columns.map((column) => ({
-      name: column.colName,
-      declaredType: column.type?.name ?? null,
-    }));
-
     return {
-      columns,
-      rows,
-      rowCount: rows.length,
+      ...primary,
       elapsedMs: Date.now() - startedAt,
       statementType: 'select',
       changes: null,
-      truncated: result.truncated,
+      ...(resultSets.length > 1 ? { resultSets } : {}),
       ...(result.messages.length > 0 ? { messages: result.messages } : {}),
     };
   }
@@ -735,11 +747,24 @@ function execOn(
   onRequest?: (request: Request | null) => void,
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
-    const rows: RawCell[][] = [];
+    const resultSets: ExecResultSet[] = [];
+    let currentColumns: ColumnMeta[] = [];
+    let currentRows: RawCell[][] = [];
+    let currentTruncated = false;
     const messages: QueryMessage[] = [];
-    let columns: ColumnMeta[] = [];
-    let truncated = false;
     let settled = false;
+
+    const flushSet = () => {
+      if (currentColumns.length === 0 && currentRows.length === 0) return;
+      resultSets.push({
+        columns: currentColumns,
+        rows: currentRows,
+        truncated: currentTruncated,
+      });
+      currentColumns = [];
+      currentRows = [];
+      currentTruncated = false;
+    };
 
     const onInfo = (info: { message?: string; class?: number }) => {
       const text = info.message?.trim();
@@ -761,19 +786,29 @@ function execOn(
         reject(error);
         return;
       }
-      resolve({ columns, rows, rowCount: rowCount ?? rows.length, truncated, messages });
+      flushSet();
+      const first = resultSets[0];
+      resolve({
+        columns: first?.columns ?? [],
+        rows: first?.rows ?? [],
+        rowCount: rowCount ?? first?.rows.length ?? 0,
+        truncated: resultSets.some((set) => set.truncated),
+        messages,
+        resultSets,
+      });
     });
 
-    // 单语句语义：只保留第一个结果集的列。
+    // 每条 columnMetadata 代表一个新结果集；第一段之前的空集合忽略。
     request.on('columnMetadata', (metadata) => {
-      if (columns.length === 0) columns = metadata as unknown as ColumnMeta[];
+      flushSet();
+      currentColumns = metadata as unknown as ColumnMeta[];
     });
     request.on('row', (cells) => {
-      if (typeof rowLimit === 'number' && rows.length >= rowLimit) {
-        truncated = true;
+      if (typeof rowLimit === 'number' && currentRows.length >= rowLimit) {
+        currentTruncated = true;
         return;
       }
-      rows.push(cells as RawCell[]);
+      currentRows.push(cells as RawCell[]);
     });
 
     for (let index = 0; index < params.length; index += 1) {

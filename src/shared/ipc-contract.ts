@@ -123,6 +123,13 @@ export interface QueryMessage {
   text: string;
 }
 
+export interface QueryResultSet {
+  columns: QueryColumn[];
+  rows: QueryCell[][];
+  rowCount: number;
+  truncated: boolean;
+}
+
 export interface QueryResult {
   columns: QueryColumn[];
   rows: QueryCell[][];
@@ -133,6 +140,8 @@ export interface QueryResult {
   truncated: boolean;
   /** 驱动消息（MSSQL PRINT/RAISERROR、MySQL warning 等）。 */
   messages?: QueryMessage[];
+  /** 单个请求返回多个结果集时按顺序列出；单结果集省略。 */
+  resultSets?: QueryResultSet[];
 }
 
 export interface QueryError {
