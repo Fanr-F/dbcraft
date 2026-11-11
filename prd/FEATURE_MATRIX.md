@@ -27,7 +27,7 @@
 | MOD-08 MSSQL Agent | 11 | 1 | 0 | 3 | 15 |
 | 跨模块：标签/会话/事务 | 11 | 1 | 1 | 0 | 13 |
 | 发布门槛 | 4 | 2 | 2 | 0 | 8 |
-| **合计** | **140** | **16** | **0** | **8** | **164** |
+| **合计** | **141** | **15** | **0** | **8** | **164** |
 
 ---
 
@@ -223,7 +223,7 @@
 | M08-09 | 运行中/空闲状态（`sysjobactivity`） | ✅ | 列表/详情通过 `sysjobactivity.stop_execution_date IS NULL` 标记运行中（W-20261109-98） |
 | M08-10 | 作业数 >1000 的服务端分页 / 虚拟滚动 | ✅ | 列表查询 COUNT + OFFSET/FETCH，页大小 200/500/1000，工具栏翻页（W-20261109-99） |
 | M08-11 | 右键菜单（启动/停止/启用/禁用/打开/复制名称） | ✅ | 作业树右键菜单提供打开详情、启停、启禁用、复制名称（W-20261109-100） |
-| M08-12 | 权限不足 / Agent XPs 禁用透传原生错误 | 🟡 | 代码路径有；缺真机回归 |
+| M08-12 | 权限不足 / Agent XPs 禁用透传原生错误 | 🟡 | 真实实例已透传「SQLServerAgent 当前未运行」原生错误；服务未启动，启停/权限全流程未完成（W-20261111-107） |
 | M08-13 | Operators / Alerts / Proxies | ⏸ | PRD §9 v1.x |
 | M08-14 | UI 创建/编辑作业向导 | ⏸ | 统一走生成脚本 |
 | M08-15 | MSX/TSX 多服务器集中管理 | ⏸ | 明确不做 |
@@ -257,10 +257,10 @@
 | G-01 | `npm run typecheck` | ✅ | 当前代码通过 |
 | G-02 | 纯逻辑测试（21 组） | ✅ | safety/groups/ddl/export/history/errors/timeouts/pagination/settings/sql-*/xlsx/rebuild/checks/mssql/dml 等 |
 | G-03 | `npm run build` | ✅ | electron-vite 构建通过 |
-| G-04 | `npm run smoke` | 🟡 | 脚本存在；近期未在沙箱外补跑 |
+| G-04 | `npm run smoke` | ✅ | 已在 Windows 真机通过：shell/bridge/title 校验成功（W-20261111-107） |
 | G-05 | `e2e:sqlite` / `e2e:mysql` / `e2e:mssql` | ✅ | 真机/E2E 通过（W-20261109-23） |
-| G-06 | 真实 Electron 手工逐项验收 | 🟡 | 大量 UI 项仍是「待人工验收」 |
-| G-07 | 打包 / 签名 / 安装包 | 🟡 | `npm run pack` 可生成 `release/win-unpacked`（跳过 node-gyp、复用本地 Electron）；NSIS 安装包与代码签名未验证（W-20261109-105） |
+| G-06 | 真实 Electron 手工逐项验收 | 🟡 | SQLite/MySQL/MSSQL Electron E2E 与 smoke 通过；仍未逐项人工点击全部 UI（W-20261111-107） |
+| G-07 | 打包 / 签名 / 安装包 | 🟡 | `pack` 与 NSIS 安装包 `release/DBCraft-0.1.0-x64.exe` 已生成；无代码签名证书，签名跳过（W-20261111-108） |
 | G-08 | 性能基线 / 无障碍 / CI 门禁 | 🟡 | 新增 GitHub Actions（typecheck + 纯逻辑测试 + build）与 `perf:baseline`；无障碍审计未做（W-20261109-106） |
 
 ---
@@ -285,8 +285,8 @@
 > 统计按本文件表格行计，`✅/🟡/❌/⏸` 第 1～10 节为准；v1.x 小节不计入。
 
 - 合计：**164 行**
-- ✅ 已实现：**140**
-- 🟡 部分实现：**16**
+- ✅ 已实现：**141**
+- 🟡 部分实现：**15**
 - ❌ 未实现：**0**
 - ⏸ 明确延后：**8**
 - ❓ 待拍板：**0**（H-02/H-06 等待拍板的语义问题在 `PROJECT_MASTER.md` §4.2，未单列到本表）
