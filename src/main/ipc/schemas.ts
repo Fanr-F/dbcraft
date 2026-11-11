@@ -5,6 +5,7 @@ const common = z.object({
   name: z.string().trim().min(1).max(80),
   group: z.string().trim().max(120),
   env: z.enum(['dev', 'test', 'prod']),
+  readOnly: z.boolean().optional(),
 });
 
 const serverFields = {

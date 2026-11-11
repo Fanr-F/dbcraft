@@ -25,7 +25,7 @@ type Pending = {
 };
 
 type WorkerRequest =
-  | { type: 'open'; filePath: string }
+  | { type: 'open'; filePath: string; readOnly?: boolean }
   | { type: 'query'; sql: string; params?: QueryCell[]; maxRows?: number }
   | { type: 'close' };
 
@@ -76,7 +76,7 @@ export class SqliteSession implements DatabaseSession {
     });
   }
 
-  static async create(filePath: string): Promise<SqliteSession> {
+  static async create(filePath: string, readOnly = false): Promise<SqliteSession> {
     const workerPath = join(__dirname, 'sqlite-worker.js').replace(
       'app.asar',
       'app.asar.unpacked',
@@ -86,6 +86,7 @@ export class SqliteSession implements DatabaseSession {
     const info = await session.request<{ version: string; readonly: boolean }>({
       type: 'open',
       filePath,
+      readOnly,
     });
     session.serverVersion = info.version;
     session.isReadOnly = info.readonly;

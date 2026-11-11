@@ -5,6 +5,7 @@
  * 依赖 Node.js 的类型剥离（Node 22.18+ / 24 默认可用）。
  */
 import { inspectDangerousSql } from '../src/shared/dialect/safety.ts';
+import { isReadOnlyStatement } from '../src/shared/dialect/readonly.ts';
 
 const cases = [
   ['prod', 'DROP TABLE users;', 'drop'],
@@ -37,6 +38,21 @@ for (const [env, sql, expected] of cases) {
 if (failed > 0) {
   console.error(`${failed} case(s) failed`);
   process.exit(1);
+}
+
+for (const [sql, expected] of [
+  ['SELECT 1;', true],
+  ['-- c\nWITH x AS (SELECT 1) SELECT * FROM x;', true],
+  ['SHOW TABLES;', true],
+  ['INSERT INTO t VALUES (1);', false],
+  ['UPDATE t SET x = 1;', false],
+  ['DROP TABLE t;', false],
+  ['EXEC dbo.proc;', false],
+]) {
+  if (isReadOnlyStatement(sql) !== expected) {
+    console.error(`readonly classifier failed: ${JSON.stringify(sql)}`);
+    process.exit(1);
+  }
 }
 
 console.log(`safety check passed (${cases.length} cases)`);

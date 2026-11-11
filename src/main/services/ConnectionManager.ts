@@ -26,6 +26,7 @@ import type {
 } from '../../shared/ipc-contract';
 import { buildConflictCheckStatement, buildTableEditStatements } from '../../shared/dialect/dml';
 import { quoteIdent } from '../../shared/dialect/identifiers';
+import { isReadOnlyStatement } from '../../shared/dialect/readonly';
 import type { DatabaseSession } from './DatabaseSession';
 import { MariaSession } from './mariadb/MariaSession';
 import { MssqlSession } from './mssql/MssqlSession';
@@ -157,17 +158,43 @@ function createSession(
 ): Promise<DatabaseSession> {
   switch (input.type) {
     case 'sqlite':
-      return SqliteSession.create(input.filePath);
+      return SqliteSession.create(input.filePath, input.readOnly === true);
     case 'mysql':
     case 'percona':
-      return MysqlSession.create(input, { connectTimeoutMs });
+      return MysqlSession.create(input, { connectTimeoutMs }).then((session) =>
+        input.readOnly ? markReadOnly(session) : session,
+      );
     case 'mariadb':
-      return MariaSession.create(input, { connectTimeoutMs });
+      return MariaSession.create(input, { connectTimeoutMs }).then((session) =>
+        input.readOnly ? markReadOnly(session) : session,
+      );
     case 'mssql':
-      return MssqlSession.create(input, { connectTimeoutMs });
+      return MssqlSession.create(input, { connectTimeoutMs }).then((session) =>
+        input.readOnly ? markReadOnly(session) : session,
+      );
     default:
       return Promise.reject(new Error('不支持的连接类型。'));
   }
+}
+
+/** 非 SQLite 驱动没有统一的只读开关；用代理强制 isReadOnly 视图。 */
+function markReadOnly(session: DatabaseSession): DatabaseSession {
+  if (session.isReadOnly) return session;
+  return new Proxy(session, {
+    get(target, property) {
+      if (property === 'isReadOnly') return true;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+function readOnlyError(): QueryError {
+  return {
+    message: '当前为只读连接：只允许 SELECT/SHOW/DESCRIBE/EXPLAIN 等查询语句。',
+    code: 'READ_ONLY_CONNECTION',
+    ...NOT_RETRYABLE,
+  };
 }
 
 function sessionMessage(session: DatabaseSession): string {
@@ -366,6 +393,10 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
     };
   }
 
+  if (session.isReadOnly && !isReadOnlyStatement(request.sql)) {
+    return { ok: false, error: readOnlyError() };
+  }
+
   const entry: RunningQuery = {
     sessionId: request.sessionId,
     session,
@@ -510,6 +541,13 @@ export async function executeQueryScript(
         connectionClosed: true,
       },
     };
+  }
+
+  if (
+    session.isReadOnly &&
+    request.statements.some((statement) => !isReadOnlyStatement(statement))
+  ) {
+    return { ok: false, error: readOnlyError() };
   }
 
   const entry: RunningQuery = {
@@ -979,6 +1017,15 @@ export async function executeDdl(
     return {
       ok: false,
       message: '会话已失效，请重新连接。',
+      results: [],
+      elapsedMs: 0,
+    };
+  }
+
+  if (session.isReadOnly) {
+    return {
+      ok: false,
+      message: '当前为只读连接，不能执行 DDL。',
       results: [],
       elapsedMs: 0,
     };

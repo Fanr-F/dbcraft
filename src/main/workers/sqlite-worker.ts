@@ -5,7 +5,7 @@ import { resolveRowLimit } from '../../shared/settings';
 import { encodeCell } from '../services/query-values';
 
 type WorkerRequest =
-  | { id: number; type: 'open'; filePath: string }
+  | { id: number; type: 'open'; filePath: string; readOnly?: boolean }
   | { id: number; type: 'query'; sql: string; params?: QueryCell[]; maxRows?: number }
   | { id: number; type: 'close' };
 
@@ -46,19 +46,27 @@ function isLockOrPermissionError(error: unknown): boolean {
   );
 }
 
-function open(filePath: string): { version: string; readonly: boolean } {
+function open(
+  filePath: string,
+  forceReadOnly = false,
+): { version: string; readonly: boolean } {
   if (database) {
     database.close();
     database = null;
   }
 
   let readonly = false;
-  try {
-    database = new Database(filePath, { fileMustExist: true });
-  } catch (error) {
-    if (!isLockOrPermissionError(error)) throw error;
+  if (forceReadOnly) {
     database = new Database(filePath, { fileMustExist: true, readonly: true });
     readonly = true;
+  } else {
+    try {
+      database = new Database(filePath, { fileMustExist: true });
+    } catch (error) {
+      if (!isLockOrPermissionError(error)) throw error;
+      database = new Database(filePath, { fileMustExist: true, readonly: true });
+      readonly = true;
+    }
   }
 
   if (!readonly) {
@@ -155,7 +163,11 @@ port.on('message', (request: WorkerRequest) => {
   try {
     switch (request.type) {
       case 'open':
-        reply({ id: request.id, ok: true, value: open(request.filePath) });
+        reply({
+          id: request.id,
+          ok: true,
+          value: open(request.filePath, request.readOnly === true),
+        });
         break;
       case 'query':
         reply({

@@ -33,6 +33,7 @@ interface FormState {
   trustServerCertificate: boolean;
   /** MSSQL 命名实例；填写后忽略端口，走 SQL Browser。 */
   instanceName: string;
+  readOnly: boolean;
 }
 
 const INITIAL_FORM: FormState = {
@@ -51,6 +52,7 @@ const INITIAL_FORM: FormState = {
   encrypt: true,
   trustServerCertificate: false,
   instanceName: '',
+  readOnly: false,
 };
 
 interface ConnectionDialogProps {
@@ -69,6 +71,7 @@ function formFromInput(input: ConnectionInput): FormState {
     group: input.group,
     env: input.env,
     password: '',
+    readOnly: input.readOnly === true,
   };
 
   if (input.type === 'sqlite') {
@@ -104,6 +107,7 @@ function buildInput(form: FormState): ConnectionInput {
     name: form.name.trim(),
     group: form.group.trim(),
     env: form.env,
+    readOnly: form.readOnly,
   };
 
   if (form.type === 'sqlite') {
@@ -333,6 +337,15 @@ export function ConnectionDialog({
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label className="check field-check">
+              <input
+                type="checkbox"
+                checked={form.readOnly}
+                onChange={(event) => update('readOnly', event.target.checked)}
+              />
+              <span>只读连接（阻止写入与 DDL）</span>
             </label>
 
             {form.type === 'sqlite' ? (

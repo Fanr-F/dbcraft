@@ -8,6 +8,8 @@ export interface ConnectionCommon {
   name: string;
   group: string;
   env: EnvironmentTag;
+  /** 只读连接：阻止非查询语句与网格/DDL 写入。 */
+  readOnly?: boolean;
 }
 
 export interface SqliteConnectionInput extends ConnectionCommon {

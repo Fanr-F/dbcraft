@@ -121,8 +121,9 @@ function fileName(filePath: string): string {
 }
 
 function summarize(input: ConnectionInput): string {
-  if (input.type === 'sqlite') return fileName(input.filePath);
-  return input.database || '未选择数据库';
+  const suffix = input.readOnly ? ' · 只读' : '';
+  if (input.type === 'sqlite') return `${fileName(input.filePath)}${suffix}`;
+  return `${input.database || '未选择数据库'}${suffix}`;
 }
 
 function searchText(connection: SavedConnection): string {

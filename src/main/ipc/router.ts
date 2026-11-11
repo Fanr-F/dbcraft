@@ -581,6 +581,9 @@ export function registerIpcHandlers(): void {
       if (!session) {
         return { ok: false, message: '当前标签不是 MSSQL 会话，请先连接 MSSQL。' };
       }
+      if (session.isReadOnly) {
+        return { ok: false, message: '当前为只读连接，不能执行 Agent 操作。' };
+      }
       return runAgentJobAction(session, parsed.data.action, parsed.data.jobName, {
         connectionId: parsed.data.connectionId,
         connectionName: parsed.data.connectionName,
