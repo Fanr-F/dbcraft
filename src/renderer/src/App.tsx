@@ -3069,6 +3069,25 @@ export default function App() {
 
   const reconnectActive = () => reconnectTab(activeTab);
 
+  const reconnectAll = async () => {
+    const targets = tabs
+      .filter(
+        (tab) =>
+          !tab.kind &&
+          tab.connectionId !== null &&
+          sessions[tab.id]?.status !== 'ready',
+      )
+      .slice(0, 10);
+    if (targets.length === 0) {
+      showNotice('info', '所有绑定连接标签都已就绪。');
+      return;
+    }
+    for (const tab of targets) {
+      await reconnectTab(tab);
+    }
+    showNotice('info', `已尝试重连 ${targets.length} 个标签。`);
+  };
+
   const openTable = async (name: string, database?: string) => {
     const type = activeConnection?.input.type ?? 'sqlite';
     if (database && type !== 'sqlite') {
@@ -4483,6 +4502,7 @@ export default function App() {
         activeConnectionId={activeTab.connectionId}
         onSelectConnection={selectConnectionTab}
         onNewConnection={openCreateDialog}
+        onReconnectAll={() => void reconnectAll()}
         onOpenHistory={() => setHistoryOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />

@@ -7,6 +7,7 @@ interface ToolbarProps {
   activeConnectionId: string | null;
   onSelectConnection: (id: string) => void;
   onNewConnection: () => void;
+  onReconnectAll: () => void;
   onOpenHistory: () => void;
   onOpenSettings: () => void;
 }
@@ -16,6 +17,7 @@ export function Toolbar({
   activeConnectionId,
   onSelectConnection,
   onNewConnection,
+  onReconnectAll,
   onOpenHistory,
   onOpenSettings,
 }: ToolbarProps) {
@@ -53,6 +55,14 @@ export function Toolbar({
       </div>
 
       <div className="toolbar-actions">
+        <button
+          type="button"
+          className="icon-btn"
+          title="重连全部绑定标签"
+          onClick={onReconnectAll}
+        >
+          <Icon name="refresh" />
+        </button>
         <button
           type="button"
           className="icon-btn"

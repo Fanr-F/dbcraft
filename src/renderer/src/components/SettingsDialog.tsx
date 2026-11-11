@@ -211,6 +211,37 @@ export function SettingsDialog({
     if (result.location) setDataLocation(result.location);
   };
 
+  const refreshStats = async () => {
+    const api = window.dbcraft;
+    if (!api) return;
+    const result = await api.stats.get();
+    if (result.ok) setStats(result.stats);
+  };
+
+  const copyStats = async () => {
+    if (!stats) return;
+    const text = JSON.stringify(
+      { exportedAt: new Date().toISOString(), ...stats },
+      null,
+      2,
+    );
+    try {
+      await navigator.clipboard.writeText(text);
+      setDiagnosticsMessage('统计已复制到剪贴板。');
+    } catch {
+      setDiagnosticsMessage('复制失败，请检查剪贴板权限。');
+    }
+  };
+
+  const clearHistory = async () => {
+    const api = window.dbcraft;
+    if (!api) return;
+    if (!window.confirm('清空全部查询历史？该操作不可撤销。')) return;
+    const result = await api.history.clear();
+    setDiagnosticsMessage(result.ok ? '查询历史已清空。' : (result.message ?? '清空失败。'));
+    if (result.ok) await refreshStats();
+  };
+
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -622,10 +653,19 @@ export function SettingsDialog({
           )}
 
           {stats && (
-            <p className="form-note">
-              本地统计：连接 {stats.connections} 个 · 历史 {stats.history} 条 · 设置{' '}
-              {stats.settings} 项 · 元数据库 {(stats.databaseBytes / 1024).toFixed(1)} KB
-            </p>
+            <div className="field check-group">
+              <span>本地统计</span>
+              <span className="pane-hint">
+                连接 {stats.connections} 个 · 历史 {stats.history} 条 · 设置{' '}
+                {stats.settings} 项 · 元数据库 {(stats.databaseBytes / 1024).toFixed(1)} KB
+              </span>
+              <button type="button" className="btn" onClick={() => void copyStats()}>
+                复制统计
+              </button>
+              <button type="button" className="btn btn-danger" onClick={() => void clearHistory()}>
+                清空查询历史
+              </button>
+            </div>
           )}
 
           {error && <div className="form-error">{error}</div>}
