@@ -84,6 +84,11 @@ try {
   assert(/MySQL/i.test(testResult), `connection test did not return MySQL: ${testResult}`);
 
   await page.getByRole('button', { name: '保存', exact: true }).click();
+  // 保存连接只写配置；点击连接打开对象树，右击「查询」创建 tab + session。
+  await page.locator('.connection-item').first().click();
+  await page.waitForSelector('.object-tree-body', { timeout: 20000 });
+  await page.locator('.connection-item').first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '查询', exact: true }).click();
   await page.waitForFunction(
     () => /MySQL\s+\d/.test(document.querySelector('.statusbar')?.textContent ?? ''),
     null,

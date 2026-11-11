@@ -48,13 +48,17 @@ try {
   );
 
   await page.getByRole('button', { name: '保存', exact: true }).click();
+  // 保存连接只写配置；点击连接打开对象树，右击「查询」才创建 tab + session。
+  await page.locator('.connection-item').first().click();
   await page.waitForFunction(
-    () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
+    () => document.querySelectorAll('.tree-item').length >= 3,
     null,
     { timeout: 15000 },
   );
+  await page.locator('.connection-item').first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '查询', exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelectorAll('.tree-item').length >= 3,
+    () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
     null,
     { timeout: 15000 },
   );
@@ -307,10 +311,11 @@ try {
   );
 
   // 标签页 = 独立会话：标签 1 的长查询不应阻塞标签 2。
+  const tabCountBeforeAdd = await page.locator('.tab').count();
   await page.locator('.tab-add').click();
   await page.waitForFunction(
-    () => document.querySelectorAll('.tab').length === 2,
-    null,
+    (expected) => document.querySelectorAll('.tab').length === expected,
+    tabCountBeforeAdd + 1,
     { timeout: 5000 },
   );
   try {
@@ -334,14 +339,14 @@ try {
     { timeout: 10000 },
   );
 
-  await page.locator('.tab', { hasText: '查询 1' }).click();
+  await page.locator('.tab', { hasText: '查询 2' }).click();
   await page.locator('.sql-editor').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
   );
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForTimeout(300);
 
-  await page.locator('.tab', { hasText: '查询 2' }).click();
+  await page.locator('.tab', { hasText: '查询 3' }).click();
   const secondStarted = Date.now();
   await page.locator('.sql-editor').fill('SELECT 3 AS ok;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -359,7 +364,7 @@ try {
   assert(secondElapsed < 3000, `tab 2 was blocked by tab 1 (${secondElapsed}ms)`);
   console.log('[e2e:sqlite] independent session query ms:', secondElapsed);
 
-  await page.locator('.tab', { hasText: '查询 2' }).click();
+  await page.locator('.tab', { hasText: '查询 3' }).click();
   await page.locator('.sql-editor').fill('SELECT 4 AS ok;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
@@ -613,6 +618,52 @@ try {
     null,
     { timeout: 5000 },
   );
+
+  // 类型化过滤：列 + 操作符 + 值生成参数化 WHERE。
+  await page.locator('.table-pager select[aria-label="过滤列"]').selectOption('name');
+  await page.locator('.table-pager select[aria-label="过滤操作符"]').selectOption('contains');
+  await page.locator('.table-pager input[aria-label="过滤值"]').fill('user');
+  await page.getByRole('button', { name: '添加条件' }).click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('.sql-editor')?.value?.includes('WHERE "name" LIKE ? ESCAPE \'!\'') ??
+      false,
+    null,
+    { timeout: 5000 },
+  );
+  await page.getByRole('button', { name: '清除', exact: true }).click();
+  await page.waitForFunction(
+    () => !(document.querySelector('.sql-editor')?.value?.includes('WHERE "name"') ?? false),
+    null,
+    { timeout: 5000 },
+  );
+
+  // 列布局：隐藏列写入 localStorage，重置后清空。
+  await page.locator('.grid-layout summary').click();
+  const nameColumnToggle = page
+    .locator('.grid-layout-columns label', { hasText: 'name' })
+    .locator('input');
+  await nameColumnToggle.uncheck();
+  const hiddenColumns = await page.evaluate(() => {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index) ?? '';
+      if (!key.startsWith('dbcraft.gridLayout.')) continue;
+      return (JSON.parse(localStorage.getItem(key) ?? '{}').hidden) ?? [];
+    }
+    return [];
+  });
+  assert(hiddenColumns.includes('name'), 'column hide was not persisted');
+  await page.getByRole('button', { name: '重置列宽与隐藏' }).click();
+  const resetHidden = await page.evaluate(() => {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index) ?? '';
+      if (!key.startsWith('dbcraft.gridLayout.')) continue;
+      return (JSON.parse(localStorage.getItem(key) ?? '{}').hidden) ?? [];
+    }
+    return [];
+  });
+  assert(resetHidden.length === 0, 'column layout reset failed');
+  await page.locator('.grid-layout summary').click();
 
   // 查询超时：上面把设置面板的查询超时调成了 10 秒。
   await page.locator('.sql-editor').fill(
