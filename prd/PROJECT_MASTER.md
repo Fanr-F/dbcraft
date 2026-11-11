@@ -1562,6 +1562,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261111-118 无障碍基础与 M04-22 归类**：诉求是补基础无障碍并如实标注生成列。变更：全局 `:focus-visible` 焦点描边与 `prefers-reduced-motion` 降级；`M04-22` 从 🟡 改为 ⏸，说明 computed/rowversion 由数据库生成、设计上只读，默认值编辑仍可用。涉及 `src/renderer/src/styles.css`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run build` 通过；未做完整无障碍审计。
 - **W-20261111-119 剩余项归类**：M02-18 改为 ⏸（错误波浪线/代码折叠需替换 textarea 编辑器内核）；M08-12 改为 ✅（真实 SQL Server Agent 已透传原生 22022 错误，权限不足未单独构造）；G-07 改为 ⏸（安装包已生成，但无代码签名证书）。同步矩阵合计为 151 ✅ / 2 🟡 / 0 ❌ / 11 ⏸。无代码变更。
 - **W-20261111-120 G-08 无障碍检查**：诉求是建立可执行的无障碍门槛。变更：新增 `scripts/a11y-check.mjs` 与 `npm run test:a11y`，启动 Electron 检查 `html lang`、按钮可访问名称、表单标签、重复 id；补充全局 `:focus-visible` 与 `prefers-reduced-motion`。涉及 `scripts/a11y-check.mjs`、`package.json`、`src/renderer/src/styles.css`。验证：`npm run test:a11y` 通过（19 个按钮、2 个表单字段）；仍不是完整 axe/人工审计。
+- **W-20261111-121 G-06 人工验收归类**：G-06 从 🟡 改为 ⏸：SQLite/MySQL/MSSQL Electron E2E、smoke、a11y 已覆盖主路径，但“逐项人工点选”属于发布前人工活动，不再计入部分实现。`e2e:mssql` 在多结果集改动后再次通过。矩阵最终为 152 ✅ / 0 🟡 / 0 ❌ / 12 ⏸。
 
 ---
 
