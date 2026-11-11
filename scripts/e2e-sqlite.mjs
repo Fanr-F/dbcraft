@@ -286,7 +286,7 @@ try {
     'connection not active after cancel',
   );
 
-  await page.getByRole('button', { name: '重连' }).click();
+  await page.getByRole('button', { name: '重连', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('SQLite 3'),
     null,
