@@ -4879,16 +4879,23 @@ export default function App() {
                     : [],
                 )
           }
-          streamTable={
-            exportOverride || !activeTab.table
+          streamSource={
+            exportOverride
               ? undefined
-              : {
-                  sessionId: activeTab.id,
-                  table: activeTab.table.name,
-                  ...(activeTab.table.database
-                    ? { database: activeTab.table.database }
-                    : {}),
-                }
+              : activeTab.table
+                ? {
+                    sessionId: activeTab.id,
+                    table: activeTab.table.name,
+                    ...(activeTab.table.database
+                      ? { database: activeTab.table.database }
+                      : {}),
+                  }
+                : !activeRun.statements && activeTab.sql.trim()
+                  ? {
+                      sessionId: activeTab.id,
+                      sql: activeTab.sql,
+                    }
+                  : undefined
           }
           onClose={() => {
             setExportOpen(false);

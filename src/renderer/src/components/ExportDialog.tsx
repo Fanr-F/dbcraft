@@ -15,8 +15,14 @@ interface ExportDialogProps {
   rows: QueryCell[][];
   /** 多语句执行时可选的结果集；提供后对话框内可切换。 */
   datasets?: ExportDataset[];
-  /** 表数据页可用：启用服务端流式 CSV（全部行）。 */
-  streamTable?: { sessionId: string; table: string; database?: string };
+  /** 表数据页或单条 SELECT：启用服务端流式 CSV（全部行）。 */
+  streamSource?: {
+    sessionId: string;
+    table?: string;
+    database?: string;
+    sql?: string;
+    params?: QueryCell[];
+  };
   onClose: () => void;
   onSave: (
     content: string,
@@ -59,7 +65,7 @@ export function ExportDialog({
   columns,
   rows,
   datasets,
-  streamTable,
+  streamSource,
   onClose,
   onSave,
   onSaveXlsx,
@@ -89,18 +95,18 @@ export function ExportDialog({
 
   useEffect(() => {
     const api = window.dbcraft;
-    if (!api || !streamTable) return;
+    if (!api || !streamSource) return;
     return api.export.onStreamProgress((progress) => {
       if (progress.requestId !== streamRequestId) return;
       setStreamRows(progress.rows);
       setStreamBytes(progress.bytes);
       if (progress.warning === '100mb') setStreamWarning(true);
     });
-  }, [streamTable, streamRequestId]);
+  }, [streamSource, streamRequestId]);
 
   const startStream = async () => {
     const api = window.dbcraft;
-    if (!api || !streamTable || streaming) return;
+    if (!api || !streamSource || streaming) return;
     const requestId = `stream-${Date.now().toString(36)}`;
     setStreamRequestId(requestId);
     setStreaming(true);
@@ -111,9 +117,11 @@ export function ExportDialog({
     try {
       const result = await api.export.streamCsv({
         requestId,
-        sessionId: streamTable.sessionId,
-        table: streamTable.table,
-        ...(streamTable.database ? { database: streamTable.database } : {}),
+        sessionId: streamSource.sessionId,
+        ...(streamSource.table ? { table: streamSource.table } : {}),
+        ...(streamSource.sql ? { sql: streamSource.sql } : {}),
+        ...(streamSource.params ? { params: streamSource.params } : {}),
+        ...(streamSource.database ? { database: streamSource.database } : {}),
         suggestedName: 'result.csv',
         delimiter: csvDelimiter,
         header: csvHeader,
@@ -351,7 +359,7 @@ export function ExportDialog({
             数字保持数值、NULL 留空。导出只包含已加载的 {exportRows.length} 行。
           </p>
 
-          {streamTable && (
+          {streamSource && (
             <div className="export-load-all">
               <button
                 type="button"

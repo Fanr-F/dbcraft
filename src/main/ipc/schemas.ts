@@ -240,7 +240,12 @@ export const exportXlsxSchema = z.object({
 export const exportStreamSchema = z.object({
   requestId: z.string().min(1).max(128),
   sessionId: z.string().min(1).max(128),
-  table: z.string().min(1).max(256),
+  table: z.string().min(1).max(256).optional(),
+  sql: z.string().min(1).max(1_000_000).optional(),
+  params: z
+    .array(z.union([z.string().max(100_000), z.number().finite(), z.boolean(), z.null()]))
+    .max(1000)
+    .optional(),
   database: z.string().max(128).optional(),
   suggestedName: z.string().trim().min(1).max(120),
   delimiter: z.string().min(1).max(4).optional(),

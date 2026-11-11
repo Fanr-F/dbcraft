@@ -194,6 +194,20 @@ export function buildTablePageQuery(
   };
 }
 
+/** 任意单条 SELECT 的流式分页包装；MSSQL 的 ORDER BY 限制可能导致部分 SQL 失败。 */
+export function buildSubqueryPageSql(
+  type: DatabaseType,
+  sql: string,
+  limit: number,
+  offset: number,
+): string {
+  const inner = sql.trim().replace(/;\s*$/, '');
+  if (type === 'mssql') {
+    return `SELECT * FROM (${inner}) AS [dbcraft_stream] ORDER BY (SELECT NULL) OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
+  }
+  return `SELECT * FROM (${inner}) AS dbcraft_stream LIMIT ${limit} OFFSET ${offset}`;
+}
+
 /** 表数据页的显式分页查询。 */
 export function buildTablePageSql(
   type: DatabaseType,

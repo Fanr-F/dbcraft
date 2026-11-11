@@ -5,6 +5,7 @@
  */
 import Database from 'better-sqlite3';
 import {
+  buildSubqueryPageSql,
   buildTablePageQuery,
   buildTablePageSql,
   buildTablePreviewSql,
@@ -87,6 +88,16 @@ assert(
   buildTablePageSql('sqlite', 'logs', 50, 0, null, null, { rowidAlias: 'rowid' }) ===
     'SELECT "rowid" AS "rowid", * FROM "logs" LIMIT 50 OFFSET 0;',
   'sqlite rowid page SQL wrong',
+);
+assert(
+  buildSubqueryPageSql('sqlite', 'SELECT * FROM users;', 5000, 10000) ===
+    'SELECT * FROM (SELECT * FROM users) AS dbcraft_stream LIMIT 5000 OFFSET 10000',
+  'sqlite subquery stream page wrong',
+);
+assert(
+  buildSubqueryPageSql('mssql', 'SELECT * FROM users', 5000, 0) ===
+    'SELECT * FROM (SELECT * FROM users) AS [dbcraft_stream] ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 5000 ROWS ONLY',
+  'mssql subquery stream page wrong',
 );
 
 const filtered = buildTablePageQuery('sqlite', 'users', 200, 0, null, {

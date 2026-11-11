@@ -7,6 +7,8 @@ import type {
 } from '../../shared/ipc-contract';
 import { csvCell } from '../../shared/export/formats';
 import { buildTablePageQuery } from '../../shared/dialect/identifiers';
+import { buildSubqueryPageSql } from '../../shared/dialect/identifiers';
+import { isReadOnlyStatement } from '../../shared/dialect/readonly';
 import { getSession } from '../services/ConnectionManager';
 
 const PAGE_SIZE = 5000;
@@ -31,6 +33,20 @@ function endStream(stream: ReturnType<typeof createWriteStream>): Promise<void> 
   });
 }
 
+/** 任意单条 SELECT 的分页包装；MSSQL 的 ORDER BY 限制可能导致部分 SQL 失败。 */
+function buildSubqueryPage(
+  dialect: string,
+  sql: string,
+  offset: number,
+): string {
+  return buildSubqueryPageSql(
+    dialect as Parameters<typeof buildSubqueryPageSql>[0],
+    sql,
+    PAGE_SIZE,
+    offset,
+  );
+}
+
 /**
  * 表数据页的流式 CSV 导出：逐批 SELECT、边查边写，不把全部行留在内存。
  * 任意 SQL 的流式分页仍受方言限制，当前只对表/视图开放。
@@ -44,6 +60,9 @@ export async function streamTableCsv(
   const session = getSession(request.sessionId);
   if (!session) return { ok: false, message: '会话未打开，请重新连接。' };
   if (!session.alive) return { ok: false, message: '会话已失效，请重新连接。' };
+  if (!request.table && (!request.sql || !isReadOnlyStatement(request.sql))) {
+    return { ok: false, message: '任意 SQL 流式导出只支持单条 SELECT 查询。' };
+  }
 
   const delimiter = request.delimiter || ',';
   const header = request.header !== false;
@@ -81,12 +100,12 @@ export async function streamTableCsv(
         return { ok: false, canceled: true, message: '已取消导出。' };
       }
 
-      const page = buildTablePageQuery(
-        session.dialect,
-        request.table,
-        PAGE_SIZE,
-        offset,
-      );
+      const page = request.table
+        ? buildTablePageQuery(session.dialect, request.table, PAGE_SIZE, offset)
+        : {
+            sql: buildSubqueryPage(session.dialect, request.sql!, offset),
+            params: request.params ?? [],
+          };
       const result = await session.query(page.sql, page.params);
 
       if (!columnsWritten) {

@@ -692,6 +692,9 @@ export function registerIpcHandlers(): void {
         return { ok: false, message: '流式导出参数无效。' };
       }
       const request = parsed.data;
+      if (!request.table && !request.sql) {
+        return { ok: false, message: '流式导出需要表名或 SELECT 语句。' };
+      }
       const options = {
         title: '流式导出 CSV',
         defaultPath: request.suggestedName,
