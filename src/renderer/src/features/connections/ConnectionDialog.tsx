@@ -29,6 +29,7 @@ interface FormState {
   database: string;
   sslMode: SslMode;
   charset: string;
+  authPlugin: string;
   encrypt: boolean;
   trustServerCertificate: boolean;
   /** MSSQL 命名实例；填写后忽略端口，走 SQL Browser。 */
@@ -49,6 +50,7 @@ const INITIAL_FORM: FormState = {
   database: '',
   sslMode: 'prefer',
   charset: '',
+  authPlugin: 'auto',
   encrypt: true,
   trustServerCertificate: false,
   instanceName: '',
@@ -99,6 +101,7 @@ function formFromInput(input: ConnectionInput): FormState {
     database: input.database,
     sslMode: input.sslMode,
     charset: input.charset ?? '',
+    authPlugin: input.authPlugin ?? 'auto',
   };
 }
 
@@ -140,6 +143,7 @@ function buildInput(form: FormState): ConnectionInput {
     database: form.database.trim(),
     sslMode: form.sslMode,
     charset: form.charset.trim(),
+    authPlugin: form.authPlugin as 'auto' | 'mysql_native_password' | 'caching_sha2_password' | 'ed25519',
   };
 }
 
@@ -469,6 +473,21 @@ export function ConnectionDialog({
                       placeholder="留空使用驱动默认，如 utf8mb4"
                       onChange={(event) => update('charset', event.target.value)}
                     />
+                  </label>
+                )}
+
+                {form.type !== 'mssql' && (
+                  <label className="field">
+                    <span>认证插件</span>
+                    <select
+                      value={form.authPlugin}
+                      onChange={(event) => update('authPlugin', event.target.value)}
+                    >
+                      <option value="auto">自动协商</option>
+                      <option value="mysql_native_password">mysql_native_password</option>
+                      <option value="caching_sha2_password">caching_sha2_password</option>
+                      <option value="ed25519">ed25519（MariaDB）</option>
+                    </select>
                   </label>
                 )}
 

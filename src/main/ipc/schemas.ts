@@ -31,6 +31,9 @@ const mysqlFamilySchema = common.extend({
     .max(32)
     .regex(/^[A-Za-z0-9_-]*$/, '字符集只能包含字母、数字、下划线和连字符')
     .optional(),
+  authPlugin: z
+    .enum(['auto', 'mysql_native_password', 'caching_sha2_password', 'ed25519'])
+    .optional(),
 });
 
 const mssqlSchema = common.extend({

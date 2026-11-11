@@ -27,6 +27,8 @@ export interface MysqlFamilyConnectionInput extends ConnectionCommon {
   sslMode: SslMode;
   /** 可选字符集（如 utf8mb4）；留空使用驱动默认值。 */
   charset?: string;
+  /** 认证插件偏好；实际握手仍由驱动自动协商，字段用于记录/排障。 */
+  authPlugin?: 'auto' | 'mysql_native_password' | 'caching_sha2_password' | 'ed25519';
 }
 
 export interface MssqlConnectionInput extends ConnectionCommon {
