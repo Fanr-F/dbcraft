@@ -393,10 +393,14 @@ export class MysqlSession implements DatabaseSession {
   }
 
   async getTableMeta(name: string, kind: DdlObjectKind): Promise<TableMeta> {
+    // 补全允许 `db.table` 形式；表数据/DML 仍只支持当前库。
+    const dot = name.lastIndexOf('.');
+    const schemaName = dot > 0 ? name.slice(0, dot) : null;
+    const tableName = dot > 0 ? name.slice(dot + 1) : name;
     const [tableRows] = await this.connection.query({
       sql: `SELECT TABLE_TYPE FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
-      values: [name],
+            WHERE TABLE_SCHEMA = COALESCE(?, DATABASE()) AND TABLE_NAME = ?`,
+      values: [schemaName, tableName],
       rowsAsArray: true,
     });
     const tableType = (tableRows as unknown[][])[0]?.[0];
@@ -407,9 +411,9 @@ export class MysqlSession implements DatabaseSession {
     const [rows] = await this.connection.query({
       sql: `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_KEY
             FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            WHERE TABLE_SCHEMA = COALESCE(?, DATABASE()) AND TABLE_NAME = ?
             ORDER BY ORDINAL_POSITION`,
-      values: [name],
+      values: [schemaName, tableName],
       rowsAsArray: true,
     });
 

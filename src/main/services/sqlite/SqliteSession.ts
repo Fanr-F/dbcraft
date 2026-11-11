@@ -104,10 +104,13 @@ export class SqliteSession implements DatabaseSession {
     const systemFilter = options.includeSystemObjects
       ? ''
       : "AND name NOT LIKE 'sqlite_%'";
+    const database = options.database?.trim();
+    const prefix =
+      database && database !== 'main' ? `${quoteIdent('sqlite', database)}.` : '';
 
     const result = await this.query(
       `SELECT name, type
-       FROM sqlite_master
+       FROM ${prefix}sqlite_master
        WHERE type IN ('table', 'view')
          ${systemFilter}
        ORDER BY type, name`,
@@ -120,28 +123,36 @@ export class SqliteSession implements DatabaseSession {
   }
 
   async databases(): Promise<DatabaseInfo[]> {
-    return [{ name: 'main', current: true }];
+    const result = await this.query('PRAGMA database_list');
+    return result.rows
+      .map((row) => ({ name: String(row[1] ?? ''), current: String(row[1] ?? '') === 'main' }))
+      .filter((item) => item.name.length > 0 && item.name !== 'temp');
   }
 
   async useDatabase(): Promise<void> {
     throw new Error('SQLite 不支持切换数据库。');
   }
 
-  async tableExtras(_database: string, table: string): Promise<TableExtras> {
+  async tableExtras(database: string, table: string): Promise<TableExtras> {
+    const schema = database.trim();
+    const quotedDatabase =
+      schema && schema !== 'main' ? `${quoteIdent('sqlite', schema)}.` : '';
     const quoted = quoteIdent('sqlite', table);
 
-    const info = await this.query(`PRAGMA table_info(${quoted})`);
+    const info = await this.query(`PRAGMA ${quotedDatabase}table_info(${quoted})`);
     const constraints: TableConstraintInfo[] = [];
     if (info.rows.some((row) => Number(row[5] ?? 0) > 0)) {
       constraints.push({ name: 'PRIMARY KEY', kind: 'PRIMARY KEY' });
     }
 
-    const indexList = await this.query(`PRAGMA index_list(${quoted})`);
+    const indexList = await this.query(`PRAGMA ${quotedDatabase}index_list(${quoted})`);
     const indexes: TableIndexInfo[] = [];
     for (const row of indexList.rows) {
       const indexName = String(row[1] ?? '');
       if (!indexName) continue;
-      const columns = await this.query(`PRAGMA index_info(${quoteIdent('sqlite', indexName)})`);
+      const columns = await this.query(
+        `PRAGMA ${quotedDatabase}index_info(${quoteIdent('sqlite', indexName)})`,
+      );
       const unique = Number(row[2] ?? 0) !== 0;
       indexes.push({
         name: indexName,
@@ -154,7 +165,7 @@ export class SqliteSession implements DatabaseSession {
       }
     }
 
-    const foreignKeys = await this.query(`PRAGMA foreign_key_list(${quoted})`);
+    const foreignKeys = await this.query(`PRAGMA ${quotedDatabase}foreign_key_list(${quoted})`);
     const seenForeignKeys = new Set<number>();
     for (const row of foreignKeys.rows) {
       const id = Number(row[0] ?? 0);
@@ -164,7 +175,7 @@ export class SqliteSession implements DatabaseSession {
     }
 
     const triggerRows = await this.query(
-      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`,
+      `SELECT name FROM ${quotedDatabase}sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`,
       [table],
     );
     const triggers: TableTriggerInfo[] = triggerRows.rows.map((row) => ({
@@ -191,17 +202,26 @@ export class SqliteSession implements DatabaseSession {
   }
 
   async getTableMeta(name: string, kind: DdlObjectKind): Promise<TableMeta> {
+    const dot = name.lastIndexOf('.');
+    const schemaName = dot > 0 ? name.slice(0, dot) : null;
+    const tableName = dot > 0 ? name.slice(dot + 1) : name;
+    const prefix =
+      schemaName && schemaName !== 'main'
+        ? `${quoteIdent('sqlite', schemaName)}.`
+        : '';
     const object = await this.query(
-      `SELECT name, type, sql FROM sqlite_master
+      `SELECT name, type, sql FROM ${prefix}sqlite_master
        WHERE name = ? AND type = ?`,
-      [name, kind === 'view' ? 'view' : 'table'],
+      [tableName, kind === 'view' ? 'view' : 'table'],
     );
 
     if (object.rows.length === 0) {
       throw new Error(`未找到${kind === 'view' ? '视图' : '表'}「${name}」。`);
     }
 
-    const info = await this.query(`PRAGMA table_info(${quoteIdent('sqlite', name)})`);
+    const info = await this.query(
+      `PRAGMA ${prefix}table_info(${quoteIdent('sqlite', tableName)})`,
+    );
     const columns: TableColumnMeta[] = info.rows.map((row) => {
       const declaredType = String(row[2] ?? '');
       const primaryKey = Number(row[5] ?? 0) > 0;

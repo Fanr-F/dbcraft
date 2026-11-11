@@ -862,7 +862,12 @@ export default function App() {
         );
         return match?.name ?? reference.table;
       }
-      if (isMysqlFamily && parts.length === 2) return parts[1] ?? reference.table;
+      if (dialect === 'sqlite' && parts.length === 2) {
+        return `${parts[0]}.${parts[1]}`;
+      }
+      if (isMysqlFamily && parts.length === 2) {
+        return `${parts[0]}.${parts[1]}`;
+      }
       return reference.table;
     };
 

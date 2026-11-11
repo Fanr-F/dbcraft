@@ -401,13 +401,16 @@ export class MariaSession implements DatabaseSession {
   }
 
   async getTableMeta(name: string, kind: DdlObjectKind): Promise<TableMeta> {
+    const dot = name.lastIndexOf('.');
+    const schemaName = dot > 0 ? name.slice(0, dot) : null;
+    const tableName = dot > 0 ? name.slice(dot + 1) : name;
     const tableRows = (await this.connection.query(
       {
         sql: `SELECT TABLE_TYPE FROM information_schema.TABLES
-              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+              WHERE TABLE_SCHEMA = COALESCE(?, DATABASE()) AND TABLE_NAME = ?`,
         rowsAsArray: true,
       },
-      [name],
+      [schemaName, tableName],
     )) as unknown[][];
     const tableType = tableRows[0]?.[0];
     if (!tableType) {
@@ -418,11 +421,11 @@ export class MariaSession implements DatabaseSession {
       {
         sql: `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_KEY
               FROM information_schema.COLUMNS
-              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+              WHERE TABLE_SCHEMA = COALESCE(?, DATABASE()) AND TABLE_NAME = ?
               ORDER BY ORDINAL_POSITION`,
         rowsAsArray: true,
       },
-      [name],
+      [schemaName, tableName],
     )) as unknown[][];
 
     const columns: TableColumnMeta[] = rows.map((row) => {
