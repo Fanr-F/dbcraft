@@ -50,6 +50,9 @@ let cachedSettings: AppSettings | null = null;
 let historyTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingHistory: HistoryEntry[] = [];
 
+/** 元数据库结构版本；每次新增迁移时 +1。 */
+export const METADATA_SCHEMA_VERSION = 6;
+
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS connections (
     id TEXT PRIMARY KEY,
@@ -148,6 +151,100 @@ function ensureServer(
   return id;
 }
 
+interface MetadataMigration {
+  version: number;
+  apply: (db: Database.Database) => void;
+}
+
+/** 按版本顺序执行；所有步骤都必须是幂等的。 */
+const MIGRATIONS: MetadataMigration[] = [
+  { version: 1, apply: (db) => db.exec(SCHEMA) },
+  { version: 2, apply: ensureLastOpenedColumn },
+  { version: 3, apply: ensureServerColumn },
+  { version: 4, apply: (db) => db.exec(HISTORY_SCHEMA) },
+  {
+    version: 5,
+    apply: (db) => {
+      if (!ensureHistoryFts(db)) {
+        log.warn('FTS5 trigram 不可用，历史搜索将回退 LIKE');
+      }
+    },
+  },
+  {
+    version: 6,
+    apply: (db) => {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS schema_migrations (
+           version INTEGER PRIMARY KEY,
+           applied_at TEXT NOT NULL
+         )`,
+      );
+    },
+  },
+];
+
+function metadataVersion(db: Database.Database): number {
+  const value = db.pragma('user_version', { simple: true });
+  return typeof value === 'number' ? value : Number(value ?? 0);
+}
+
+function hasExistingSchema(db: Database.Database): boolean {
+  const row = db
+    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'connections'")
+    .get() as { ok?: number } | undefined;
+  return row?.ok === 1;
+}
+
+/** 升级前用 SQLite 在线备份生成一致性快照；失败则中止迁移。 */
+function backupBeforeMigration(db: Database.Database, fromVersion: number): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const path = join(
+    app.getPath('userData'),
+    `dbcraft-meta.backup-pre-v${fromVersion}-${stamp}.db`,
+  );
+  db.exec(`VACUUM INTO '${path.replace(/'/g, "''")}'`);
+  log.info('元数据库升级前已备份', { path, fromVersion, toVersion: METADATA_SCHEMA_VERSION });
+  return path;
+}
+
+function migrateMetadata(db: Database.Database): void {
+  const fromVersion = metadataVersion(db);
+  const existing = hasExistingSchema(db);
+  const target = METADATA_SCHEMA_VERSION;
+  if (fromVersion >= target) return;
+
+  if (existing && fromVersion > 0) {
+    backupBeforeMigration(db, fromVersion);
+  }
+
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS schema_migrations (
+       version INTEGER PRIMARY KEY,
+       applied_at TEXT NOT NULL
+     )`,
+  );
+  db.exec('BEGIN');
+  try {
+    for (const migration of MIGRATIONS) {
+      if (migration.version <= fromVersion) continue;
+      migration.apply(db);
+      db.prepare(
+        'INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)',
+      ).run(migration.version, new Date().toISOString());
+    }
+    db.pragma(`user_version = ${target}`);
+    db.exec('COMMIT');
+    log.info('元数据库迁移完成', { fromVersion, toVersion: target });
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // 忽略回滚失败，保留原始错误。
+    }
+    throw error;
+  }
+}
+
 /**
  * 打开本地元数据库。位置固定在 `<userData>/dbcraft-meta.db`，
  * 与用户自己的 SQLite 连接文件分开，避免被对象树/查询误操作。
@@ -161,14 +258,7 @@ export function openMetadataDatabase(): void {
     const opened = new Database(file);
     opened.pragma('journal_mode = WAL');
     opened.pragma('busy_timeout = 3000');
-    opened.exec(SCHEMA);
-    ensureLastOpenedColumn(opened);
-    ensureServerColumn(opened);
-    opened.exec(HISTORY_SCHEMA);
-    if (!ensureHistoryFts(opened)) {
-      log.warn('FTS5 trigram 不可用，历史搜索将回退 LIKE');
-    }
-    opened.pragma('user_version = 5');
+    migrateMetadata(opened);
     database = opened;
     openError = null;
     log.info('元数据库已打开', { file });
