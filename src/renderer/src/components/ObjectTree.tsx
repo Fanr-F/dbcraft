@@ -66,6 +66,7 @@ export function ObjectTree({
   onTableContextMenu,
 }: ObjectTreeProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [objectLimits, setObjectLimits] = useState<Record<string, number>>({});
   const normalizedQuery = query.trim().toLowerCase();
   const requestedDatabases = useRef(new Set<string>());
 
@@ -315,11 +316,13 @@ export function ObjectTree({
     const folder = (key: string, label: string, count: number, items: SchemaObject[]) => {
       const folderKey = `${key}:${database}`;
       const openFolder = open(folderKey, true);
+      const limit = objectLimits[folderKey] ?? 200;
+      const visibleItems = items.slice(0, limit);
       return (
         <div className="tree-branch" key={folderKey}>
           <button
             type="button"
-            className="tree-row tree-item tree-child tree-muted"
+            className={`tree-row tree-item tree-child tree-muted`}
             aria-expanded={openFolder}
             onClick={() => toggle(folderKey, true)}
           >
@@ -332,7 +335,25 @@ export function ObjectTree({
             <span>{label}</span>
             <span className="tree-count">{count}</span>
           </button>
-          {openFolder && renderItems(folderKey, items)}
+          {openFolder && (
+            <>
+              {renderItems(folderKey, visibleItems)}
+              {items.length > visibleItems.length && (
+                <button
+                  type="button"
+                  className="tree-row tree-item tree-child-2 tree-muted"
+                  onClick={() =>
+                    setObjectLimits((current) => ({
+                      ...current,
+                      [folderKey]: limit + 200,
+                    }))
+                  }
+                >
+                  显示更多（剩余 {items.length - visibleItems.length}）
+                </button>
+              )}
+            </>
+          )}
         </div>
       );
     };
