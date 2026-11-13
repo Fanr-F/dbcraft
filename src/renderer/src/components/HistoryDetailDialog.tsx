@@ -9,7 +9,7 @@ interface HistoryDetailDialogProps {
   /** 原连接已从本地连接列表删除。 */
   connectionDeleted?: boolean;
   onClose: () => void;
-  onInsert: (sql: string) => void;
+  onInsert: (record: HistoryRecord) => void;
   onRun: (record: HistoryRecord) => void;
 }
 
@@ -17,6 +17,7 @@ const STATUS_LABELS: Record<HistoryRecord['status'], string> = {
   success: '成功',
   failed: '失败',
   cancelled: '已取消',
+  saved: '已保存',
 };
 
 const SOURCE_LABELS: Record<HistoryRecord['source'], string> = {
@@ -26,6 +27,7 @@ const SOURCE_LABELS: Record<HistoryRecord['source'], string> = {
   'table-page': '表数据',
   export: '导出',
   'agent-control': 'Agent',
+  'closed-tab': '关闭标签',
 };
 
 export function HistoryDetailDialog({
@@ -97,7 +99,7 @@ export function HistoryDetailDialog({
           <button type="button" className="btn" onClick={() => void copySql()}>
             {copied ? '已复制' : '复制 SQL'}
           </button>
-          <button type="button" className="btn" onClick={() => onInsert(record.sqlText)}>
+          <button type="button" className="btn" onClick={() => onInsert(record)}>
             插入编辑器
           </button>
           <button

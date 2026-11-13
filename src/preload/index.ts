@@ -4,6 +4,7 @@ import {
   type ConnectionInput,
   type ConnectionSaveOptions,
   type DBCraftApi,
+  type HistorySaveRequest,
 } from '../shared/ipc-contract';
 
 const api: DBCraftApi = {
@@ -104,6 +105,8 @@ const api: DBCraftApi = {
   },
   history: {
     list: (options = {}) => ipcRenderer.invoke(IPC_CHANNELS.historyList, options),
+    record: (request: HistorySaveRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.historyRecord, request),
     remove: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.historyDelete, id),
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.historyClear),
     clearConnection: (connectionId: string) =>

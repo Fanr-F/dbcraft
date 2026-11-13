@@ -52,4 +52,24 @@ assert(identifiers.length === 2, 'identifier detection failed');
 const quoted = tokenizeSql("'a''b'")[0];
 assert(quoted.type === 'string' && quoted.text === "'a''b'", 'escaped quote handling failed');
 
+const functionTokens = tokenizeSql('SELECT COUNT(*), lower (name) FROM t').filter(
+  (token) => token.type === 'function',
+);
+assert(
+  functionTokens.length === 2 &&
+    functionTokens[0].text === 'COUNT' &&
+    functionTokens[1].text === 'lower',
+  'function calls should be highlighted as functions',
+);
+
+const bareCount = tokenizeSql('SELECT count FROM t').filter(
+  (token) => token.type === 'function',
+);
+assert(bareCount.length === 0, 'function name without parentheses should not be a function token');
+
+const namedLikeFunction = tokenizeSql('SELECT my_count(1) FROM t').filter(
+  (token) => token.type === 'function',
+);
+assert(namedLikeFunction.length === 0, 'unknown functions should stay identifiers');
+
 console.log('sql highlight check passed');

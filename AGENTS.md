@@ -123,8 +123,9 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - UI DDL 的删除列/表/视图必须让用户输入对象名确认；重命名/加列/删列/索引先生成 SQL 预览，再走 `ddl:execute`，
   不要直接执行未经预览的语句。
 - 查询历史由主进程在 `executeQuery` 内写入元数据库（内存队列 + 定时落库，关闭元数据库前 flush；
-  SQL 文本本地明文保存，符合 PRD；但日志仍不得记录 SQL 文本）。去重/淘汰/搜索/脱敏在
-  `storage/history-store.ts`，改动后跑 `npm run test:history`。
+  SQL 文本本地明文保存，符合 PRD；但日志仍不得记录 SQL 文本）。关闭标签经 `history:record`
+  以 `status=saved` / `source=closed-tab` 写入（关闭 dedupe，避免改写执行记录）。
+  去重/淘汰/搜索/脱敏在 `storage/history-store.ts`，改动后跑 `npm run test:history`。
 
 ## 构建 / 测试细节
 

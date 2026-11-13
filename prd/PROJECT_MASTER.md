@@ -77,12 +77,12 @@
 ### 2.1 结论
 
 1. **保存连接是配置（类），session 是运行时对象，tab 与 session 强绑定**：一个 SQL 标签 = 一个 session = 一条物理连接；关闭标签关闭 session；不做连接池。
-2. **服务器实体已落地**：`servers` 表、`connections.server_id`、左侧按服务器分组（W-20261109-13/14）。服务器级 Agent、服务器删除/重命名/健康状态**明确不做**。
-3. **独立 browse session 已实现**：双击/展开连接只打开左侧对象树（`browse-<connectionId>`），不创建/激活查询 tab；右击连接 →「查询」才创建 tab + session（W-20261109-15/16/17）。
+2. **服务器实体已落地**：`servers` 表、`connections.server_id`（W-20261109-13/14）；左侧树已不再显示服务器分组行，分组/未分组下直接列连接（W-20261111-122）。服务器级 Agent、服务器删除/重命名/健康状态**明确不做**。
+3. **独立 browse session 已实现**：双击/展开连接只打开左侧对象树（`browse-<connectionId>`），不创建/激活查询 tab；右击连接 →「查询」才创建 tab + session（W-20261109-15/16/17）。切换浏览不再关闭上一个 browse 会话，连接绿点聚合 browse/tab 会话状态（W-20261111-123）；多个连接可同时展开对象树，点击其他连接不会折叠已展开的连接，再次点击该连接才收起（W-20261111-125）。
 4. **库上下文可见**：标签标题显示连接 + 当前库；执行按钮旁数据库下拉；状态栏显示当前库与活动会话数；切换即对该 tab 的 session 执行 `USE`（W-20261109-12）。
 5. **编辑/删除保存连接与已有 tab session 解耦**：编辑只更新配置、不重连/不改写 tab、收起左侧树；删除保留 tab 的 session/SQL/结果并标记「连接已删除」，由用户自行关闭；关闭后不可重连（W-20261109-12/17）。
 6. **重连恢复当前库**：SQLite 超时/断线重连后回到原库（W-20261109-12）。
-7. **H-01～H-11 已全部修复**：新建连接不再改绑 tab、断开连接会关闭 browse session、标签自定义名随草稿持久化、单标签关闭有提示；剩余缺口见 §3 / §4。
+7. **H-01～H-11 已全部修复**：新建连接不再改绑 tab、断开连接会关闭 browse session、标签自定义名随草稿持久化；单标签关闭限制已按 W-20261111-127 取消（允许关闭全部标签）；剩余缺口见 §3 / §4。
 
 ### 2.2 当前模型（代码事实）
 
@@ -99,8 +99,8 @@
 | 断开连接 | 关闭该连接所有 tab session；标签和 SQL 保留；**browse session 当前未一起关闭（H-03）** | `disconnectConnection` |
 | 删除连接 | 保留 tab session/SQL/结果，写 `connectionSnapshot`；标签标记「连接已删除」 | `deleteSavedConnection` |
 | 编辑连接 | 只更新配置，不重连绑定标签；收起该连接左侧树 | `saveConnection` |
-| 关闭最后标签 | 自动新建一个绑定同一连接的查询标签；单标签时「关闭」静默无反应（H-10） | `closeTab` |
-| 草稿恢复 | 恢复 SQL/表数据标签的 id/title/customTitle/sql/connectionId/filePath/connectionSnapshot/table 上下文；重启后自动重开最多 5 个标签会话并重跑 SQL；表设计与 Agent 标签不恢复 | `DRAFT_STORAGE_KEY` |
+| 关闭最后标签 | 允许关闭到零标签，主区域显示「没有打开的标签」空状态；重启后保持零标签（W-20261111-127） | `closeTab`、`closeTabsByIds` |
+| 草稿恢复 | 恢复上次的标签集合（含零标签）与 id/title/customTitle/sql/connectionId/filePath/connectionSnapshot/table 上下文；重启后自动重开最多 5 个标签会话并重跑 SQL；表设计与 Agent 标签不恢复 | `DRAFT_STORAGE_KEY` |
 
 关系图（当前）：
 
@@ -132,7 +132,7 @@ Server（servers 表）
 
 | 隐藏需求 | 现状 | 风险/说明 | 建议 |
 |---|---|---|---|
-| 独立服务器节点（host:port/instance） | ✅ `servers`/`server_id` + 服务器分组 | 同一服务器多个库/账号归到同一 server | 保留 |
+| 独立服务器节点（host:port/instance） | ✅ `servers`/`server_id`（左侧树不显示服务器行） | 同一服务器多个库/账号归到同一 server | 保留 |
 | 一台服务器多个连接配置 | ✅ 按 `server_id` 分组 | 凭据仍各自保存 | 保留；凭据复用 v1.x |
 | 服务器级 Agent 节点 | ⏸ 明确不做，Agent 保持在连接配置下 | 同一 MSSQL 服务器多配置会出现多套 Agent | 不做 |
 | 服务器级数据库列表/健康状态 | ⏸ 不做服务器级 UI | 当前按连接/会话展示 | 不做 |
@@ -179,9 +179,9 @@ Server（servers 表）
 
 | 隐藏需求 | 现状 | 风险/说明 | 建议 |
 |---|---|---|---|
-| 左侧同时浏览多个服务器 | ❌ 只渲染当前 browse/活动连接 | 当前最大的信息架构限制 | v1.x 服务器浏览器 |
+| 左侧同时浏览多个服务器 | 🟡 多个连接可同时展开对象树（各自 browse 会话） | 搜索/服务器级浏览仍受限 | v1.x 完整服务器浏览器 |
 | 展开连接不等于打开标签 | ✅ 独立 browse session | 右击 →「查询」才创建 tab | 保留 |
-| 服务器 → 数据库 → schema → 对象 | 🟡 服务器分组 + browse 多库树 | 完整多服务器同时浏览 v1.x | 保留 |
+| 服务器 → 数据库 → schema → 对象 | 🟡 browse 多库树（服务器行已从左侧树移除，W-20261111-122） | 完整多服务器同时浏览 v1.x | 保留 |
 | 当前库标记/切换库 | ✅ 树内切换；标题/状态栏显示 | — | 保留 |
 | 跨库搜索 | ❌ 只搜已加载库 | 大库难找 | v1.x |
 | 系统对象开关 | ✅ SQLite/MSSQL；MySQL 系禁用 | — | 保留 |
@@ -192,7 +192,7 @@ Server（servers 表）
 
 | 隐藏需求 | 现状 | 风险/说明 | 建议 |
 |---|---|---|---|
-| 恢复上次打开的标签/会话 | ❌ 只恢复 SQL 草稿 | 重启后上下文丢失 | v1.x |
+| 恢复上次打开的标签/会话 | 🟡 恢复上次的标签集合（含零标签）与 SQL；最多 5 个标签自动重开会话并重跑 SQL | 结果不缓存，会话按需重建 | v1.x 全量会话/结果恢复 |
 | 恢复标签当前库 | ❌ 草稿不存 database | 多库体验差 | v1.0 可先存 `database` 字段 |
 | 恢复表数据/表设计/Agent 标签 | 🟡 | SQL/表数据标签恢复并重跑；表设计/Agent 仍不恢复 | v1.x |
 | 工作区/项目（连接+标签集合） | ❌ | 多项目切换靠分组 | v1.x |
@@ -232,7 +232,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 
 **v1.0 必做（Q21～Q27 决策后，主路径已落地）**：
 
-- 服务器实体（Q21 A）：服务器 → 连接配置 → 会话；连接管理器按服务器分组。
+- 服务器实体（Q21 A）：服务器 → 连接配置 → 会话；连接管理器按服务器分组（左侧树已不渲染服务器行，W-20261111-122）。
 - 标签标题（Q22 A）：连接名 + 当前库 + 查询序号；表数据/DDL/Agent 标签统一格式。
 - 数据库下拉（Q22 A）：非 SQLite 标签切换即 `USE`；失败保持原库。
 - 标签右键菜单（Q23 A）：关闭/关闭其他/关闭右侧/全部关闭/复制/重命名；运行中/失败可取消/重连。
@@ -311,7 +311,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 | 模块 | 状态 | 估算 | 已有能力摘要 | 主要缺口 |
 |---|---|---:|---|---|
 | MOD-01 连接管理 | 🟡 | 91% | 五类连接表单、测试连接、元数据库持久化（safeStorage）、编辑/复制/删除/断开、多级分组、搜索、最近使用、系统对象开关、生产危险语句拦截、SQLite 只读降级、库级 DDL、连接导入/导出、字符集、证书错误解释、超时、MSSQL 连接、多数据库对象树（库/schema/表/视图/存储过程/表子对象）、服务器实体与分组、独立 browse session | **v1.0 P0**：SQLite 文件拖入、认证插件字段、全量错误码、真实 Percona 与 MySQL 多库回归；H-02/H-03/H-04/H-08/H-09 |
-| MOD-02 SQL 编辑器 | 🟡 | 92% | 多标签、选区执行、取消、语法高亮、行号、括号匹配、格式化、关键字+函数+对象名补全、列/别名/限定名补全（W-20261109-19）、函数签名（W-20261109-20）、库/Schema/多段限定名/大小写跟随（W-20261109-21）、编辑器内多语句/多结果页签/消息面板与 `GO`/`DELIMITER` 分句（W-20261109-22）、草稿自动保存/恢复、关闭确认、SQL 文件打开/保存、多语句脚本窗口 | **v1.0 P0**：版本感知、补全类型提示、光标语句；**v1.x**：错误波浪线、最近文件、参数化执行、快捷键自定义 |
+| MOD-02 SQL 编辑器 | 🟡 | 92% | 多标签、选区执行、取消、语法高亮、行号、括号匹配、格式化、关键字+函数+对象名补全、列/别名/限定名补全（W-20261109-19）、函数签名（W-20261109-20）、库/Schema/多段限定名/大小写跟随（W-20261109-21）、编辑器内多语句/多结果页签/消息面板与 `GO`/`DELIMITER` 分句（W-20261109-22）、草稿自动保存/恢复、关闭标签时写入查询历史（W-20261111-128）、SQL 文件打开/保存、多语句脚本窗口 | **v1.0 P0**：版本感知、补全类型提示、光标语句；**v1.x**：错误波浪线、最近文件、参数化执行、快捷键自定义 |
 | MOD-03 查询历史 | 🟢 | 99% | history 表、成功/失败/取消记录、可关闭的 60s 去重、保留条数（含不限制）、FTS5 trigram 搜索（短查询回退 LIKE）、命中片段高亮、组合过滤（今天/自定义时间）、时间/耗时排序、详情、插入光标处、再次执行回到原连接/原库、复制/仅看此连接、连接已删除标记、JSON 导出、删除/清空、默认脱敏、写入队列与退出前 flush | 更完整的敏感内容识别、历史列表分页/加载更多 |
 | MOD-04 UI DDL | 🟢 | 97% | 查看/复制 DDL、新建表/编辑表结构页签（列差异生成 ALTER、SQLite 整表重建、删除列输入表名确认）、MSSQL schema + IDENTITY、新建视图、加/删/重命名/修改列、重命名/删除表、删除视图、索引管理、表结构（列/索引/外键/CHECK/注释）、表注释编辑、多语句脚本逐条结果、库级 DDL | CHECK 约束编辑、列序调整、编辑页签内唯一约束/索引变更、SQLite 重建保留外键/触发器、MSSQL 默认值/computed/rowversion 编辑 |
 | MOD-05 表数据编辑 | 🟢 | 96% | 数据页、50/200/500/1000 分页、多列排序、类型化多条件过滤、单元格编辑、多行粘贴、增删行/批量删行、单事务提交/回滚、乐观锁与 rowversion、本地撤销栈、主键修改确认、自增列写入、NULL/默认值、类型化编辑器、列布局记忆、必填标记、自动提交/确认、冲突预检/跳过、退出三选一、rowid 表、TSV 区域复制、网格右键菜单 | BLOB/大文本 hex 查看器仍只保留前 32 字节 |
@@ -348,8 +348,8 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 - MSSQL 命名实例：支持 `主机\实例名`、`主机:端口` 与独立实例名输入；实例名走 SQL Browser（UDP 1434）解析，与端口互斥；错误提示引导启动 SQL Server Browser 或改用端口；已在默认实例 `MSSQLSERVER` 上验证。
 - 元数据库 `<userData>/dbcraft-meta.db` 持久化连接；密码经 `safeStorage` 加密为 BLOB，只在主进程解密，不回传渲染层。
 - 连接编辑、复制、删除、断开、右键菜单；编辑保存不重连已有标签，只收起该连接左侧树；删除保留 tab session/SQL/结果与快照。
-- 多级分组（`A/B/C`）、折叠、重命名/删除分组、拖拽换组；连接与对象合并为一棵树：分组下直接列保存连接，连接节点可打开/关闭对象树，当前连接的对象树内联显示；连接右侧状态点区分已连接/连接中/连接失败/未连接；搜索合并；最近使用排序。
-- 服务器实体：`servers` 表 + `server_id`，左侧按服务器分组（服务器头可折叠）。
+- 多级分组（`A/B/C`）、折叠、重命名/删除分组、拖拽换组；连接与对象合并为一棵树：分组下直接列保存连接，连接节点可打开/关闭对象树，可同时展开多个连接的对象树（各用自己的 browse 会话）；连接右侧状态点区分已连接/连接中/连接失败/未连接；搜索合并；最近使用排序。
+- 服务器实体：`servers` 表 + `server_id`；左侧树不再显示服务器分组行，分组与「未分组」下直接列保存连接（W-20261111-122）。
 - 独立 browse session：双击/展开连接只打开树；右击「查询」才创建 tab；browse-only 对象操作会先 `ensureConnectionTab`。
 - 系统对象开关（SQLite、MSSQL；其他方言禁用并提示）；MSSQL 可浏览 `master` / `msdb` 中 `is_ms_shipped = 1` 的表/视图。
 - 生产连接危险语句拦截（`DROP` / `TRUNCATE` / 无顶层 `WHERE` 的 `UPDATE`、`DELETE`）。
@@ -377,10 +377,10 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 
 已实现：
 
-- 多标签、每标签独立会话、Ctrl+Enter 执行（有选区只执行选区）、取消、行数/耗时统计。
+- 多标签、每标签独立会话、Ctrl+Enter 执行（有选区只执行选区；无选区执行光标语句）、执行按钮（有选区只执行选区，无选区执行全文）、取消、行数/耗时统计。
 - 语法高亮（高亮层 + 透明 textarea，IME 组合期间隐藏高亮层）、行号、括号匹配（跳过字符串/注释）。
 - 格式化（关键字大写、子句换行、缩进、字符串/注释原样保留），Ctrl+Shift+F。
-- 补全：关键字 + 当前连接表/视图名，Ctrl+Space，前缀优先、键盘选择、回车/Tab 插入、Esc 关闭；列/别名/`别名.`/`表名.`/函数/函数签名/库/Schema/多段限定名（W-20261109-19/20/21）、大小写跟随、`.` 与关键字后空格自动触发。
+- 补全：关键字 + 当前连接表/视图名，Ctrl+Space，前缀优先、键盘选择、回车/Tab 插入、Esc 关闭；列/别名/`别名.`/`表名.`/函数/函数签名/库/Schema/多段限定名（W-20261109-19/20/21）、大小写跟随、普通单词输入、`.` 与关键字后空格自动触发；候选按子句分类（FROM/JOIN 只给表/视图，EXEC 只给存储过程，USE 只给数据库，W-20261111-131）；对象候选包含用户对象与系统对象（MSSQL 的 EXEC 会额外带入 master 系统存储过程，W-20261111-132）。
 - 30 秒草稿自动保存与启动恢复（最多 20 个标签）、关闭未保存标签确认。
 - SQL 文件打开/保存（Ctrl+S；首次保存弹对话框）。
 - 编辑器内多语句：`;` / MSSQL `GO` / MySQL `DELIMITER` 分句，逐条执行、遇错停止；每条查询一个结果页签，非查询/错误进入消息面板（W-20261109-22）。
@@ -696,8 +696,8 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 8. 脱敏：执行 `UPDATE ... SET password = 'x'` 后勾选「脱敏显示」，列表/详情/导出显示 `'***'`；插入编辑器仍是原始 SQL。
 9. 设置里的「快捷键」列出当前可用组合；底部「本地统计」与侧边栏连接数、历史条数一致。
 10. 关闭「记录查询历史」后执行查询，历史不再新增；重新开启后恢复。
-11. 选中一段 SQL 后 Ctrl+Enter 只执行选区；未选中时执行全文（当前为全文，非光标语句）。
-12. 草稿：修改 SQL 后等待 30 秒（或正常退出），重开恢复标签与 SQL；30 秒内关标签应提示最近修改尚未写入草稿。
+11. 选中一段 SQL 后 Ctrl+Enter 只执行选区，未选中时执行光标语句；点击「执行」按钮有选区时只执行选区，无选区时执行全文（W-20261112-02）。
+12. 草稿：修改 SQL 后等待 30 秒（或正常退出），重开恢复标签与 SQL；关闭标签不再弹出草稿确认，关闭前把该标签 SQL 写入查询历史（`saved` / `closed-tab`）。
 13. SQL 文件：打开 `.sql` 生成新标签；Ctrl+S 覆盖；无路径时弹保存对话框。
 14. 长查询超过 30 秒提示「查询超时」；SQLite 会话失败，点「重连」恢复；`DBCRAFT_QUERY_TIMEOUT_MS=0` 重启后不再自动取消。
 
@@ -772,7 +772,7 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 - MySQL / Percona / MariaDB 流式查询、TLS 回退、`KILL QUERY` 仅在便携实例主路径验证。
 - MSSQL 只在 SQL Server 2016 SP2 上验证主路径；TLS 严格校验、多 schema、命名实例（非默认）与动态端口、Agent 权限不足/Agent XPs 禁用路径未验证。
 - MSSQL Agent 的 UI（对象树入口、详情页签、按钮置灰、脚本打开新标签）尚未人工点击；后端查询/脚本/生命周期已用 Node 对真实实例验证。
-- 合并树只内联当前 browse/活动连接的对象；其他连接即使状态点为“已连接”也不会展开。
+- 合并树可为多个连接同时内联对象树（每个连接一个 browse 会话）；点击其他连接不会折叠已展开的连接。
 - 对象搜索只覆盖当前库；跨库搜索仍需先切换数据库。
 - 打包（`npm run pack` / `dist`）与安装包未验证。
 - 自动化测试只覆盖纯逻辑与 SQLite E2E，不覆盖 React 组件和真实驱动。
@@ -966,7 +966,7 @@ password / passwd / secret / token / authorization / apiKey / api_key / cookie
 
 | 领域 | 关键内容 |
 |---|---|
-| 编辑器 | 语法高亮、行号、括号匹配、格式化、基础补全、SQL 文件打开/保存、草稿与崩溃恢复、关闭确认、选中执行、多语句脚本 |
+| 编辑器 | 语法高亮、行号、括号匹配、格式化、基础补全、SQL 文件打开/保存、草稿与崩溃恢复、关闭标签写入查询历史、选中执行、多语句脚本 |
 | 查询历史 | FTS5 trigram、索引损坏自愈、组合过滤、时间/耗时排序、详情、再次执行、JSON 导出、按连接清空、赋值型脱敏、写入队列、历史开关、保留条数 |
 | UI DDL | 重命名/删除表、添加/删除/重命名列、MySQL 修改列、SQLite 重建表（含复合主键）、新建视图、索引管理、表结构（索引/外键/CHECK/注释）、表注释编辑、脚本逐条结果、DDL 执行写入历史 |
 | 表数据编辑 | 单元格编辑、多行粘贴、增删行、单事务提交/回滚、乐观锁、撤销栈、无主键高风险仅新增、服务端过滤、参数化 DML |
@@ -1156,10 +1156,10 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 
 #### H-10 只剩一个普通 SQL 标签时，「关闭」静默无反应（已修复）
 
-- **优先级/状态**：P2 / ✅（W-20261109-36）
+- **优先级/状态**：P2 / ⏸（W-20261109-36 曾修复为提示/置灰；W-20261111-127 改为允许全部关闭，本条约束不再适用）
 - **原问题**：`closeTab()` 在只剩一个非 kind 标签时直接返回；标签右键「关闭」没有置灰。
-- **修复**：右键「关闭」在只剩一个 SQL 标签时置灰；`closeTab` 被直接调用时给出「至少保留一个 SQL 标签」提示。
-- **验收**：单标签时右键「关闭」置灰或有明确提示；不会静默失败。
+- **修复**：W-20261109-36 曾让右键「关闭」置灰并给出提示；W-20261111-127 取消该限制——现在可以关闭全部标签，主区域显示空状态，重启后保持零标签。
+- **验收**：关闭最后一个标签后显示「没有打开的标签」+「新建查询」；重启后仍为零标签。
 
 #### H-11 死文件与临时探针脚本留在仓库（已清理）
 
@@ -1203,7 +1203,7 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 |---|---|---|---|---|
 | C-01 | 表数据分页档位 | PRD §4.5.2 写 50/200/500/1000；审计已指出缺 1000 | `Workspace.tsx:704` 只有 `[50, 200, 500]` | 补 1000，或回写 PRD 统一为 50/200/500 |
 | C-02 | 新建连接语义 | PRD v0.20 Q27：保存连接是配置，编辑/删除不影响已建 tab session；AGENTS 还写着「当前实现会静默重连绑定标签」 | 编辑连接已不重连（W-20261109-12）；但**新建**连接会改绑当前 tab（H-02） | 先确认 H-02 的产品语义；同步修正 AGENTS 的过期句子 |
-| C-03 | 服务器模型 | README 仍可能写「当前实现仍是扁平保存连接」 | `servers` 表 + `server_id` + 左侧树按服务器分组已实现（W-20261109-13/14） | 更新 README 为「服务器实体与分组已实现；服务器级浏览/操作仍按 v1.x/明确不做」 |
+| C-03 | 服务器模型 | README 仍可能写「当前实现仍是扁平保存连接」 | `servers` 表 + `server_id` 已实现（W-20261109-13/14）；左侧树服务器分组行已按用户要求移除（W-20261111-122） | 更新 README 为「服务器实体已实现；服务器级浏览/操作仍按 v1.x/明确不做；左侧树不显示服务器行」 |
 | C-04 | MSSQL 导出能力 | README/审计只说 MSSQL 已接入、导出格式可用 | 「加载全部」分支被旧 guard 挡住（H-01） | 修 H-01；文档补一句「导出全部依赖查询重跑，最多 1 万行」 |
 
 ### 4.6 证据索引
@@ -1339,7 +1339,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] 补全弹层：列名、`别名.`、`表名.`、函数（W-20261109-19；待人工验收）
 - [~] 函数签名提示：输入 `(`/`,` 后显示参数并高亮当前参数（W-20261109-20；待人工验收）
 - [~] 补全弹层：MSSQL `库.Schema.表`、MySQL `库.表`、SQLite `main.`/`temp.`、库名/Schema 名（W-20261109-21；待人工验收）
-- [~] 补全触发：`.`、`FROM/JOIN/INTO/UPDATE/TABLE/VIEW/EXEC/USE/SET` 后空格自动触发、手动 Ctrl+Space、大小写跟随（W-20261109-19/21；待人工验收）
+- [~] 补全触发：`.`、普通单词输入、`FROM/JOIN/INTO/UPDATE/TABLE/VIEW/EXEC/USE/SET` 后空格自动触发、手动 Ctrl+Space、大小写跟随、按子句分类（FROM 只给表/视图等，W-20261111-131；待人工验收）
 - [ ] 补全弹层：版本感知、类型提示、通配符展开、SQLite ATTACH 库内对象、MySQL 跨库列
 - [ ] 补全弹层定位、滚动、键盘选择、Esc 关闭、IME 不冲突
 - [ ] 错误波浪线（解析失败/可定位错误）
@@ -1563,6 +1563,36 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261111-119 剩余项归类**：M02-18 改为 ⏸（错误波浪线/代码折叠需替换 textarea 编辑器内核）；M08-12 改为 ✅（真实 SQL Server Agent 已透传原生 22022 错误，权限不足未单独构造）；G-07 改为 ⏸（安装包已生成，但无代码签名证书）。同步矩阵合计为 151 ✅ / 2 🟡 / 0 ❌ / 11 ⏸。无代码变更。
 - **W-20261111-120 G-08 无障碍检查**：诉求是建立可执行的无障碍门槛。变更：新增 `scripts/a11y-check.mjs` 与 `npm run test:a11y`，启动 Electron 检查 `html lang`、按钮可访问名称、表单标签、重复 id；补充全局 `:focus-visible` 与 `prefers-reduced-motion`。涉及 `scripts/a11y-check.mjs`、`package.json`、`src/renderer/src/styles.css`。验证：`npm run test:a11y` 通过（19 个按钮、2 个表单字段）；仍不是完整 axe/人工审计。
 - **W-20261111-121 G-06 人工验收归类**：G-06 从 🟡 改为 ⏸：SQLite/MySQL/MSSQL Electron E2E、smoke、a11y 已覆盖主路径，但“逐项人工点选”属于发布前人工活动，不再计入部分实现。`e2e:mssql` 在多结果集改动后再次通过。矩阵最终为 152 ✅ / 0 🟡 / 0 ❌ / 12 ⏸。
+
+- **W-20261111-122 左侧树移除服务器分组行**：诉求是分组（含「未分组」）下不再出现「服务器 → 连接」的二级头行，连接直接挂在分组下。变更：删除 `Sidebar` 的 `renderServerGroups` 与 `collapsedServers` 状态，分组、未分组、无分组三种路径统一直接渲染连接行；移除不再使用的 `server-identity` 导入与 `.connection-server-*` 样式；`servers`/`server_id` 数据模型不变。该改动与 PRD Q21「连接列表按服务器分组」的 UI 呈现不一致，偏差记录在本文件和 `prd/FEATURE_MATRIX.md`，未改 `prd/PRD.md`。涉及 `src/renderer/src/components/Sidebar.tsx`、`src/renderer/src/styles.css`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run test:groups` 通过；未在真实 Electron 中点击确认视觉与拖拽换组。
+
+- **W-20261111-123 browse 会话保留与连接绿点**：诉求是点击另一个连接时，已打开连接（如 test 分组）的状态点不应变灰。根因是 `openBrowseConnection` 在切换时关闭上一个 `browse-<connectionId>` 会话，且 `connectionStates` 只聚合 tab 会话，browse 状态只对当前浏览行生效。变更：切换浏览不再关闭旧 browse 会话；`connectionStates` 同时聚合 `browse-*` 会话（ready/opening/error 优先级与 tab 一致），连接状态点改为只看聚合结果；`closeBrowseConnection` 可关闭任意连接的 browse 会话（折叠该连接、编辑、删除、断开都会关闭对应会话），折叠非当前连接也会断开其 tree 会话。代价：浏览过且未折叠的连接各自保持一个物理连接，直到折叠/断开/删除/退出。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Sidebar.tsx`。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；临时 Playwright 脚本实测两连接：点 testconn 后仅 testconn 绿色，点 22 后两者均绿色，折叠 testconn 后其点变灰，再点回恢复绿色；未做长期内存/连接数压力验证。
+
+- **W-20261111-124 左侧树单连接展开与再次点击收起**：诉求是已展开的连接在点击其他连接时自动折叠，再次点击同一个连接时收起。变更：连接是否展开只由 `browseConnectionId` 决定（同一时间只内联一个连接的对象树），删除 `expandedConnections` 与 `collapseSignal` 传递；`expandConnection` 与折叠按钮改为切换语义——点击当前连接收起，点击其他连接切换树。收起只清 `browseConnectionId`，不关闭 browse 会话（绿点保持已连接，再次点击直接复用），W-20261111-123 中「折叠断开 browse 会话」的行为由本条取代；真正关闭仍走断开连接、编辑/删除连接或退出应用。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Sidebar.tsx`。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；Playwright 实测：点 testconn 展开且绿 → 点 22 后 testconn 自动折叠但仍绿、22 展开 → 再点 22 收起且仍绿 → 点 testconn 复用会话重新展开。
+
+- **W-20261111-125 多连接同时展开对象树**：诉求是点击别的连接时，原来已展开的对象树不折叠。（W-20261111-124 中“同一时间只展开一个连接、点击其他连接即折叠”的规则由本条取代。）变更：`Sidebar` 恢复按连接记录的 `expandedConnections`，点击只切换该连接自身，其他连接保持展开；`App` 新增 `browseViews`，把每个 `browse-<connectionId>` 会话的 schema/库/对象/当前库/加载态聚合成视图数据，`Sidebar` 为每个展开连接渲染独立 `ObjectTree`；刷新、切换库、系统对象开关、表子对象加载、搜索等回调改为带 `connectionId`；编辑/删除/断开后对应会话消失，行自动收起；`browseConnectionId` 保留为“最近请求展开”的焦点，供工具栏切连接时联动展开、以及收起时清除。涉及 `src/renderer/src/types.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/Sidebar.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；Playwright 实测两连接：点 testconn 展开 → 点 22 后 testconn 仍展开且两棵树并存、均绿色 → 再点 22 只收起 22 → 再点 testconn 只收起 testconn。遗留：表子对象的加载态仍用单个全局 key，多树同时加载同名表时可能出现共用 spinner；同时展开大量连接会增加物理连接与内存占用，未做压力验证。
+
+- **W-20261111-126 移除工具栏连接下拉**：诉求是删掉顶部工具栏的「当前连接」选择框，连接切换统一走左侧树。变更：`Toolbar` 删除 `connection-select` 及 `connections/activeConnectionId/onSelectConnection` props 与 `DATABASE_TYPE_LABELS`/`SavedConnection` 引用；删除 App 的 `selectConnectionTab`（原由工具栏下拉与 Sidebar 未使用 prop 调用）并移除 Sidebar 的 `onSelectConnection` 声明与传参；删除 `.connection-select` 样式，保留「新建连接」按钮。与 `prd/PRD.md` 中「顶部工具栏：连接选择框」的线框不一致，偏差记录在此，未改 PRD。涉及 `src/renderer/src/components/Toolbar.tsx`、`src/renderer/src/components/Sidebar.tsx`、`src/renderer/src/App.tsx`、`src/renderer/src/styles.css`。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite`、`npm run test:a11y`（19 buttons / 1 form field）通过；未人工逐项点击工具栏。
+
+- **W-20261111-127 允许关闭全部标签并按上次状态恢复**：诉求是标签可以全部关闭，程序重新打开时恢复上次关闭时的标签集合。变更：`closeTab`/`closeTabNow` 删除“至少保留一个 SQL 标签”限制，关闭最后一个标签不再自动新建空标签；`closeTabsByIds`（关闭其他/右侧/全部）在结果为空时把 `activeTabId` 置空；`loadDraftTabs` 区分“无草稿”和“空标签集合”，空集合返回 `tabs: []` 而不是回退到默认标签；`persistDraftTabs` 继续写入空集合，重启后保持零标签；新增 `EMPTY_TAB` 哨兵供 App/Workspace 在零标签时安全计算，Workspace 渲染「没有打开的标签 + 新建查询」空状态，标签关闭按钮不再因只剩一个而隐藏；`nextTabNumber([])` 从 1 开始。涉及 `src/renderer/src/types.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/styles.css`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；临时 Playwright 脚本实测：关闭唯一标签 → 空状态 → 退出重开仍为零标签；新建两个标签并写入 SQL、触发草稿保存后退出 → 重开恢复两个标签与 SQL。遗留：表设计/Agent 页签仍不写入草稿，若退出时只有这类页签，重开会是零标签；会话仍只对最多 5 个标签自动重开。
+
+- **W-20261111-128 关闭标签不弹草稿确认并写入历史**：诉求是关闭标签时不要弹「每 30 秒保存一次」的确认，但 SQL 要保留在查询历史里。变更：删除 `closeTabNow` 的 dirty 草稿确认（未提交事务、未提交表格修改的确认保留）；新增 `historySaveRequest`/`historySaveResult` 契约与 `history:record` 通道（`schemas.ts` 校验、`router.ts` 处理、`preload` 暴露）；主进程以 `status='saved'`、`source='closed-tab'`、`dedupe: false` 写入查询历史，避免改写 60 秒内的执行记录；`closeTabNow` 与 `closeTabsByIds` 在关闭前对非空 SQL 且有连接（含快照）的标签调用 `history.record`；历史面板与详情增加「已保存 / 关闭标签」标签与徽标样式，状态筛选自动包含「已保存」。涉及 `src/shared/ipc-contract.ts`、`src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/main/storage/metadata.ts`、`src/main/storage/history-store.ts`、`src/preload/index.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/HistoryDialog.tsx`、`src/renderer/src/components/HistoryDetailDialog.tsx`、`src/renderer/src/styles.css`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run build`、`npm run test:history` 通过；未在真实 Electron 中手动关闭标签验证历史条目（按用户要求不再启动自动化窗口）。遗留：未绑定连接的标签 SQL 不写入历史；历史设置关闭时不记录。
+
+- **W-20261111-129 MySQL 数据库下拉“假选中”**：诉求是 MySQL 已选择数据库后 `SHOW TABLES` 仍报 1046，需要先切别的库再切回来才生效。根因：`loadDatabases` 在 `DATABASE()` 为空时把 `SHOW DATABASES` 的第一项（如 `fanr`）当成当前库写入 `currentDatabaseByTab`，下拉框显示已选中，但会话并未执行 `USE`；再次选择同一项不会触发 `onChange`。变更：不再伪造当前库，没有当前库时把 `currentDatabaseByTab` 置空并清空对象；执行处下拉框在无当前库时显示「（未选择数据库）」占位，选择后才真正 `USE`；空值变更直接忽略。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过；未启动 Electron 手工验证，待确认。遗留：`ObjectTree` 内部仍有 `databases.find(current) ?? 'main'` 的展示回退，不影响 `USE` 执行。
+
+- **W-20261111-130 函数高亮与单词输入自动补全**：诉求是 SQL 函数使用独立高亮，且输入 `sele` 这类普通单词时自动弹出补全。变更：`tokenizeSql` 增加 `function` token，已知函数名后跟 `(`（允许中间空白）时归类为函数，否则仍按关键字/标识符处理；新增 `.sql-tok-function` 深色/浅色主题颜色；新增 `shouldOpenCompletionOnInput()`，普通单词输入、`.`、`FROM/JOIN/...` 后空格和手动快捷键都会打开补全，删除文本不触发；`SqlEditor` 增加补全定时器（沿用设置里的补全延迟），新输入会取消上一次待触发的补全。涉及 `src/renderer/src/utils/sql-highlight.ts`、`src/renderer/src/utils/sql-completion.ts`、`src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/styles.css`、`scripts/test-sql-highlight.mjs`、`scripts/test-sql-completion.mjs`、`prd/FEATURE_MATRIX.md`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run test:sql-highlight`、`npm run test:sql-completion`、`npm run build` 通过；未在真实 Electron 中输入 `sele` 观察弹窗（按用户要求不启动自动化窗口）。遗留：字符串/注释内输入仍会弹出补全，后续可按 token 判断光标上下文。
+
+- **W-20261111-131 补全按上下文分类**：诉求是 `FROM` 之后只出表/视图，不要混入函数、存储过程等。变更：`sql-completion` 增加 `CompletionKind/CompletionCandidate/CompletionGroups`；`relationKindsForClause()` 定义 FROM/JOIN/UPDATE/INTO/TABLE/VIEW → 表/视图、EXEC/EXECUTE → 存储过程、USE → 数据库；`completionCandidatesForContext()` 按子句生成基础候选，其余位置只给关键字+函数，带限定符时交给对象查询；`clauseAt` 增加 EXEC/EXECUTE/USE；`App` 的补全基础数据改为分类的 `completionGroups`（关键字/函数/对象类型/库/Schema），`requestCompletion` 返回带 kind 的候选并按子句过滤（含 `db.` / `schema.` 限定场景）；`SqlEditor`/`Workspace` props 同步改为 `completionGroups` 与 `CompletionCandidate[]`。涉及 `src/renderer/src/utils/sql-completion.ts`、`src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`scripts/test-sql-completion.mjs`、`prd/FEATURE_MATRIX.md`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run test:sql-completion`、`npm run test:sql-highlight`、`npm run build` 通过；纯逻辑测试覆盖 FROM/EXEC/SELECT/USE 与限定符分类；未在真实 Electron 中逐项点击验证。遗留：`USE` 之外没有单独的“存储过程/函数”独立入口；字符串/注释内仍会弹补全。
+
+- **W-20261111-132 补全包含系统对象**：诉求是 `EXEC` 后的存储过程、`FROM` 后的表/视图都要同时包含用户定义与系统对象。变更：补全专用对象加载固定 `includeSystemObjects: true`，不再复用左侧树的对象缓存；新增 `mergeObjects` 按“名称+类型”合并树内对象与补全加载结果；MSSQL 在 `EXEC/EXECUTE` 时额外合并 `master` 中的存储过程（未限定 `sp_*` 会回退 master）；MSSQL `sys.` 等 schema 在树内不存在时单独加载后过滤；SQLite `main./temp.` 限定符也改为补全加载。涉及 `src/renderer/src/App.tsx`、`prd/FEATURE_MATRIX.md`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run test:sql-completion`、`npm run build` 通过；未在真实 MSSQL/MySQL 上点击验证系统对象是否出现。
+
+- **W-20261112-01 移除数据库下拉前的“数据库”文字**：诉求是删除执行栏数据库选择框前的 `<span>数据库</span>`。变更：`Workspace` 的 `.db-select-inline` 只保留下拉框，`aria-label="当前数据库"` 仍提供可访问名称。涉及 `src/renderer/src/components/Workspace.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中查看间距。
+
+- **W-20261112-02 执行按钮按选区执行**：诉求是有选中内容时点「执行」只跑选区，无选中时执行全文。变更：`SqlEditor` 增加 `onSelectionChange`，在输入/选择/点击/按键后上报当前选区文本；`Workspace` 保存 `selectedSql` 并在切换标签时清空，执行按钮改为 `onRun(selectedSql.trim() ? selectedSql : undefined)`，无选区时仍执行全文（`Ctrl+Enter` 的无选区“光标语句”行为保持不变）。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中选区后点执行验证。
+
+- **W-20261112-03 DDL 执行成功反馈**：诉求是 DDL 执行完没有明显返回（例如“执行成功”）。根因：单条 `change` 语句没有结果列，`ResultGrid` 会显示“还没有结果”，而编辑器执行路径也没有成功提示。变更：`Workspace` 对单条无结果集的 change 语句显示「执行成功 · N 行受影响 · X ms」面板，结果工具栏同步加「执行成功」前缀；`App` 新增 `isDdlSql()`（跳过开头注释识别 CREATE/ALTER/DROP/TRUNCATE/RENAME/COMMENT），单条执行与脚本执行成功且包含 DDL 时弹出 toast（`DDL 执行成功 · N 条语句/耗时`）。涉及 `src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中执行 DDL 查看提示。
+
+- **W-20261113-01 补记：历史记录点击改为新建标签**：诉求是点击查询历史时在标签栏打开新标签，而不是把 SQL 插入当前编辑器（原先无标签时会丢失）。变更：`HistoryDialog` 的插入回调改为传递完整 `HistoryRecord`，`App` 新增 `openHistoryInNewTab()`，每次点击历史记录都新建标签并填入 SQL，尽量绑定原连接与原库；原“插入到光标处”的 `insertRequest` 链路一并移除。涉及 `src/renderer/src/components/HistoryDialog.tsx`、`src/renderer/src/components/HistoryDetailDialog.tsx`、`src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/features/editor/SqlEditor.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过（本条为补记，未新增自动化验证）。
 
 ---
 

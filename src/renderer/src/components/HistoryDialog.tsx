@@ -18,7 +18,8 @@ interface HistoryDialogProps {
   /** 设置里的脱敏默认值；用户仍可在面板内临时切换。 */
   defaultMasked: boolean;
   onClose: () => void;
-  onInsert: (sql: string) => void;
+  /** 插入历史 SQL；外层在没有可用 SQL 标签时会新建标签。 */
+  onInsert: (record: HistoryRecord) => void;
   /** 再次执行：由外层决定回到原连接/原库，原连接不存在时退化为插入。 */
   onRun: (record: HistoryRecord) => void;
 }
@@ -27,6 +28,7 @@ const STATUS_LABELS: Record<QueryStatus, string> = {
   success: '成功',
   failed: '失败',
   cancelled: '已取消',
+  saved: '已保存',
 };
 
 const SOURCE_LABELS: Record<HistoryRecord['source'], string> = {
@@ -36,6 +38,7 @@ const SOURCE_LABELS: Record<HistoryRecord['source'], string> = {
   'agent-control': 'Agent',
   'table-page': '表数据',
   export: '导出',
+  'closed-tab': '关闭标签',
 };
 
 function formatTime(iso: string): string {
@@ -492,11 +495,11 @@ export function HistoryDialog({
                   className="history-row"
                   role="button"
                   tabIndex={0}
-                  onClick={() => onInsert(record.sqlText)}
+                  onClick={() => onInsert(record)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
-                      onInsert(record.sqlText);
+                      onInsert(record);
                     }
                   }}
                   title={displaySql(record)}
@@ -653,9 +656,9 @@ export function HistoryDialog({
           displaySql={displaySql(detail)}
           connectionDeleted={isDeletedConnection(detail)}
           onClose={() => setDetail(null)}
-          onInsert={(sql) => {
+          onInsert={(record) => {
             setDetail(null);
-            onInsert(sql);
+            onInsert(record);
           }}
           onRun={(record) => {
             setDetail(null);

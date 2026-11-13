@@ -30,6 +30,7 @@ import {
   type ExportSaveResult,
   type ExportStreamResult,
   type HistoryListResult,
+  type HistorySaveResult,
   type QueryResponse,
   type QueryScriptResponse,
   type SchemaGetResult,
@@ -66,6 +67,7 @@ import {
   fileReadSqlSchema,
   formatConnectionIssues,
   historyListSchema,
+  historySaveSchema,
   logWriteSchema,
   queryExecuteSchema,
   queryExecuteScriptSchema,
@@ -111,6 +113,7 @@ import {
   removeConnection,
   saveConnection,
   listQueryHistory,
+  recordQueryHistory,
   removeQueryHistory,
   clearQueryHistory,
   clearConnectionQueryHistory,
@@ -782,6 +785,35 @@ export function registerIpcHandlers(): void {
         return { ok: false, message: '历史查询参数无效。' };
       }
       return listQueryHistory(parsed.data);
+    },
+  );
+
+  handle(
+    IPC_CHANNELS.historyRecord,
+    (_event, rawInput: unknown): HistorySaveResult => {
+      const parsed = historySaveSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return { ok: false, message: '历史保存参数无效。' };
+      }
+      recordQueryHistory(
+        {
+          sqlText: parsed.data.sqlText,
+          dialect: parsed.data.dialect,
+          connectionId: parsed.data.connectionId,
+          connectionName: parsed.data.connectionName,
+          databaseName: parsed.data.databaseName ?? '',
+          status: 'saved',
+          errorMessage: null,
+          durationMs: 0,
+          affectedRows: null,
+          returnedRows: null,
+          source: 'closed-tab',
+          executedAt: new Date().toISOString(),
+        },
+        // 不与最近执行记录合并，避免把执行结果改写成“已保存”。
+        { dedupe: false },
+      );
+      return { ok: true };
     },
   );
 

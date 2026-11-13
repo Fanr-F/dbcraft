@@ -1,14 +1,30 @@
 import type {
   ConnectionRecord,
+  DatabaseInfo,
   QueryCell,
   QueryColumn,
   QueryMessage,
+  SchemaObject,
   TableDetail,
+  TableExtras,
 } from '@shared/ipc-contract';
 import type { TableFilter } from '@shared/dialect/identifiers';
 
 /** 已持久化连接；密码留在主进程，渲染层只拿到不含密码的配置。 */
 export type SavedConnection = ConnectionRecord;
+
+/** 单个连接的对象树视图数据（来自它的 browse-<connectionId> 会话）。 */
+export interface BrowseConnectionView {
+  status: SessionStatus;
+  schemaObjects: SchemaObject[];
+  databases: DatabaseInfo[];
+  objectsByDatabase: Record<string, SchemaObject[]>;
+  currentDatabase: string | null;
+  databaseLoading: string | null;
+  tableExtras: Record<string, TableExtras>;
+  showSystemObjects: boolean;
+  schemaLoading: boolean;
+}
 
 export interface QueryTab {
   id: string;
@@ -66,6 +82,9 @@ export interface QueryTab {
     params?: QueryCell[];
   };
 }
+
+/** 没有打开任何标签时的占位；不进入 tabs 状态，也不绑定连接。 */
+export const EMPTY_TAB: QueryTab = { id: '', title: '', sql: '', connectionId: null };
 
 export interface RunStatement {
   sql: string;

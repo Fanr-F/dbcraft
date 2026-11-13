@@ -27,8 +27,12 @@ import { SQL_KEYWORD_LIST } from './utils/sql-highlight';
 import {
   extractAttachedDatabases,
   functionCompletions,
+  relationKindsForClause,
   splitQualifier,
+  type CompletionCandidate,
   type CompletionContext,
+  type CompletionGroups,
+  type CompletionKind,
 } from './utils/sql-completion';
 import { splitSqlStatements } from './utils/sql-script';
 import { formatSql } from './utils/sql-format';
@@ -58,6 +62,7 @@ import { StatusBar } from './components/StatusBar';
 import { Toolbar } from './components/Toolbar';
 import { Workspace } from './components/Workspace';
 import type {
+  BrowseConnectionView,
   Notice,
   QueryTab,
   RunState,
@@ -67,6 +72,15 @@ import type {
   SessionStatus,
   TransactionRuntime,
 } from './types';
+import { EMPTY_TAB } from './types';
+
+/** 判断语句是否 DDL（跳过开头的块注释/行注释）。 */
+function isDdlSql(sql: string): boolean {
+  const stripped = sql
+    .replace(/^\s*(?:\/\*[\s\S]*?\*\/|--[^\n]*(?:\n|$))\s*/g, '')
+    .trimStart();
+  return /^(CREATE|ALTER|DROP|TRUNCATE|RENAME|COMMENT)\b/i.test(stripped);
+}
 
 const INITIAL_SQL = `SELECT name, type, sql
 FROM sqlite_master
@@ -158,7 +172,7 @@ function loadDraftTabs(): { tabs: QueryTab[]; activeTabId: string } | null {
           : {}),
       });
     }
-    if (tabs.length === 0) return null;
+    if (tabs.length === 0) return { tabs: [], activeTabId: '' };
 
     const active =
       typeof parsed.activeTabId === 'string' &&
@@ -205,6 +219,7 @@ function persistDraftTabs(tabs: QueryTab[], activeTabId: string): boolean {
 const RESTORED_DRAFTS = loadDraftTabs();
 
 function nextTabNumber(tabs: QueryTab[]): number {
+  if (tabs.length === 0) return 1;
   let max = 1;
   for (const tab of tabs) {
     const match = /^query-(\d+)$/.exec(tab.id);
@@ -453,10 +468,6 @@ export default function App() {
   /** 允许 INSERT 显式写入自增列；MSSQL 会使用 IDENTITY_INSERT。 */
   const [identityInsertMode, setIdentityInsertMode] = useState<Record<string, boolean>>({});
   const [transactions, setTransactions] = useState<Record<string, TransactionRuntime>>({});
-  const [treeCollapseSignal, setTreeCollapseSignal] = useState<{
-    connectionId: string;
-    token: number;
-  } | null>(null);
   const [browseConnectionId, setBrowseConnectionId] = useState<string | null>(null);
   const [connectionDialog, setConnectionDialog] = useState<ConnectionDialogState | null>(null);
   const [maintenance, setMaintenance] = useState<{
@@ -477,10 +488,6 @@ export default function App() {
     label: string;
   } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [insertRequest, setInsertRequest] = useState<{
-    text: string;
-    token: number;
-  } | null>(null);
   const [tableAction, setTableAction] = useState<{
     mode: TableActionMode;
     name: string;
@@ -725,7 +732,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [settings.shortcuts.history]);
 
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? EMPTY_TAB;
   const connectionForTab = (tab: QueryTab): SavedConnection | null =>
     connections.find((connection) => connection.id === tab.connectionId) ??
     tab.connectionSnapshot ??
@@ -737,13 +744,14 @@ export default function App() {
   const activeAgentJob =
     activeTab.kind === 'agent-detail' ? (activeTab.agentJob ?? null) : null;
   const activeRun = runs[activeTab.id] ?? EMPTY_RUN;
-  /** 保存连接对应的运行状态：同一保存连接可能被多个标签使用。 */
+  /** 保存连接对应的运行状态：同一保存连接可能被多个标签使用，browse 会话也计入。 */
   const connectionStates = useMemo(() => {
     const states: Record<string, SessionStatus> = {};
-    for (const tab of tabs) {
-      const runtime = sessions[tab.id];
-      if (!runtime || runtime.status === 'idle' || !tab.connectionId) continue;
-      const connectionId = tab.connectionId;
+    const merge = (
+      connectionId: string | null | undefined,
+      runtime: SessionRuntime | undefined,
+    ) => {
+      if (!connectionId || !runtime || runtime.status === 'idle') return;
       const current = states[connectionId];
       if (runtime.status === 'ready' || current === undefined) {
         states[connectionId] = runtime.status;
@@ -752,12 +760,20 @@ export default function App() {
       } else if (runtime.status === 'error' && current !== 'ready' && current !== 'opening') {
         states[connectionId] = 'error';
       }
+    };
+    for (const tab of tabs) merge(tab.connectionId, sessions[tab.id]);
+    // 浏览连接独立持有 browse-<connectionId> 会话；切换浏览不再关闭旧会话，
+    // 因此这里把仍然存活的 browse 会话也聚合到连接状态点上。
+    for (const [sessionId, runtime] of Object.entries(sessions)) {
+      if (sessionId.startsWith('browse-')) {
+        merge(sessionId.slice('browse-'.length), runtime);
+      }
     }
     return states;
   }, [tabs, sessions]);
   const activeDatabases = databasesByTab[activeTab.id] ?? [];
   const activeVersion = sessions[activeTab.id]?.version ?? '';
-  const completionItems = useMemo(() => {
+  const completionGroups = useMemo<CompletionGroups>(() => {
     const schemaNames = Array.from(
       new Set(
         activeSchema
@@ -775,22 +791,25 @@ export default function App() {
       if (dialect === 'sqlite') return !major || major > 3 || (major === 3 && minor >= 35);
       return true;
     })();
-    const keywords = modern
-      ? SQL_KEYWORD_LIST
-      : SQL_KEYWORD_LIST.filter(
-          (keyword) => !['WITH', 'OVER', 'PARTITION', 'RETURNING'].includes(keyword),
-        );
-    return [
-      ...keywords,
-      ...functionCompletions(dialect),
-      ...activeSchema.map((object) => object.name),
-      ...schemaNames,
-      ...activeDatabases.map((database) => database.name),
-      ...extractAttachedDatabases(activeTab.sql ?? ''),
-    ];
+    return {
+      keywords: modern
+        ? SQL_KEYWORD_LIST
+        : SQL_KEYWORD_LIST.filter(
+            (keyword) => !['WITH', 'OVER', 'PARTITION', 'RETURNING'].includes(keyword),
+          ),
+      functions: functionCompletions(dialect),
+      objects: activeSchema.map((object) => ({ name: object.name, kind: object.type })),
+      schemas: schemaNames,
+      databases: [
+        ...activeDatabases.map((database) => database.name),
+        ...extractAttachedDatabases(activeTab.sql ?? ''),
+      ],
+    };
   }, [activeSchema, activeConnection?.input.type, activeDatabases, activeTab.sql, activeVersion]);
 
-  const requestCompletion = async (context: CompletionContext): Promise<string[]> => {
+  const requestCompletion = async (
+    context: CompletionContext,
+  ): Promise<CompletionCandidate[]> => {
     const tab = activeTab;
     const connection = activeConnection;
     if (!connection || sessions[tab.id]?.status !== 'ready') return [];
@@ -803,21 +822,28 @@ export default function App() {
       currentDatabaseByTab[tab.id] ??
       (dialect === 'sqlite' ? 'main' : connection.input.database);
     const databases = databasesByTab[tab.id] ?? [];
+    // FROM/JOIN 只给表/视图，EXEC 只给存储过程，USE 只给数据库。
+    const contextKinds: CompletionKind[] = relationKindsForClause(context.clause);
+    const pick = (candidates: CompletionCandidate[]): CompletionCandidate[] =>
+      contextKinds.length === 0
+        ? candidates
+        : candidates.filter((candidate) => contextKinds.includes(candidate.kind));
+    const toCandidates = (
+      names: string[],
+      kind: CompletionKind,
+    ): CompletionCandidate[] => names.map((label) => ({ label, kind }));
+    const objectCandidates = (objects: SchemaObject[]): CompletionCandidate[] =>
+      objects.map((object) => ({ label: object.name, kind: object.type }));
 
-    /** 读取某个库的对象（不切换会话当前库；SQLite 忽略 database）。 */
+    /** 读取某个库的对象（不切换会话当前库；SQLite 忽略 database）。补全包含系统对象。 */
     const loadObjects = async (targetDatabase: string): Promise<SchemaObject[]> => {
       const key = `${tab.id}:${targetDatabase.toLowerCase()}`;
       const cached = schemaObjectCache.current[key];
       if (cached) return cached;
-      const existing = dbObjectsByTab[tab.id]?.[targetDatabase];
-      if (existing) {
-        schemaObjectCache.current[key] = existing;
-        return existing;
-      }
       try {
         const result = await api.schema.get(tab.id, {
           database: targetDatabase,
-          includeSystemObjects: showSystemObjects[tab.id] ?? false,
+          includeSystemObjects: true,
         });
         const objects = result.ok ? result.objects : [];
         schemaObjectCache.current[key] = objects;
@@ -827,10 +853,25 @@ export default function App() {
       }
     };
 
-    const loadColumns = async (tableName: string): Promise<string[]> => {
+    /** 合并对象列表并按“名称+类型”去重，保证用户对象与系统对象都在。 */
+    const mergeObjects = (...lists: SchemaObject[][]): SchemaObject[] => {
+      const seen = new Set<string>();
+      const objects: SchemaObject[] = [];
+      for (const list of lists) {
+        for (const object of list) {
+          const key = `${object.name.toLowerCase()}:${object.type}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          objects.push(object);
+        }
+      }
+      return objects;
+    };
+
+    const loadColumns = async (tableName: string): Promise<CompletionCandidate[]> => {
       const key = `${tab.id}:${database}:${tableName.toLowerCase()}`;
       const cached = columnCache.current[key];
-      if (cached) return cached;
+      if (cached) return toCandidates(cached, 'column');
       try {
         let result = await api.schema.table(tab.id, tableName, 'table');
         if (!result.ok) {
@@ -842,7 +883,7 @@ export default function App() {
         }
         const names = columns.map((column) => column.name);
         columnCache.current[key] = names;
-        return names;
+        return toCandidates(names, 'column');
       } catch {
         return [];
       }
@@ -871,11 +912,9 @@ export default function App() {
       return reference.table;
     };
 
-    /** `dbo.users` 这类对象名去掉 schema 前缀，只补表名本身。 */
-    const stripSchema = (objects: SchemaObject[], schema: string) =>
-      objects
-        .filter((object) => (object.schema ?? '').toLowerCase() === schema.toLowerCase())
-        .map((object) => object.name.split('.').slice(1).join('.'));
+    /** 取指定 schema 下的对象，并判断是否属于表/视图/存储过程。 */
+    const objectsInSchema = (objects: SchemaObject[], schema: string) =>
+      objects.filter((object) => (object.schema ?? '').toLowerCase() === schema.toLowerCase());
 
     // `SELECT *` 后手动触发补全时，直接展开当前表/别名的列。
     if (context.needle === '*') {
@@ -905,25 +944,36 @@ export default function App() {
         if (dialect === 'sqlite') {
           // main./temp. 可查；ATTACH 的别名目前没有元数据接口，先不返回错误候选。
           return last === 'main' || last === 'temp'
-            ? activeSchema.map((object) => object.name)
+            ? pick(objectCandidates(await loadObjects(last)))
             : [];
         }
 
         if (dialect === 'mssql') {
-          const hasSchema = activeSchema.some(
+          let objects = activeSchema;
+          let hasSchema = objects.some(
             (object) => (object.schema ?? '').toLowerCase() === last,
           );
-          if (hasSchema) return stripSchema(activeSchema, last);
+          // `sys.` 等系统 schema 可能没在左侧树里（系统对象开关关闭），补全时单独加载。
+          if (!hasSchema) {
+            objects = await loadObjects(database);
+            hasSchema = objects.some(
+              (object) => (object.schema ?? '').toLowerCase() === last,
+            );
+          }
+          if (hasSchema) return pick(objectCandidates(objectsInSchema(objects, last)));
 
           const databaseMatch = databases.find((item) => item.name.toLowerCase() === last);
           if (databaseMatch) {
             const objects = await loadObjects(databaseMatch.name);
-            return Array.from(
-              new Set(
-                objects
-                  .map((object) => object.schema)
-                  .filter((name): name is string => Boolean(name)),
+            return toCandidates(
+              Array.from(
+                new Set(
+                  objects
+                    .map((object) => object.schema)
+                    .filter((name): name is string => Boolean(name)),
+                ),
               ),
+              'schema',
             );
           }
           return [];
@@ -933,7 +983,7 @@ export default function App() {
           const databaseMatch = databases.find((item) => item.name.toLowerCase() === last);
           if (databaseMatch) {
             const objects = await loadObjects(databaseMatch.name);
-            return objects.map((object) => object.name);
+            return pick(objectCandidates(objects));
           }
           return [];
         }
@@ -948,7 +998,7 @@ export default function App() {
           );
           if (databaseMatch) {
             const objects = await loadObjects(databaseMatch.name);
-            return stripSchema(objects, parts[1]!);
+            return pick(objectCandidates(objectsInSchema(objects, parts[1]!)));
           }
           return loadColumns(`${parts[0]}.${parts[1]}`);
         }
@@ -970,7 +1020,7 @@ export default function App() {
       return [];
     }
 
-    const items: string[] = [];
+    const items: CompletionCandidate[] = [];
     if (
       ['select', 'where', 'on', 'set', 'order by', 'group by', 'having'].includes(
         context.clause,
@@ -983,24 +1033,37 @@ export default function App() {
       const columnLists = await Promise.all(uniqueTables.map((name) => loadColumns(name)));
       for (const columns of columnLists) items.push(...columns);
       for (const table of context.tables) {
-        if (table.alias) items.push(table.alias);
+        if (table.alias) items.push({ label: table.alias, kind: 'alias' });
       }
     } else if (
       ['from', 'join', 'into', 'update', 'table', 'view', 'exec', 'execute'].includes(
         context.clause,
       )
     ) {
-      const objects = activeSchema.length > 0 ? activeSchema : await loadObjects(database);
-      items.push(...objects.map((object) => object.name));
+      const loaded = await loadObjects(database);
+      let objects = mergeObjects(activeSchema, loaded);
+      // MSSQL 的 sp_* 未限定名会回退到 master，补全时把 master 的系统存储过程也带上。
+      if (
+        dialect === 'mssql' &&
+        (context.clause === 'exec' || context.clause === 'execute')
+      ) {
+        const masterObjects = await loadObjects('master');
+        objects = mergeObjects(
+          objects,
+          masterObjects.filter((object) => object.type === 'procedure'),
+        );
+      }
+      // 关系位置只保留表/视图（或 EXEC 的存储过程），不再混入函数与关键字。
+      items.push(...pick(objectCandidates(objects)));
       for (const schema of new Set(
         objects
           .map((object) => object.schema)
           .filter((name): name is string => Boolean(name)),
       )) {
-        items.push(schema);
+        items.push({ label: schema, kind: 'schema' });
       }
     }
-    return items;
+    return contextKinds.length > 0 ? pick(items) : items;
   };
   const tabLabels = useMemo(() => {
     const labels: Record<string, string> = {};
@@ -1036,26 +1099,35 @@ export default function App() {
   const activeSessionCount = Object.values(sessions).filter(
     (runtime) => runtime.status === 'ready' || runtime.status === 'opening',
   ).length;
-  const browseSessionKey = browseConnectionId ? browseSessionId(browseConnectionId) : null;
-  const browseRuntime = browseSessionKey ? (sessions[browseSessionKey] ?? null) : null;
-  const browseSchemaObjects = browseSessionKey ? (schemas[browseSessionKey] ?? []) : [];
-  const browseDatabases = browseSessionKey ? (databasesByTab[browseSessionKey] ?? []) : [];
-  const browseObjectsByDatabase = browseSessionKey
-    ? (dbObjectsByTab[browseSessionKey] ?? {})
-    : {};
-  const browseCurrentDatabase = browseSessionKey
-    ? (currentDatabaseByTab[browseSessionKey] ?? null)
-    : null;
-  const browseDatabaseLoading = browseSessionKey
-    ? (dbLoadingByTab[browseSessionKey] ?? null)
-    : null;
-  const browseTableExtras = browseSessionKey ? (tableExtrasByTab[browseSessionKey] ?? {}) : {};
-  const browseShowSystemObjects = browseSessionKey
-    ? (showSystemObjects[browseSessionKey] ?? false)
-    : false;
-  const browseSchemaLoading = browseSessionKey
-    ? schemaLoadingId === browseSessionKey
-    : false;
+  const browseViews = useMemo(() => {
+    const views: Record<string, BrowseConnectionView> = {};
+    for (const [sessionId, runtime] of Object.entries(sessions)) {
+      if (!sessionId.startsWith('browse-')) continue;
+      const connectionId = sessionId.slice('browse-'.length);
+      views[connectionId] = {
+        status: runtime.status,
+        schemaObjects: schemas[sessionId] ?? [],
+        databases: databasesByTab[sessionId] ?? [],
+        objectsByDatabase: dbObjectsByTab[sessionId] ?? {},
+        currentDatabase: currentDatabaseByTab[sessionId] ?? null,
+        databaseLoading: dbLoadingByTab[sessionId] ?? null,
+        tableExtras: tableExtrasByTab[sessionId] ?? {},
+        showSystemObjects: showSystemObjects[sessionId] ?? false,
+        schemaLoading: schemaLoadingId === sessionId,
+      };
+    }
+    return views;
+  }, [
+    sessions,
+    schemas,
+    databasesByTab,
+    dbObjectsByTab,
+    currentDatabaseByTab,
+    dbLoadingByTab,
+    tableExtrasByTab,
+    showSystemObjects,
+    schemaLoadingId,
+  ]);
   const running = Boolean(runningTabs[activeTab.id]);
   const activeTransaction = transactions[activeTab.id] ?? IDLE_TRANSACTION;
   const activeTableMeta = tableMetas[activeTab.id] ?? null;
@@ -1171,11 +1243,12 @@ export default function App() {
         return;
       }
       setDatabasesByTab((current) => ({ ...current, [tabId]: result.databases }));
+      // 不把“第一个数据库”当成当前库：MySQL 会话没有 USE 过时 DATABASE() 为空，
+      // 伪造当前库会让下拉框显示已选中，但服务器端仍报 1046。
       const current =
-        result.databases.find((database) => database.current)?.name ??
-        result.databases[0]?.name ??
-        '';
+        result.databases.find((database) => database.current)?.name ?? '';
       if (!current) {
+        setCurrentDatabaseByTab((currentDb) => ({ ...currentDb, [tabId]: '' }));
         setSchemas((currentSchemas) => ({ ...currentSchemas, [tabId]: [] }));
         return;
       }
@@ -1426,9 +1499,8 @@ export default function App() {
     const connection = connections.find((item) => item.id === connectionId);
     if (!connection) return;
     const nextId = browseSessionId(connectionId);
-    if (browseConnectionId && browseConnectionId !== connectionId) {
-      await closeTabSession(browseSessionId(browseConnectionId));
-    }
+    // 同一时间只内联一个连接的对象树，但已建立的 browse 会话保留：
+    // 绿点继续表示“连接仍然打开”，切回时复用会话而不是重新建连。
     setBrowseConnectionId(connectionId);
     if (sessions[nextId]?.status === 'ready') return;
 
@@ -1441,32 +1513,32 @@ export default function App() {
     await openTabSession(tab, connectionId);
   };
 
-  const closeBrowseConnection = async (connectionId: string) => {
-    if (browseConnectionId !== connectionId) return;
-    setBrowseConnectionId(null);
-    await closeTabSession(browseSessionId(connectionId));
+  /** 收起对象树只清“焦点”，不关闭 browse 会话；多个连接可同时保持展开。 */
+  const collapseBrowseConnection = (connectionId: string) => {
+    if (browseConnectionId === connectionId) setBrowseConnectionId(null);
   };
 
-  const refreshBrowse = () => {
-    if (!browseConnectionId) return;
-    const id = browseSessionId(browseConnectionId);
+  const refreshBrowse = (connectionId: string) => {
+    const id = browseSessionId(connectionId);
     if (sessions[id]?.status === 'ready') {
       void loadSchema(id, showSystemObjects[id] ?? false);
     }
-    // 对象树顶部的刷新按钮同时刷新当前 MSSQL 连接的 Agent 作业。
-    if (activeConnection?.input.type === 'mssql') {
+    // 对象树顶部的刷新按钮同时刷新对应 MSSQL 连接的 Agent 作业。
+    const connection = connections.find((item) => item.id === connectionId);
+    if (connection?.input.type === 'mssql' && connectionId === activeTab.connectionId) {
       void loadAgentJobs();
     }
   };
 
-  const selectBrowseDatabase = async (database: string): Promise<boolean> => {
-    if (!browseConnectionId) return false;
-    return switchDatabase(browseSessionId(browseConnectionId), database);
+  const selectBrowseDatabase = async (
+    connectionId: string,
+    database: string,
+  ): Promise<boolean> => {
+    return switchDatabase(browseSessionId(connectionId), database);
   };
 
-  const toggleBrowseSystemObjects = (next: boolean) => {
-    if (!browseConnectionId) return;
-    const id = browseSessionId(browseConnectionId);
+  const toggleBrowseSystemObjects = (connectionId: string, next: boolean) => {
+    const id = browseSessionId(connectionId);
     setShowSystemObjects((current) => ({ ...current, [id]: next }));
     if (sessions[id]?.status === 'ready') {
       setDbObjectsByTab((current) => ({ ...current, [id]: {} }));
@@ -1474,9 +1546,12 @@ export default function App() {
     }
   };
 
-  const loadBrowseTableExtras = (database: string, table: string) => {
-    if (!browseConnectionId) return;
-    void loadTableExtras(database, table, browseSessionId(browseConnectionId));
+  const loadBrowseTableExtras = (
+    connectionId: string,
+    database: string,
+    table: string,
+  ) => {
+    void loadTableExtras(database, table, browseSessionId(connectionId));
   };
 
   /**
@@ -1587,49 +1662,6 @@ export default function App() {
       current.map((item) => (item.id === tab.id ? finalTab : item)),
     );
     await runQuery(query.sql, finalTab, query.params, { internal: true });
-  };
-
-  /**
-   * 选择连接时只切换标签，绝不把当前标签改绑到另一个连接。
-   * 标签与会话一一对应：已有该连接的标签就激活，没有就新建标签。
-   */
-  const selectConnectionTab = (connectionId: string) => {
-    const connection = connections.find((item) => item.id === connectionId);
-    if (!connection) return;
-    if (browseConnectionId !== connectionId) {
-      void openBrowseConnection(connectionId);
-    }
-
-    // 当前标签已经属于该连接：保持不动，只确保会话可用。
-    if (activeTab.connectionId === connectionId && !activeTab.kind) {
-      if (sessions[activeTab.id]?.status !== 'ready') {
-        void openTabSession(activeTab, connection.id);
-      }
-      return;
-    }
-
-    // Agent 详情页签也绑定连接，但不适合作为“打开该连接查询”的目标。
-    const bound = tabs.filter((tab) => tab.connectionId === connectionId && !tab.kind);
-    const target = bound.find((tab) => !tab.table) ?? bound[0];
-    if (target) {
-      setActiveTabId(target.id);
-      if (sessions[target.id]?.status !== 'ready') {
-        void openTabSession(target, connection.id);
-      }
-      return;
-    }
-
-    const number = tabCounter.current;
-    tabCounter.current += 1;
-    const tab: QueryTab = {
-      id: `query-${number}`,
-      title: `查询 ${number}`,
-      sql: DEFAULT_SQL[connection.input.type],
-      connectionId: connection.id,
-    };
-    setTabs((current) => [...current, tab]);
-    setActiveTabId(tab.id);
-    void openTabSession(tab, connection.id);
   };
 
   /** 为 browse-only 连接的对象操作准备一个活动 tab；返回是否可用。 */
@@ -1861,6 +1893,13 @@ export default function App() {
               [tab.id]: { status: 'error', message: firstError.error!.message },
             }));
           }
+        } else if (!response.result.canceled && !response.result.timedOut) {
+          const ddlCount = response.result.statements.filter(
+            (statement) => statement.ok && isDdlSql(statement.sql),
+          ).length;
+          if (ddlCount > 0) {
+            showNotice('info', `DDL 执行成功 · ${ddlCount} 条语句`);
+          }
         }
         return;
       }
@@ -1938,6 +1977,9 @@ export default function App() {
         }));
         if (response.result.truncated) {
           showNotice('info', `仅显示前 ${response.result.rowCount} 行，其余结果未加载。`);
+        }
+        if (isDdlSql(executableSql)) {
+          showNotice('info', `DDL 执行成功 · ${response.result.elapsedMs} ms`);
         }
         clearEditHistory(tab.id);
         const action = transactionAction(executableSql);
@@ -2020,12 +2062,39 @@ export default function App() {
    * 历史记录「再次执行」：优先回到原连接与原库；原连接已删除时只插入编辑器，
    * 由用户选择目标连接，避免把 SQL 发到错误的数据库。
    */
+  /** 点击历史记录：始终新建一个标签并填入 SQL，不覆盖当前编辑器。 */
+  const openHistoryInNewTab = (record: HistoryRecord) => {
+    const number = tabCounter.current;
+    tabCounter.current += 1;
+    const connection =
+      connections.find((item) => item.id === record.connectionId) ?? null;
+    const tab: QueryTab = {
+      id: `query-${number}`,
+      title: `查询 ${number}`,
+      sql: record.sqlText,
+      connectionId: connection?.id ?? null,
+    };
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+    if (connection) {
+      const database =
+        connection.input.type === 'sqlite' ? undefined : record.databaseName || undefined;
+      void openTabSession(tab, connection.id, database);
+    }
+    showNotice(
+      'info',
+      connection
+        ? '已在新标签打开历史 SQL，按 Ctrl+Enter 执行。'
+        : '已在新标签打开历史 SQL；原连接不可用，请重新选择连接。',
+    );
+  };
+
   const runHistoryRecord = async (record: HistoryRecord) => {
     setHistoryOpen(false);
     const connection = connections.find((item) => item.id === record.connectionId);
     if (!connection) {
-      setInsertRequest({ text: record.sqlText, token: Date.now() });
-      showNotice('error', '原连接已删除，已插入编辑器；请选择目标连接后执行。');
+      openHistoryInNewTab(record);
+      showNotice('error', '原连接已删除，已在新标签打开 SQL；请选择目标连接后执行。');
       return;
     }
 
@@ -2728,22 +2797,27 @@ export default function App() {
     }
   };
 
+  /** 关闭标签时把 SQL 存入查询历史，避免未执行的草稿丢失。 */
+  const rememberClosedTabSql = (tab: QueryTab) => {
+    const api = window.dbcraft;
+    if (!api) return;
+    const sql = tab.sql.trim();
+    const connection = connectionForTab(tab);
+    if (!sql || !connection) return;
+    void api.history
+      .record({
+        sqlText: tab.sql,
+        connectionId: connection.id,
+        connectionName: connection.input.name,
+        dialect: connection.input.type,
+        databaseName: tab.table?.database ?? currentDatabaseByTab[tab.id] ?? '',
+      })
+      .catch(() => undefined);
+  };
+
   const closeTabNow = async (id: string) => {
     const closing = tabs.find((tab) => tab.id === id);
     if (!closing) return;
-    if (tabs.length <= 1 && !closing.kind) {
-      showNotice('info', '至少保留一个 SQL 标签；可先新建查询再关闭当前标签。');
-      return;
-    }
-    if (closing?.dirty) {
-      if (
-        !window.confirm(
-          '当前 SQL 最近修改尚未写入自动草稿（每 30 秒保存一次），关闭会丢失这些修改。继续吗？',
-        )
-      ) {
-        return;
-      }
-    }
     if (transactions[id]?.state === 'active') {
       if (
         !window.confirm('该标签有未提交事务，关闭标签会回滚事务。继续吗？')
@@ -2757,32 +2831,15 @@ export default function App() {
 
     // 关闭前先取消该标签正在执行的查询，避免关闭后查询仍在后台占锁/写历史。
     await cancelQueryForTab(id, true);
+    rememberClosedTabSql(closing);
 
     const next = tabs.filter((tab) => tab.id !== id);
-    if (next.length === 0) {
-      // 关闭最后一个 Agent 页签后保持一个可用的查询标签，避免主区域空白。
-      const number = tabCounter.current;
-      tabCounter.current += 1;
-      const reopenedConnection =
-        connections.find((connection) => connection.id === closing.connectionId) ?? null;
-      const tab: QueryTab = {
-        id: `query-${number}`,
-        title: `查询 ${number}`,
-        sql: reopenedConnection ? DEFAULT_SQL[reopenedConnection.input.type] : 'SELECT 1;',
-        connectionId: reopenedConnection?.id ?? null,
-      };
-      setTabs([tab]);
-      setActiveTabId(tab.id);
-      persistDraftTabs([tab], tab.id);
-      void closeTabSession(id);
-      if (reopenedConnection) {
-        void openTabSession(tab, reopenedConnection.id);
-      }
-      return;
-    }
-
     const fallback =
-      activeTabId === id ? (next[Math.max(0, index - 1)] ?? next[0]).id : activeTabId;
+      next.length === 0
+        ? ''
+        : activeTabId === id
+          ? (next[Math.max(0, index - 1)] ?? next[0]).id
+          : activeTabId;
     setTabs(next);
     if (activeTabId === id) {
       setActiveTabId(fallback);
@@ -2824,10 +2881,6 @@ export default function App() {
   const closeTab = async (id: string) => {
     const closing = tabs.find((tab) => tab.id === id);
     if (!closing) return;
-    if (tabs.length <= 1 && !closing.kind) {
-      showNotice('info', '至少保留一个 SQL 标签；可先新建查询再关闭当前标签。');
-      return;
-    }
     if (countPendingEdits(pendingTableEdits[id]) > 0) {
       setClosePrompt({ tabId: id });
       return;
@@ -2971,28 +3024,14 @@ export default function App() {
       return;
     }
 
-    let next = tabs.filter((tab) => !unique.includes(tab.id));
+    const next = tabs.filter((tab) => !unique.includes(tab.id));
     let nextActive = activeTabId;
     for (const tab of closing) {
       await cancelQueryForTab(tab.id, true);
+      rememberClosedTabSql(tab);
     }
     if (next.length === 0) {
-      const number = tabCounter.current;
-      tabCounter.current += 1;
-      const source = closing[0];
-      const connection = source ? connectionForTab(source) : null;
-      const saved = connection
-        ? connections.find((item) => item.id === connection.id) ?? null
-        : null;
-      const tab: QueryTab = {
-        id: `query-${number}`,
-        title: `查询 ${number}`,
-        sql: saved ? DEFAULT_SQL[saved.input.type] : 'SELECT 1;',
-        connectionId: saved?.id ?? null,
-      };
-      next = [tab];
-      nextActive = tab.id;
-      if (saved) void openTabSession(tab, saved.id);
+      nextActive = '';
     } else if (!next.some((tab) => tab.id === activeTabId)) {
       const index = tabs.findIndex((tab) => tab.id === activeTabId);
       nextActive = next[Math.max(0, Math.min(index, next.length - 1))]?.id ?? next[0].id;
@@ -3073,11 +3112,13 @@ export default function App() {
   };
 
   const refreshBrowseSchema = () => {
-    if (!browseConnectionId) return;
-    const id = browseSessionId(browseConnectionId);
-    setTableExtrasByTab((current) => ({ ...current, [id]: {} }));
-    if (sessions[id]?.status === 'ready') {
-      void loadSchema(id, showSystemObjects[id] ?? false);
+    // 可能同时展开多个连接：刷新所有仍存活的 browse 会话。
+    for (const [id, runtime] of Object.entries(sessions)) {
+      if (!id.startsWith('browse-')) continue;
+      setTableExtrasByTab((current) => ({ ...current, [id]: {} }));
+      if (runtime.status === 'ready') {
+        void loadSchema(id, showSystemObjects[id] ?? false);
+      }
     }
   };
 
@@ -3392,14 +3433,9 @@ export default function App() {
     // 保存连接是配置（类），编辑不应影响已创建的 tab session。
     // 只更新配置并关闭左侧对象树；用户双击连接重新打开树。
     if (id) {
-      if (browseConnectionId === id) {
-        await closeTabSession(browseSessionId(id));
-        setBrowseConnectionId(null);
-      }
-      setTreeCollapseSignal((current) => ({
-        connectionId: id,
-        token: (current?.token ?? 0) + 1,
-      }));
+      const browseKey = browseSessionId(id);
+      if (sessions[browseKey]) await closeTabSession(browseKey);
+      if (browseConnectionId === id) setBrowseConnectionId(null);
       showNotice('info', `连接「${connection.input.name}」已更新；已打开的标签保持原会话，左侧树已关闭。`);
       return;
     }
@@ -3430,10 +3466,10 @@ export default function App() {
 
     setConnections((current) => current.filter((item) => item.id !== id));
 
-    if (browseConnectionId === id) {
+    if (sessions[browseSessionId(id)]) {
       await closeTabSession(browseSessionId(id));
-      setBrowseConnectionId(null);
     }
+    if (browseConnectionId === id) setBrowseConnectionId(null);
 
     const affectedTabs = tabs.filter((tab) => tab.connectionId === id);
     if (affectedTabs.length > 0) {
@@ -3451,10 +3487,6 @@ export default function App() {
         `连接「${target.input.name}」已删除；${affectedTabs.length} 个标签保留原会话，关闭后不可重连。`,
       );
     }
-    setTreeCollapseSignal((current) => ({
-      connectionId: id,
-      token: (current?.token ?? 0) + 1,
-    }));
   };
 
   const openCreateDialog = () => setConnectionDialog({ mode: 'create' });
@@ -3483,10 +3515,11 @@ export default function App() {
     const affected = tabs.filter(
       (tab) => tab.connectionId === id && sessions[tab.id] !== undefined,
     );
-    const hadBrowse = browseConnectionId === id;
+    const browseKey = browseSessionId(id);
+    const hadBrowse = sessions[browseKey] !== undefined;
     if (hadBrowse) {
-      await closeTabSession(browseSessionId(id));
-      setBrowseConnectionId(null);
+      await closeTabSession(browseKey);
+      if (browseConnectionId === id) setBrowseConnectionId(null);
     }
     await Promise.all(affected.map((tab) => closeTabSession(tab.id)));
 
@@ -3779,11 +3812,9 @@ export default function App() {
         void loadSchema(sourceTabId, showSystemObjects[sourceTabId] ?? false);
       }
     }
-    if (browseConnectionId) {
-      columnCache.current = {};
-      schemaObjectCache.current = {};
+    columnCache.current = {};
+    schemaObjectCache.current = {};
     refreshBrowseSchema();
-    }
   };
 
   const fetchDdl = async (name: string, kind: DdlObjectKind): Promise<string | null> => {
@@ -4543,9 +4574,6 @@ export default function App() {
   return (
     <main className="app-shell" data-testid="app-shell">
       <Toolbar
-        connections={connections}
-        activeConnectionId={activeTab.connectionId}
-        onSelectConnection={selectConnectionTab}
         onNewConnection={openCreateDialog}
         onReconnectAll={() => void reconnectAll()}
         onOpenHistory={() => setHistoryOpen(true)}
@@ -4572,29 +4600,19 @@ export default function App() {
             activeConnection?.input.type === 'sqlite' || activeConnection?.input.type === 'mssql'
           }
           sessionReadOnly={activeRuntime?.readonly === true}
-          collapseSignal={treeCollapseSignal}
           browseConnectionId={browseConnectionId}
-          browseSessionStatus={browseRuntime?.status ?? 'idle'}
-          browseSchemaObjects={browseSchemaObjects}
-          browseDatabases={browseDatabases}
-          browseObjectsByDatabase={browseObjectsByDatabase}
-          browseCurrentDatabase={browseCurrentDatabase}
-          browseDatabaseLoading={browseDatabaseLoading}
-          browseTableExtras={browseTableExtras}
-          browseTableExtrasLoadingKey={tableExtrasLoadingKey}
-          browseSchemaLoading={browseSchemaLoading}
-          browseShowSystemObjects={browseShowSystemObjects}
+          browseViews={browseViews}
           onOpenBrowseConnection={(id) => void openBrowseConnection(id)}
-          onCloseBrowseConnection={(id) => void closeBrowseConnection(id)}
-          onRefreshBrowse={refreshBrowse}
-          onToggleBrowseSystemObjects={toggleBrowseSystemObjects}
-          onSelectBrowseDatabase={(database) => void selectBrowseDatabase(database)}
-          onLoadBrowseDatabase={(database) => {
-            if (browseConnectionId) {
-              void loadDatabaseObjects(browseSessionId(browseConnectionId), database);
-            }
+          onCollapseBrowseConnection={(id) => collapseBrowseConnection(id)}
+          onRefreshBrowse={(id) => refreshBrowse(id)}
+          onToggleBrowseSystemObjects={(id, next) => toggleBrowseSystemObjects(id, next)}
+          onSelectBrowseDatabase={(id, database) => void selectBrowseDatabase(id, database)}
+          onLoadBrowseDatabase={(id, database) => {
+            void loadDatabaseObjects(browseSessionId(id), database);
           }}
-          onLoadBrowseTableExtras={loadBrowseTableExtras}
+          onLoadBrowseTableExtras={(id, database, table) =>
+            loadBrowseTableExtras(id, database, table)
+          }
           onOpenTableInBrowse={(connectionId, name, database) =>
             openTableFromBrowse(connectionId, name, database)
           }
@@ -4605,7 +4623,6 @@ export default function App() {
             openProcedureFromBrowse(connectionId, name, database)
           }
           onEnsureConnectionTab={(connectionId) => ensureConnectionTab(connectionId)}
-          onSelectConnection={selectConnectionTab}
           onNewConnection={openCreateDialog}
           onRefreshSchema={refreshSchema}
           onToggleSystemObjects={toggleSystemObjects}
@@ -4762,8 +4779,7 @@ export default function App() {
           onOpenRecentSqlFile={(path) => void openSqlFile(path)}
           onFormatSql={formatActiveSql}
           onOpenHistory={() => setHistoryOpen(true)}
-          insertRequest={insertRequest}
-          completionItems={completionItems}
+          completionGroups={completionGroups}
           completionDetails={completionDetails.current}
           completionEnabled={settings.completionEnabled}
           completionDelayMs={settings.completionDelayMs}
@@ -4818,7 +4834,9 @@ export default function App() {
               !activeTab.kind &&
               !activeTab.table,
           )}
-          onDatabaseChange={(database) => switchDatabase(activeTab.id, database)}
+          onDatabaseChange={(database) => {
+            if (database) void switchDatabase(activeTab.id, database);
+          }}
           agentContent={
             activeTab.kind === 'agent-detail' ? (
               <AgentTabPanel
@@ -4957,14 +4975,9 @@ export default function App() {
           connections={connections}
           defaultMasked={settings.historyMask}
           onClose={() => setHistoryOpen(false)}
-          onInsert={(sql) => {
+          onInsert={(record) => {
             setHistoryOpen(false);
-            if (activeTab.kind === 'agent-detail') {
-              showNotice('error', '当前是 Agent 详情页，请先切到 SQL 标签再插入历史。');
-              return;
-            }
-            setInsertRequest({ text: sql, token: Date.now() });
-            showNotice('info', '已插入历史 SQL 到光标处，按 Ctrl+Enter 执行。');
+            openHistoryInNewTab(record);
           }}
           onRun={(record) => {
             void runHistoryRecord(record);

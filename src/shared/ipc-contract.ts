@@ -184,8 +184,9 @@ export type QuerySource =
   | 'grid-edit'
   | 'agent-control'
   | 'table-page'
-  | 'export';
-export type QueryStatus = 'success' | 'failed' | 'cancelled';
+  | 'export'
+  | 'closed-tab';
+export type QueryStatus = 'success' | 'failed' | 'cancelled' | 'saved';
 
 /** 多语句执行中的单条语句结果；失败后脚本停止。 */
 export interface QueryScriptStatement {
@@ -248,6 +249,17 @@ export interface HistoryRecord {
 export type HistoryListResult =
   | { ok: true; records: HistoryRecord[] }
   | { ok: false; message: string };
+
+/** 关闭标签时把未执行的 SQL 存入历史（不产生查询执行）。 */
+export interface HistorySaveRequest {
+  sqlText: string;
+  connectionId: string;
+  connectionName: string;
+  dialect: DatabaseType;
+  databaseName?: string;
+}
+
+export type HistorySaveResult = { ok: boolean; message?: string };
 
 export interface HistoryListOptions {
   /** SQL 内容包含匹配；`%`/`_` 按字面量。 */
@@ -815,6 +827,7 @@ export interface DBCraftApi {
   };
   history: {
     list: (options?: HistoryListOptions) => Promise<HistoryListResult>;
+    record: (request: HistorySaveRequest) => Promise<HistorySaveResult>;
     remove: (id: number) => Promise<{ ok: boolean; message?: string }>;
     clear: () => Promise<{ ok: boolean; message?: string }>;
     clearConnection: (connectionId: string) => Promise<{ ok: boolean; message?: string }>;
@@ -882,6 +895,7 @@ export const IPC_CHANNELS = {
   exportStreamCancel: 'export:stream-cancel',
   exportStreamProgress: 'export:stream-progress',
   historyList: 'history:list',
+  historyRecord: 'history:record',
   historyDelete: 'history:delete',
   historyClear: 'history:clear',
   historyClearConnection: 'history:clear-connection',

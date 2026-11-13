@@ -1,5 +1,6 @@
 export type SqlTokenType =
   | 'keyword'
+  | 'function'
   | 'string'
   | 'comment'
   | 'number'
@@ -26,6 +27,17 @@ const KEYWORDS = new Set(
 
 /** 补全使用的关键字列表（小写存储，展示时统一大写）。 */
 export const SQL_KEYWORD_LIST = Array.from(KEYWORDS, (keyword) => keyword.toUpperCase());
+
+/** 常见 SQL 函数；只有后面跟 `(` 时才按函数高亮。 */
+const FUNCTIONS = new Set(
+  `count sum avg min max coalesce ifnull nullif length substr substring upper lower trim
+   date time datetime strftime julianday round abs random typeof json_extract json_unquote
+   json_value json_query concat group_concat string_agg now curdate curtime date_format
+   str_to_date datediff dateadd date_add date_sub isnull len getdate sysdatetime format
+   convert cast replace`
+    .split(/\s+/)
+    .filter(Boolean),
+);
 
 function isWordStart(char: string): boolean {
   return /[A-Za-z_\u0080-\uffff]/.test(char);
@@ -106,7 +118,18 @@ export function tokenizeSql(sql: string): SqlToken[] {
       let end = index + 1;
       while (end < sql.length && isWordPart(sql[end]!)) end += 1;
       const word = sql.slice(index, end);
-      push(KEYWORDS.has(word.toLowerCase()) ? 'keyword' : 'identifier', word);
+      const lower = word.toLowerCase();
+      let lookahead = end;
+      while (lookahead < sql.length && /\s/.test(sql[lookahead]!)) lookahead += 1;
+      const isCall = sql[lookahead] === '(';
+      push(
+        FUNCTIONS.has(lower) && isCall
+          ? 'function'
+          : KEYWORDS.has(lower)
+            ? 'keyword'
+            : 'identifier',
+        word,
+      );
       index = end;
       continue;
     }

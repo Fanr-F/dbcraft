@@ -7,11 +7,14 @@ import { statementAtCursor } from '../../utils/sql-script';
 import { findBracketMatch, type BracketMatch } from '../../utils/sql-brackets';
 import {
   applyCompletion,
+  completionCandidatesForContext,
   extractCompletionContext,
   extractSignatureHelp,
   filterCompletions,
-  shouldAutoTriggerCompletion,
+  shouldOpenCompletionOnInput,
+  type CompletionCandidate,
   type CompletionContext,
+  type CompletionGroups,
   type SignatureHelp,
 } from '../../utils/sql-completion';
 import { ContextMenu } from '../../components/ContextMenu';
@@ -27,8 +30,10 @@ interface SqlEditorProps {
   onOpenHistory?: () => void;
   /** 一次性插入请求；token 变化时在光标处插入 text。 */
   insertRequest?: { text: string; token: number } | null;
-  /** 关键字 + 当前连接对象名。 */
-  completionItems?: string[];
+  /** 选区变化时上报选中文本（空字符串表示没有选中）。 */
+  onSelectionChange?: (selected: string) => void;
+  /** 关键字 + 当前连接对象名（按分类供上下文过滤）。 */
+  completionGroups?: CompletionGroups;
   /** 补全项的类型详情（列名 → 类型）。 */
   completionDetails?: Record<string, string>;
   /** 是否启用补全。 */
@@ -36,7 +41,7 @@ interface SqlEditorProps {
   /** 自动补全延迟（毫秒）。 */
   completionDelayMs?: number;
   /** 按光标上下文异步补充列/别名等候选。 */
-  onRequestCompletion?: (context: CompletionContext) => Promise<string[]>;
+  onRequestCompletion?: (context: CompletionContext) => Promise<CompletionCandidate[]>;
   /** 当前连接的方言；用于函数签名提示。 */
   dialect?: DatabaseType | null;
   shortcuts?: ShortcutMap;
@@ -56,7 +61,8 @@ export function SqlEditor({
   onFormat,
   onOpenHistory,
   insertRequest,
-  completionItems = [],
+  onSelectionChange,
+  completionGroups,
   completionDetails,
   completionEnabled = true,
   completionDelayMs = 0,
@@ -68,6 +74,7 @@ export function SqlEditor({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastInsertToken = useRef<number | null>(null);
   const completionRequest = useRef(0);
+  const completionTimer = useRef<number | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [composing, setComposing] = useState(false);
   const [completion, setCompletion] = useState<CompletionState | null>(null);
@@ -118,18 +125,28 @@ export function SqlEditor({
     setScrollTop(element.scrollTop);
   };
 
+  /** 上报选区文本，供工具栏“执行”决定只跑选中内容还是全文。 */
+  const reportSelection = (element: HTMLTextAreaElement) => {
+    onSelectionChange?.(element.value.slice(element.selectionStart, element.selectionEnd));
+  };
+
   const openCompletion = async () => {
     if (!completionEnabled) return;
     const element = textareaRef.current;
     if (!element) return;
     const context = extractCompletionContext(element.value, element.selectionStart);
-    const base = context.qualifier
-      ? []
-      : filterCompletions(completionItems, context.needle);
+    const groups: CompletionGroups = completionGroups ?? {
+      keywords: [],
+      functions: [],
+      objects: [],
+      databases: [],
+      schemas: [],
+    };
+    const base: CompletionCandidate[] = completionCandidatesForContext(context, groups);
     const request = completionRequest.current + 1;
     completionRequest.current = request;
 
-    let extra: string[] = [];
+    let extra: CompletionCandidate[] = [];
     if (onRequestCompletion) {
       try {
         extra = await onRequestCompletion(context);
@@ -139,7 +156,16 @@ export function SqlEditor({
     }
     if (completionRequest.current !== request) return;
 
-    const filtered = filterCompletions([...extra, ...base], context.needle);
+    // 按上下文分类的候选先合并去重，再做前缀/包含匹配。
+    const seen = new Set<string>();
+    const labels: string[] = [];
+    for (const candidate of [...extra, ...base]) {
+      const key = candidate.label.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      labels.push(candidate.label);
+    }
+    const filtered = filterCompletions(labels, context.needle);
     if (filtered.length === 0) {
       setCompletion(null);
       return;
@@ -152,7 +178,23 @@ export function SqlEditor({
     setActiveIndex(0);
   };
 
+  const clearCompletionTimer = () => {
+    if (completionTimer.current !== null) {
+      window.clearTimeout(completionTimer.current);
+      completionTimer.current = null;
+    }
+  };
+
+  const scheduleCompletion = () => {
+    clearCompletionTimer();
+    completionTimer.current = window.setTimeout(() => {
+      completionTimer.current = null;
+      void openCompletion();
+    }, Math.max(0, completionDelayMs));
+  };
+
   const acceptCompletion = (index: number) => {
+    clearCompletionTimer();
     const element = textareaRef.current;
     if (!completion || !element) return;
     const item = completion.items[index];
@@ -245,22 +287,22 @@ export function SqlEditor({
         value={value}
         onChange={(event) => {
           completionRequest.current += 1;
+          clearCompletionTimer();
           setCompletion(null);
           setBracketMatch(null);
           const next = event.target.value;
+          const cursor = event.target.selectionStart;
+          const inserted = next.length >= value.length;
           onChange(next);
           updateCursorLine(event.currentTarget);
           requestAnimationFrame(() => {
             const element = textareaRef.current;
             if (element) updateSignatureHelp(element);
           });
-          if (
-            !composing &&
-            (next.endsWith('.') ||
-              shouldAutoTriggerCompletion(next, event.target.selectionStart))
-          ) {
-            window.setTimeout(() => void openCompletion(), completionDelayMs);
+          if (!composing && shouldOpenCompletionOnInput(next, cursor, { inserted })) {
+            scheduleCompletion();
           }
+          reportSelection(event.currentTarget);
         }}
         onScroll={(event) => {
           syncScroll(event.currentTarget);
@@ -270,21 +312,25 @@ export function SqlEditor({
           updateBracketMatch(event.currentTarget);
           updateSignatureHelp(event.currentTarget);
           updateCursorLine(event.currentTarget);
+          reportSelection(event.currentTarget);
         }}
         onKeyUp={(event) => {
           updateBracketMatch(event.currentTarget);
           updateSignatureHelp(event.currentTarget);
           updateCursorLine(event.currentTarget);
+          reportSelection(event.currentTarget);
         }}
         onClick={(event) => {
           updateBracketMatch(event.currentTarget);
           updateSignatureHelp(event.currentTarget);
           updateCursorLine(event.currentTarget);
+          reportSelection(event.currentTarget);
         }}
         onCompositionStart={() => setComposing(true)}
         onCompositionEnd={() => setComposing(false)}
         onBlur={() => {
           completionRequest.current += 1;
+          clearCompletionTimer();
           setCompletion(null);
           setSignatureHelp(null);
         }}
@@ -320,6 +366,7 @@ export function SqlEditor({
             if (event.key === 'Escape') {
               event.preventDefault();
               completionRequest.current += 1;
+              clearCompletionTimer();
               setCompletion(null);
               return;
             }

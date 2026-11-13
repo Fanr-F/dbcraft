@@ -9,8 +9,7 @@ import type {
   TableExtras,
 } from '@shared/ipc-contract';
 import { agentRunStatusLabel } from '@shared/agent';
-import { serverDisplayName, serverKey, serverTypeLabel } from '@shared/server-identity';
-import type { SavedConnection, SessionStatus } from '../types';
+import type { BrowseConnectionView, SavedConnection, SessionStatus } from '../types';
 import { buildGroupTree, countGroup, type GroupNode } from '../utils/groups';
 import { ContextMenu } from './ContextMenu';
 import { Icon } from './Icon';
@@ -33,27 +32,16 @@ interface SidebarProps {
   showSystemObjects: boolean;
   systemObjectsSupported: boolean;
   sessionReadOnly: boolean;
-  /** 编辑/删除保存连接后收起该连接的对象树。 */
-  collapseSignal?: { connectionId: string; token: number } | null;
-  /** 独立 browse session：左侧对象树不再依赖当前 tab。 */
+  /** 独立 browse session：每个连接的对象树数据（可同时展开多个）。 */
   browseConnectionId: string | null;
-  browseSessionStatus: SessionStatus;
-  browseSchemaObjects: SchemaObject[];
-  browseDatabases: DatabaseInfo[];
-  browseObjectsByDatabase: Record<string, SchemaObject[]>;
-  browseCurrentDatabase: string | null;
-  browseDatabaseLoading: string | null;
-  browseTableExtras: Record<string, TableExtras>;
-  browseTableExtrasLoadingKey: string | null;
-  browseSchemaLoading: boolean;
-  browseShowSystemObjects: boolean;
+  browseViews: Record<string, BrowseConnectionView>;
   onOpenBrowseConnection: (id: string) => void;
-  onCloseBrowseConnection: (id: string) => void;
-  onRefreshBrowse: () => void;
-  onToggleBrowseSystemObjects: (next: boolean) => void;
-  onSelectBrowseDatabase: (database: string) => void;
-  onLoadBrowseDatabase: (database: string) => void;
-  onLoadBrowseTableExtras: (database: string, table: string) => void;
+  onCollapseBrowseConnection: (id: string) => void;
+  onRefreshBrowse: (connectionId: string) => void;
+  onToggleBrowseSystemObjects: (connectionId: string, next: boolean) => void;
+  onSelectBrowseDatabase: (connectionId: string, database: string) => void;
+  onLoadBrowseDatabase: (connectionId: string, database: string) => void;
+  onLoadBrowseTableExtras: (connectionId: string, database: string, table: string) => void;
   onOpenTableInBrowse: (connectionId: string, name: string, database?: string) => void;
   onOpenTableDataInBrowse: (
     connectionId: string,
@@ -63,7 +51,6 @@ interface SidebarProps {
   ) => void;
   onOpenProcedureInBrowse: (connectionId: string, name: string, database?: string) => void;
   onEnsureConnectionTab: (connectionId: string) => Promise<boolean> | boolean;
-  onSelectConnection: (id: string) => void;
   onNewConnection: () => void;
   onRefreshSchema: () => void;
   onToggleSystemObjects: (next: boolean) => void;
@@ -145,21 +132,12 @@ export function Sidebar({
   schemaObjects,
   databases,
   objectsByDatabase,
+  tableExtrasLoadingKey,
   sessionReadOnly,
-  collapseSignal,
   browseConnectionId,
-  browseSessionStatus,
-  browseSchemaObjects,
-  browseDatabases,
-  browseObjectsByDatabase,
-  browseCurrentDatabase,
-  browseDatabaseLoading,
-  browseTableExtras,
-  browseTableExtrasLoadingKey,
-  browseSchemaLoading,
-  browseShowSystemObjects,
+  browseViews,
   onOpenBrowseConnection,
-  onCloseBrowseConnection,
+  onCollapseBrowseConnection,
   onRefreshBrowse,
   onToggleBrowseSystemObjects,
   onSelectBrowseDatabase,
@@ -209,15 +187,14 @@ export function Sidebar({
   onAgentJobAction,
 }: SidebarProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const [collapsedServers, setCollapsedServers] = useState<Record<string, boolean>>({});
   const [expandedConnections, setExpandedConnections] = useState<Record<string, boolean>>({});
+  // App 通过 browseConnectionId 请求展开某个连接（双击、工具栏切连接）。
   useEffect(() => {
-    if (!collapseSignal) return;
-    setExpandedConnections((current) => ({
-      ...current,
-      [collapseSignal.connectionId]: false,
-    }));
-  }, [collapseSignal?.token]);
+    if (!browseConnectionId) return;
+    setExpandedConnections((current) =>
+      current[browseConnectionId] ? current : { ...current, [browseConnectionId]: true },
+    );
+  }, [browseConnectionId]);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     tables: true,
     views: true,
@@ -288,21 +265,24 @@ export function Sidebar({
         matchesName(object.name),
       ) ||
       (agentJobs ?? []).some((job) => matchesName(job.name)));
-  const browseObjectMatches =
-    normalizedQuery.length > 0 &&
-    (browseDatabases.some((database) => matchesName(database.name)) ||
-      [
-        ...Object.values(browseObjectsByDatabase).flat(),
-        ...browseSchemaObjects,
-      ].some((object) => matchesName(object.name)));
+  const viewMatches = (connectionId: string) => {
+    if (normalizedQuery.length === 0) return false;
+    const view = browseViews[connectionId];
+    if (!view) return false;
+    return (
+      view.databases.some((database) => matchesName(database.name)) ||
+      [...Object.values(view.objectsByDatabase).flat(), ...view.schemaObjects].some((object) =>
+        matchesName(object.name),
+      )
+    );
+  };
 
   const filteredConnections = normalizedQuery
     ? connections.filter(
         (connection) =>
           searchText(connection).includes(normalizedQuery) ||
           (connection.id === activeConnectionId && activeObjectMatches) ||
-          (connection.id === browseConnectionId &&
-            (browseObjectMatches || normalizedQuery.length > 0)),
+          viewMatches(connection.id),
       )
     : connections;
 
@@ -335,11 +315,14 @@ export function Sidebar({
     onRenameGroup(current.path, parent ? `${parent}/${value}` : value);
   };
 
-  const isConnectionExpanded = (connection: SavedConnection) =>
-    expandedConnections[connection.id] ??
-    (connection.id === activeConnectionId || connection.id === browseConnectionId);
-
   const expandConnection = (connection: SavedConnection) => {
+    // 多个连接可以同时展开；只有再次点击自己（或折叠按钮）才收起。
+    const expanded = Boolean(expandedConnections[connection.id] && browseViews[connection.id]);
+    if (expanded) {
+      setExpandedConnections((current) => ({ ...current, [connection.id]: false }));
+      onCollapseBrowseConnection(connection.id);
+      return;
+    }
     setExpandedConnections((current) => ({ ...current, [connection.id]: true }));
     onOpenBrowseConnection(connection.id);
   };
@@ -436,11 +419,13 @@ export function Sidebar({
   const renderConnection = (connection: SavedConnection) => {
     const active = connection.id === activeConnectionId;
     const browsing = connection.id === browseConnectionId;
-    const expanded = isConnectionExpanded(connection);
-    const state = browsing ? browseSessionStatus : (connectionStates[connection.id] ?? 'closed');
-    const browseCanManage = browsing && connection.id === activeConnectionId;
+    const view = browseViews[connection.id];
+    // 会话被断开/编辑/删除后 view 消失，行自动收起；否则按本地展开状态渲染。
+    const expanded = Boolean(expandedConnections[connection.id] && view);
+    const browseCanManage = expanded && connection.id === activeConnectionId;
     const browseSystemSupported =
       connection.input.type === 'sqlite' || connection.input.type === 'mssql';
+    const state = connectionStates[connection.id] ?? 'closed';
     const stateLabel =
       state === 'ready'
         ? '已连接'
@@ -480,12 +465,7 @@ export function Sidebar({
             title={expanded ? '收起对象' : '展开对象'}
             onClick={(event) => {
               event.stopPropagation();
-              if (expanded) {
-                setExpandedConnections((current) => ({ ...current, [connection.id]: false }));
-                onCloseBrowseConnection(connection.id);
-              } else {
-                expandConnection(connection);
-              }
+              expandConnection(connection);
             }}
           >
             <Icon
@@ -540,19 +520,19 @@ export function Sidebar({
           </button>
         </div>
 
-        {browsing && expanded && browseSessionStatus !== 'ready' && (
+        {expanded && view && view.status !== 'ready' && (
           <div className="connection-objects">
             <div className="tree-empty">
-              {browseSessionStatus === 'opening'
+              {view.status === 'opening'
                 ? '正在连接…'
-                : browseSessionStatus === 'error'
+                : view.status === 'error'
                   ? '连接失败'
                   : '未连接'}
             </div>
           </div>
         )}
 
-        {browsing && expanded && browseSessionStatus === 'ready' && (
+        {expanded && view && view.status === 'ready' && (
           <div className="connection-objects">
             <div className="connection-object-actions">
               <button
@@ -613,8 +593,8 @@ export function Sidebar({
                 type="button"
                 className="icon-btn"
                 title="刷新对象"
-                onClick={onRefreshBrowse}
-                disabled={browseSchemaLoading}
+                onClick={() => onRefreshBrowse(connection.id)}
+                disabled={view.schemaLoading}
               >
                 <Icon name="refresh" size={14} />
               </button>
@@ -630,9 +610,11 @@ export function Sidebar({
             >
               <input
                 type="checkbox"
-                checked={browseShowSystemObjects}
-                disabled={!browseSystemSupported || browseSchemaLoading}
-                onChange={(event) => onToggleBrowseSystemObjects(event.target.checked)}
+                checked={view.showSystemObjects}
+                disabled={!browseSystemSupported || view.schemaLoading}
+                onChange={(event) =>
+                  onToggleBrowseSystemObjects(connection.id, event.target.checked)
+                }
               />
               <span>显示系统对象</span>
             </label>
@@ -640,17 +622,23 @@ export function Sidebar({
             <ObjectTree
               dialect={connection.input.type}
               query={treeQuery}
-              databases={browseDatabases}
-              currentDatabase={browseCurrentDatabase}
-              objectsByDatabase={browseObjectsByDatabase}
-              schemaObjects={browseSchemaObjects}
-              loadingDatabase={browseDatabaseLoading}
-              loading={browseSchemaLoading}
-              tableExtras={browseTableExtras}
-              tableExtrasLoadingKey={browseTableExtrasLoadingKey}
-              onSelectDatabase={onSelectBrowseDatabase}
-              onLoadDatabase={onLoadBrowseDatabase}
-              onLoadTableExtras={onLoadBrowseTableExtras}
+              databases={view.databases}
+              currentDatabase={view.currentDatabase}
+              objectsByDatabase={view.objectsByDatabase}
+              schemaObjects={view.schemaObjects}
+              loadingDatabase={view.databaseLoading}
+              loading={view.schemaLoading}
+              tableExtras={view.tableExtras}
+              tableExtrasLoadingKey={tableExtrasLoadingKey}
+              onSelectDatabase={(database) =>
+                onSelectBrowseDatabase(connection.id, database)
+              }
+              onLoadDatabase={(database) =>
+                onLoadBrowseDatabase(connection.id, database)
+              }
+              onLoadTableExtras={(database, table) =>
+                onLoadBrowseTableExtras(connection.id, database, table)
+              }
               onOpenTable={(name, database) =>
                 onOpenTableInBrowse(connection.id, name, database)
               }
@@ -770,74 +758,12 @@ export function Sidebar({
         {renderGroupHeader(node, depth, true)}
         {!collapsed && (
           <>
-            {renderServerGroups(node.connections, depth + 1)}
+            {node.connections.map((connection) => renderConnection(connection))}
             {node.children.map((child) => renderGroupNode(child, depth + 1))}
           </>
         )}
       </div>
     );
-  };
-
-  const renderServerGroups = (list: SavedConnection[], depth: number) => {
-    const groups = new Map<
-      string,
-      { key: string; name: string; type: string; connections: SavedConnection[] }
-    >();
-    for (const connection of list) {
-      const key = connection.serverId ?? serverKey(connection.input);
-      const existing = groups.get(key);
-      if (existing) {
-        existing.connections.push(connection);
-      } else {
-        groups.set(key, {
-          key,
-          name: connection.serverName ?? serverDisplayName(connection.input),
-          type: serverTypeLabel(connection.input),
-          connections: [connection],
-        });
-      }
-    }
-
-    return Array.from(groups.values()).map((server) => {
-      const collapsed = normalizedQuery.length === 0 && Boolean(collapsedServers[server.key]);
-      return (
-        <div className="connection-server" key={server.key}>
-          <div
-            className="connection-server-head"
-            style={{ paddingLeft: 8 + depth * 12 }}
-            role="button"
-            tabIndex={0}
-            aria-expanded={!collapsed}
-            title={`${server.type} · ${server.name}`}
-            onClick={() =>
-              setCollapsedServers((current) => ({
-                ...current,
-                [server.key]: !current[server.key],
-              }))
-            }
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                setCollapsedServers((current) => ({
-                  ...current,
-                  [server.key]: !current[server.key],
-                }));
-              }
-            }}
-          >
-            <Icon
-              name="chevron"
-              size={11}
-              className={collapsed ? 'chevron collapsed' : 'chevron'}
-            />
-            <span className="connection-server-name">{server.name}</span>
-            <span className="connection-server-type">{server.type}</span>
-            <span className="tree-count">{server.connections.length}</span>
-          </div>
-          {!collapsed && server.connections.map((connection) => renderConnection(connection))}
-        </div>
-      );
-    });
   };
 
   return (
@@ -914,13 +840,13 @@ export function Sidebar({
                       <span className="tree-count">{tree.connections.length}</span>
                     </div>
                     {!(normalizedQuery.length === 0 && collapsedGroups['']) &&
-                      renderServerGroups(tree.connections, 1)}
+                      tree.connections.map((connection) => renderConnection(connection))}
                   </div>
                 )}
                 {tree.children.map((child) => renderGroupNode(child, 0))}
               </>
             ) : (
-              renderServerGroups(filteredConnections, 0)
+              filteredConnections.map((connection) => renderConnection(connection))
             )}
           </div>
         </>

@@ -48,7 +48,7 @@ let database: Database.Database | null = null;
 let openError: string | null = null;
 let cachedSettings: AppSettings | null = null;
 let historyTimer: ReturnType<typeof setTimeout> | null = null;
-const pendingHistory: HistoryEntry[] = [];
+const pendingHistory: Array<{ entry: HistoryEntry; dedupe?: boolean }> = [];
 
 /** 元数据库结构版本；每次新增迁移时 +1。 */
 export const METADATA_SCHEMA_VERSION = 6;
@@ -364,9 +364,12 @@ export function restoreMetadataDatabase(
 }
 
 /** 查询历史写入失败只记日志，不影响查询结果。 */
-export function recordQueryHistory(entry: HistoryEntry): void {
+export function recordQueryHistory(
+  entry: HistoryEntry,
+  options: { dedupe?: boolean } = {},
+): void {
   if (!currentSettings().historyEnabled) return;
-  pendingHistory.push(entry);
+  pendingHistory.push({ entry, dedupe: options.dedupe });
   if (historyTimer) return;
   historyTimer = setTimeout(() => {
     historyTimer = null;
@@ -381,10 +384,10 @@ export function flushQueryHistoryWrites(): void {
     historyTimer = null;
   }
   while (pendingHistory.length > 0) {
-    const entry = pendingHistory.shift()!;
+    const { entry, dedupe } = pendingHistory.shift()!;
     try {
       recordHistory(requireDatabase(), entry, {
-        dedupe: currentSettings().historyDedupe,
+        dedupe: dedupe ?? currentSettings().historyDedupe,
         retentionLimit: historyRetentionLimit(),
       });
     } catch (error) {

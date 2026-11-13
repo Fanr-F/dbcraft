@@ -5,6 +5,7 @@
  */
 import {
   applyCompletion,
+  completionCandidatesForContext,
   extractAttachedDatabases,
   extractCompletionContext,
   extractSignatureHelp,
@@ -12,6 +13,7 @@ import {
   functionCompletions,
   matchCompletionCase,
   shouldAutoTriggerCompletion,
+  shouldOpenCompletionOnInput,
   splitQualifier,
 } from '../src/renderer/src/utils/sql-completion.ts';
 
@@ -130,5 +132,57 @@ assert(
 assert(shouldAutoTriggerCompletion('SELECT * FROM ', 14), 'FROM space should trigger');
 assert(shouldAutoTriggerCompletion('SELECT * FROM demo ', 19) === false, 'table space should not trigger');
 assert(shouldAutoTriggerCompletion('SELECT * FRO ', 13) === false, 'partial keyword should not trigger');
+
+// 普通单词输入也应自动弹出补全（sele -> SELECT）。
+assert(shouldOpenCompletionOnInput('sele', 4), 'typing a word should auto-open completion');
+assert(shouldOpenCompletionOnInput('SELECT * FROM ', 14), 'FROM space should auto-open completion');
+assert(shouldOpenCompletionOnInput('select u.', 9), 'dot should auto-open completion');
+assert(
+  shouldOpenCompletionOnInput('sele', 4, { inserted: false }) === false,
+  'deleting text should not auto-open completion',
+);
+assert(shouldOpenCompletionOnInput('SELECT 1 ', 9) === false, 'plain space should not auto-open');
+
+// 补全按上下文分类：FROM 只给表/视图，EXEC 只给存储过程，SELECT 给关键字/函数。
+const groups = {
+  keywords: ['SELECT', 'FROM'],
+  functions: ['COUNT'],
+  objects: [
+    { name: 'users', kind: 'table' },
+    { name: 'v_users', kind: 'view' },
+    { name: 'p_refresh', kind: 'procedure' },
+  ],
+  databases: ['fanr'],
+  schemas: ['dbo'],
+};
+const labelsOf = (sql) => {
+  const context = extractCompletionContext(sql, sql.length);
+  return completionCandidatesForContext(context, groups).map((item) => item.label);
+};
+const fromLabels = labelsOf('SELECT * FROM ');
+assert(
+  fromLabels.includes('users') &&
+    fromLabels.includes('v_users') &&
+    !fromLabels.includes('p_refresh') &&
+    !fromLabels.includes('COUNT') &&
+    !fromLabels.includes('SELECT'),
+  `FROM completion wrong: ${fromLabels.join(',')}`,
+);
+const execLabels = labelsOf('EXEC ');
+assert(
+  execLabels.length === 1 && execLabels[0] === 'p_refresh',
+  `EXEC completion wrong: ${execLabels.join(',')}`,
+);
+const selectLabels = labelsOf('SELECT ');
+assert(
+  selectLabels.includes('COUNT') &&
+    selectLabels.includes('SELECT') &&
+    !selectLabels.includes('users'),
+  `SELECT completion wrong: ${selectLabels.join(',')}`,
+);
+const useLabels = labelsOf('USE ');
+assert(useLabels.length === 1 && useLabels[0] === 'fanr', `USE completion wrong: ${useLabels.join(',')}`);
+const qualifiedLabels = labelsOf('SELECT u.');
+assert(qualifiedLabels.length === 0, 'qualified completion should not use base candidates');
 
 console.log('sql completion check passed');

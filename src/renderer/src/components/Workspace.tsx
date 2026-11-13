@@ -8,7 +8,12 @@ import type {
   TableMeta,
 } from '@shared/ipc-contract';
 import type { QueryTab, RunState, SessionRuntime, TransactionRuntime } from '../types';
-import type { CompletionContext } from '../utils/sql-completion';
+import { EMPTY_TAB } from '../types';
+import type {
+  CompletionCandidate,
+  CompletionContext,
+  CompletionGroups,
+} from '../utils/sql-completion';
 import type { TableFilter, TableFilterOperator } from '@shared/dialect/identifiers';
 import { SqlEditor } from '../features/editor/SqlEditor';
 import { ResultGrid } from '../features/grid/ResultGrid';
@@ -158,14 +163,12 @@ interface WorkspaceProps {
   onFormatSql: () => void;
   /** 编辑器右键「从历史插入」。 */
   onOpenHistory: () => void;
-  /** 历史记录的一次性插入请求，由 SqlEditor 在光标处应用。 */
-  insertRequest: { text: string; token: number } | null;
-  completionItems: string[];
+  completionGroups: CompletionGroups;
   completionDetails?: Record<string, string>;
   completionEnabled: boolean;
   completionDelayMs: number;
   shortcuts: ShortcutMap;
-  onRequestCompletion: (context: CompletionContext) => Promise<string[]>;
+  onRequestCompletion: (context: CompletionContext) => Promise<CompletionCandidate[]>;
   onCancel: () => void;
   onReconnect: () => void;
   onExport: () => void;
@@ -268,8 +271,7 @@ export function Workspace({
   onOpenRecentSqlFile,
   onFormatSql,
   onOpenHistory,
-  insertRequest,
-  completionItems,
+  completionGroups,
   completionDetails,
   completionEnabled,
   completionDelayMs,
@@ -308,7 +310,7 @@ export function Workspace({
   showDatabaseSelect,
   onDatabaseChange,
 }: WorkspaceProps) {
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? EMPTY_TAB;
   const isAgentTab = activeTab.kind === 'agent-detail';
   const isTableDesignTab = activeTab.kind === 'table-design';
   const isSqlTab = !activeTab.kind && !activeTab.table;
@@ -343,6 +345,8 @@ export function Workspace({
     operator: TableFilterOperator;
     value: string;
   }>({ column: '', operator: 'contains', value: '' });
+  /** 编辑器当前选区；执行按钮据此决定只跑选中内容。 */
+  const [selectedSql, setSelectedSql] = useState('');
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(
     null,
   );
@@ -362,6 +366,7 @@ export function Workspace({
 
   useEffect(() => {
     setFilterDraft({ column: '', operator: 'contains', value: '' });
+    setSelectedSql('');
   }, [activeTab.id]);
 
   const addFilter = () => {
@@ -384,6 +389,24 @@ export function Workspace({
   const menuTab = tabMenu ? tabs.find((tab) => tab.id === tabMenu.tabId) ?? null : null;
   const menuStatus = menuTab ? tabStatuses[menuTab.id] : null;
   const menuIndex = menuTab ? tabs.findIndex((tab) => tab.id === menuTab.id) : -1;
+
+  if (tabs.length === 0) {
+    return (
+      <section className="workspace">
+        <div className="tabbar" role="tablist" aria-label="查询标签页">
+          <button type="button" className="tab-add" title="新建查询" onClick={() => onAddTab()}>
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
+        <div className="workspace-empty">
+          <p>没有打开的标签</p>
+          <button type="button" className="btn btn-primary" onClick={() => onAddTab()}>
+            新建查询
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="workspace">
@@ -417,19 +440,17 @@ export function Workspace({
                 <span className="tab-state is-dirty" title="有未保存的 SQL 或未提交修改" />
               )}
               <span>{tabLabels[tab.id] ?? tab.title}</span>
-              {(tabs.length > 1 || Boolean(tab.kind)) && (
-                <button
-                  type="button"
-                  className="tab-close"
-                  aria-label={`关闭 ${tabLabels[tab.id] ?? tab.title}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCloseTab(tab.id);
-                  }}
-                >
-                  <Icon name="close" size={12} />
-                </button>
-              )}
+              <button
+                type="button"
+                className="tab-close"
+                aria-label={`关闭 ${tabLabels[tab.id] ?? tab.title}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCloseTab(tab.id);
+                }}
+              >
+                <Icon name="close" size={12} />
+              </button>
             </div>
           );
         })}
@@ -447,7 +468,6 @@ export function Workspace({
           items={[
             {
               label: '关闭',
-              disabled: tabs.length <= 1 && !menuTab.kind,
               onSelect: () => onCloseTab(menuTab.id),
             },
             {
@@ -579,7 +599,7 @@ export function Workspace({
           <button
             type="button"
             className="btn btn-run"
-            onClick={() => onRun()}
+            onClick={() => onRun(selectedSql.trim() ? selectedSql : undefined)}
             disabled={running || !ready}
             title={ready ? '执行 SQL（Ctrl+Enter）' : '先连接数据库'}
           >
@@ -588,15 +608,15 @@ export function Workspace({
           </button>
           {showDatabaseSelect && (
             <label className="db-select-inline" title="切换当前标签的数据库">
-              <span>数据库</span>
               <select
                 aria-label="当前数据库"
                 value={currentDatabase ?? ''}
                 disabled={!ready}
                 onChange={(event) => void onDatabaseChange(event.target.value)}
               >
-                {databases.length === 0 && (
-                  <option value={currentDatabase ?? ''}>{currentDatabase ?? '（默认库）'}</option>
+                {!currentDatabase && <option value="">（未选择数据库）</option>}
+                {databases.length === 0 && currentDatabase && (
+                  <option value={currentDatabase}>{currentDatabase}</option>
                 )}
                 {databases.map((database) => (
                   <option key={database.name} value={database.name}>
@@ -729,11 +749,11 @@ export function Workspace({
           value={activeTab.sql}
           onChange={onSqlChange}
           onRun={onRun}
+          onSelectionChange={setSelectedSql}
           onSave={onSaveSqlFile}
           onFormat={onFormatSql}
           onOpenHistory={onOpenHistory}
-          insertRequest={insertRequest}
-          completionItems={completionItems}
+          completionGroups={completionGroups}
           completionDetails={completionDetails}
           completionEnabled={completionEnabled}
           completionDelayMs={completionDelayMs}
@@ -757,7 +777,7 @@ export function Workspace({
             <span className="badge badge-danger">执行失败</span>
           ) : run.statementType === 'change' ? (
             <span className="pane-hint">
-              {run.changes ?? 0} 行受影响 · {run.elapsedMs} ms
+              执行成功 · {run.changes ?? 0} 行受影响 · {run.elapsedMs} ms
             </span>
           ) : run.executedAt ? (
             <span className="pane-hint">
@@ -1270,6 +1290,19 @@ export function Workspace({
                   {run.scriptTotal - scriptStatements.length} 条未执行。
                 </div>
               )}
+          </div>
+        ) : !scriptStatements &&
+          !run.error &&
+          run.executedAt !== null &&
+          run.statementType === 'change' &&
+          run.columns.length === 0 ? (
+          <div className="grid-host">
+            <div className="grid-empty">
+              <strong>执行成功</strong>
+              <span>
+                {run.changes ?? 0} 行受影响 · {run.elapsedMs} ms
+              </span>
+            </div>
           </div>
         ) : (
           <ResultGrid

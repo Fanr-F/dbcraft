@@ -104,8 +104,10 @@ export const queryExecuteScriptSchema = z.object({
 export const historyListSchema = z.object({
   query: z.string().max(1000).optional().default(''),
   dialect: z.enum(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']).optional(),
-  status: z.enum(['success', 'failed', 'cancelled']).optional(),
-  source: z.enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control', 'table-page', 'export']).optional(),
+  status: z.enum(['success', 'failed', 'cancelled', 'saved']).optional(),
+  source: z
+    .enum(['editor', 'ddl-preview', 'grid-edit', 'agent-control', 'table-page', 'export', 'closed-tab'])
+    .optional(),
   connectionId: z.string().max(128).optional(),
   databaseName: z.string().max(128).optional(),
   since: z.string().datetime({ offset: true }).optional(),
@@ -113,6 +115,14 @@ export const historyListSchema = z.object({
   sortBy: z.enum(['time', 'duration']).optional(),
   sortDir: z.enum(['asc', 'desc']).optional(),
   limit: z.number().int().min(1).max(1000).optional().default(200),
+});
+
+export const historySaveSchema = z.object({
+  sqlText: z.string().min(1).max(1_000_000),
+  connectionId: z.string().max(128),
+  connectionName: z.string().max(256),
+  dialect: z.enum(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']),
+  databaseName: z.string().max(256).optional(),
 });
 
 export const schemaGetSchema = z.object({

@@ -8,7 +8,7 @@ import type {
 } from '../../shared/ipc-contract';
 
 const DIALECTS = new Set(['sqlite', 'mysql', 'percona', 'mariadb', 'mssql']);
-const STATUSES = new Set(['success', 'failed', 'cancelled']);
+const STATUSES = new Set(['success', 'failed', 'cancelled', 'saved']);
 const SOURCES = new Set([
   'editor',
   'ddl-preview',
@@ -16,6 +16,7 @@ const SOURCES = new Set([
   'agent-control',
   'table-page',
   'export',
+  'closed-tab',
 ]);
 
 type DB = Database.Database;

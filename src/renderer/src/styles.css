@@ -191,22 +191,6 @@ button:disabled {
   gap: 8px;
 }
 
-.connection-select {
-  width: 270px;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  outline: none;
-  background: var(--bg-elevated);
-  color: var(--text-soft);
-  font-size: 12px;
-}
-
-.connection-select:focus {
-  border-color: var(--accent);
-}
-
 .toolbar-actions {
   display: flex;
   align-items: center;
@@ -813,6 +797,17 @@ button:disabled {
   flex-direction: column;
 }
 
+.workspace-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .tabbar {
   display: flex;
   height: 38px;
@@ -1105,6 +1100,10 @@ button:disabled {
   color: #7dd3fc;
 }
 
+.sql-tok-function {
+  color: #c4b5fd;
+}
+
 .sql-tok-string {
   color: #86efac;
 }
@@ -1130,6 +1129,10 @@ button:disabled {
 
 [data-theme='light'] .sql-tok-keyword {
   color: #0369a1;
+}
+
+[data-theme='light'] .sql-tok-function {
+  color: #6d28d9;
 }
 
 [data-theme='light'] .sql-tok-string {
@@ -2311,6 +2314,11 @@ button:disabled {
   color: #fcd34d;
 }
 
+.badge.status-saved {
+  background: rgba(56, 189, 248, 0.12);
+  color: #7dd3fc;
+}
+
 /* ---------- toast ---------- */
 
 .toast {
@@ -2753,39 +2761,6 @@ button:disabled {
   color: var(--text);
 }
 
-/* ���������飨PRD v0.20 Q21�� */
-.connection-server-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  margin: 2px 0;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-}
-
-.connection-server-head:hover {
-  background: rgba(56, 189, 248, 0.06);
-  color: var(--text-soft);
-}
-
-.connection-server-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.connection-server-type {
-  flex: 0 0 auto;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: rgba(148, 163, 184, 0.12);
-  color: var(--faint);
-  font-size: 10px;
-}
 
 /* ����ǩ����ʾ��PRD v0.20 ��ȫ Phase 2�� */
 .sql-signature {

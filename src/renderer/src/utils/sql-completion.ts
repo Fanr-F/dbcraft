@@ -35,6 +35,69 @@ export interface TableReference {
   alias?: string;
 }
 
+/** 补全候选分类；用于按上下文过滤（例如 FROM 后只给表/视图）。 */
+export type CompletionKind =
+  | 'keyword'
+  | 'function'
+  | 'table'
+  | 'view'
+  | 'procedure'
+  | 'database'
+  | 'schema'
+  | 'column'
+  | 'alias';
+
+export interface CompletionCandidate {
+  label: string;
+  kind: CompletionKind;
+}
+
+/** 基础补全数据：关键字/函数/对象/库/Schema。 */
+export interface CompletionGroups {
+  keywords: string[];
+  functions: string[];
+  objects: Array<{ name: string; kind: 'table' | 'view' | 'procedure' }>;
+  databases: string[];
+  schemas: string[];
+}
+
+/** FROM/JOIN 等位置只接受表/视图；EXEC 只接受存储过程；USE 只接受数据库。 */
+export function relationKindsForClause(clause: string): CompletionKind[] {
+  if (clause === 'exec' || clause === 'execute') return ['procedure'];
+  if (clause === 'use') return ['database'];
+  if (['from', 'join', 'into', 'update', 'table', 'view'].includes(clause)) {
+    return ['table', 'view'];
+  }
+  return [];
+}
+
+/**
+ * 根据光标所在子句给出基础候选：
+ * - `FROM/JOIN/...` → 表/视图；`EXEC` → 存储过程；`USE` → 数据库；
+ * - 其他位置 → 关键字 + 函数；
+ * - 带限定符（`u.` / `dbo.`）时基础候选为空，由对象查询补充列/库对象。
+ */
+export function completionCandidatesForContext(
+  context: CompletionContext,
+  groups: CompletionGroups,
+): CompletionCandidate[] {
+  if (context.qualifier) return [];
+  const kinds = relationKindsForClause(context.clause);
+  if (context.clause === 'use') {
+    return groups.databases.map((label) => ({ label, kind: 'database' }));
+  }
+  if (kinds.length > 0) {
+    return groups.objects
+      .filter((object) => kinds.includes(object.kind))
+      .map((object) => ({ label: object.name, kind: object.kind }));
+  }
+  const candidates: CompletionCandidate[] = [
+    ...groups.keywords.map((label) => ({ label, kind: 'keyword' as const })),
+    ...groups.functions.map((label) => ({ label, kind: 'function' as const })),
+  ];
+  return candidates;
+}
+
 /** 常用函数（不含方言专有函数；Phase 1 先给出名称，后续可带签名）。 */
 export const SQL_FUNCTIONS: Record<DatabaseType, string[]> = {
   sqlite: [
@@ -476,7 +539,7 @@ function parseTables(statement: string): TableReference[] {
 function clauseAt(statement: string): string {
   const before = statement.slice(0, statement.length);
   const matches = before.match(
-    /\b(SELECT|FROM|JOIN|WHERE|ON|SET|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|VALUES|UPDATE|INSERT|INTO|RETURNING)\b/gi,
+    /\b(SELECT|FROM|JOIN|WHERE|ON|SET|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|VALUES|UPDATE|INSERT|INTO|RETURNING|EXEC|EXECUTE|USE)\b/gi,
   );
   return (matches?.[matches.length - 1] ?? '').toLowerCase();
 }
@@ -584,6 +647,21 @@ export function shouldAutoTriggerCompletion(text: string, cursor: number): boole
   return /(?:^|[^\w])(FROM|JOIN|INTO|UPDATE|TABLE|VIEW|EXEC|EXECUTE|USE|SET)\s+$/i.test(
     before,
   );
+}
+
+/** 每次输入后判断是否应自动弹补全（含普通单词输入）。 */
+export function shouldOpenCompletionOnInput(
+  text: string,
+  cursor: number,
+  options: { inserted?: boolean } = {},
+): boolean {
+  const safeCursor = Math.max(0, Math.min(cursor, text.length));
+  const typed = text[safeCursor - 1] ?? '';
+  if (typed === '.') return true;
+  if (shouldAutoTriggerCompletion(text, safeCursor)) return true;
+  if (options.inserted === false) return false;
+  if (!/[A-Za-z0-9_$\u0080-\uffff]/.test(typed)) return false;
+  return extractCompletionContext(text, safeCursor).needle.length > 0;
 }
 
 /** 用补全项替换 [start, end) 区间，返回新文本与光标位置。 */
