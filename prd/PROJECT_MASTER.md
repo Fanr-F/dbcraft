@@ -377,7 +377,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 
 已实现：
 
-- 多标签、每标签独立会话、Ctrl+Enter 执行（有选区只执行选区；无选区执行光标语句）、执行按钮（有选区只执行选区，无选区执行全文）、取消、行数/耗时统计。
+- 多标签、每标签独立会话、Ctrl+Enter 执行（有选区只执行选区；无选区执行光标语句）、执行按钮（有选区只执行选区，无选区执行全文；执行中同一按钮变为红色「取消」，结束后回到「执行」，W-20261116-03/04）、行数/耗时统计。
 - 语法高亮（高亮层 + 透明 textarea，IME 组合期间隐藏高亮层）、行号、括号匹配（跳过字符串/注释）。
 - 格式化（关键字大写、子句换行、缩进、字符串/注释原样保留），Ctrl+Shift+F。
 - 补全：关键字 + 当前连接表/视图名，Ctrl+Space，前缀优先、键盘选择、回车/Tab 插入、Esc 关闭；列/别名/`别名.`/`表名.`/函数/函数签名/库/Schema/多段限定名（W-20261109-19/20/21）、大小写跟随、普通单词输入、`.` 与关键字后空格自动触发；候选按子句分类（FROM/JOIN 只给表/视图，EXEC 只给存储过程，USE 只给数据库，W-20261111-131）；对象候选包含用户对象与系统对象（MSSQL 的 EXEC 会额外带入 master 系统存储过程，W-20261111-132）。
@@ -1345,6 +1345,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] CTE / 子查询别名列展开、引号标识符内补全、`lower_case_table_names` 大小写策略（W-20261113-03；待人工验收）
 - [ ] 错误波浪线（解析失败/可定位错误）
 - [ ] 未选中时执行“光标所在语句”
+- [~] 执行与取消合并为同一按钮：执行中显示红色「取消」（复用 `.btn-danger`），取消或查询结束后自动回到绿色「执行」，尺寸、图标与位置不变（W-20261116-03/04；typecheck/build、e2e:sqlite 通过，待人工验收）
 - [~] 多语句执行：`;` / MSSQL `GO` / MySQL `DELIMITER` 分句、逐条执行、遇错停止（W-20261109-22；E2E 覆盖 SQLite 主路径，待人工验收）
 - [~] 多结果页签 + 消息面板（W-20261109-22；E2E 覆盖结果切换/失败停止，待人工验收）
 - [ ] 驱动级多结果集、MSSQL `PRINT`/`RAISERROR` 消息、MySQL warning 进入消息面板
@@ -1602,6 +1603,10 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261116-01 修复补全弹层“闪一下就消失”**：诉求是输入时自动弹出的补全候选一出现就立刻消失。原因是 W-20261113-02 在 `onSelect` 里无条件关闭补全并作废异步请求，而浏览器（含 Chromium/Electron）每输入一个字符都会补发 `select`（`selectionchange`）事件，弹层刚渲染就被这条事件关掉；异步候选场景下该事件还会在 `await` 期间作废请求。变更：`SqlEditor` 新增 `lastInputCaret`，`onChange` 记录输入后的光标位置，`onSelect` 只在“光标位置与最近一次输入不一致或存在选区”时才关闭弹层/作废请求，输入引起的 select 回声只更新括号匹配、签名与选区上报；左右方向键关闭补全时同步作废未完成的异步请求，避免请求晚到后在旧替换区间重新弹层。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run test:sql-completion`、`npm run build` 通过；未在真实 Electron 中手动输入观察弹层（按用户要求不启动自动化窗口），待人工确认。
 
 - **W-20261116-02 浅色主题状态文字对比度修复**：诉求是执行错误等提示在浅色主题下太淡。原因是 `.result-error` / `.form-error` / `.toast-*` / `.badge-*` / `.env-*` / `.session-alert-*` / `.ddl-*` / `.test-*` 等直接写死了深色主题的浅色文字（`#fecaca`、`#fde68a`、`#a7f3d0`、`#7dd3fc`、`#6ee7b7`、`#fcd34d`、`#fca5a5`、`#bae6fd`、`rgba(254,202,202,0.65)`），放在浅色背景或 8%～16% 的浅色底纹上对比度只有约 1.0～1.6:1。变更：`styles.css` 新增一组 `[data-theme='light']` 覆盖，红色文字统一 `#b91c1c`、琥珀色 `#92400e`、绿色 `#047857`、蓝色 `#0369a1`（括号匹配 `#075985`），提示框边框同步加深，标签状态点改用语义色；浅色 `--faint` 由 `#64748b` 调深到 `#5b677b`（`--bg` 上 4.34→5.22:1、`--panel-soft` 上 4.37→4.64:1），SQL 注释同色；顺带修复 `.btn:hover` 浅色下近白文字压浅灰底（改为 `var(--text)`，主按钮/执行/危险按钮保留各自文字色）和 `.modal` 写死的深色边框。对比度在构建版 Electron 里切浅色主题、用探针实测：`.result-error` 5.40:1、meta 6.32:1、hint 5.91:1、badge/状态 4.65～6.13:1、`.toast-error` 6.47:1、`.toast-info` 5.93:1、`--faint` 5.22:1（最低 4.65:1）；标签状态点 3.74/4.41/4.58:1（非文本门槛 3:1）。涉及 `src/renderer/src/styles.css`、`prd/PROJECT_MASTER.md`。验证：`npm run build`、`npm run test:a11y`（20 buttons / 1 form fields）通过，并完成上述实测；未在真实 Electron 中人工逐项查看浅色主题。遗留：驱动消息面板 `.result-message-note.is-error/.is-warn` 只有类名没有样式（错误仍显示为 `--muted` 灰字），本次未改，按需后续补。
+
+- **W-20261116-03 执行与取消合并为同一按钮**：诉求是编辑器工具栏的「执行」和「取消」不要分两个按钮，点击执行后同一按钮变为取消，取消完成后再变回执行，样式保持现状。变更：`Workspace` 编辑器工具栏移除独立的取消按钮，保留一个切换按钮——空闲时 `btn btn-run` + play 图标 +「执行」，运行中 `btn` + stop 图标 +「取消」；点击行为按 `running` 分流到 `onRun`（仍遵守选区优先）或 `onCancel`；空闲且会话未就绪时按钮禁用，运行中始终可点。按钮外观沿用原来的执行/取消样式，未新增 CSS；`Ctrl+Enter`、标签右键「取消查询」、状态栏「执行中…」均不变，E2E 现有 `getByRole('button', { name: '执行' })` / `{ name: '取消' }` 选择器仍可命中。涉及 `src/renderer/src/components/Workspace.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过——E2E 在长查询执行后按「取消」命中同一按钮、取消后回到「执行」并继续查询，说明切换与回退成立；未人工点击验收按钮外观与切换动画。
+
+- **W-20261116-04 取消态改为红色**：诉求是执行中的「取消」按钮改成红色，其余保持合并后的样式与行为不变。变更：`Workspace` 合并按钮运行中的 className 由 `btn` 改为 `btn btn-danger`，复用项目现有红色危险按钮样式（深色主题红色描边 + 16% 红底 + `#fecaca` 文字，浅色主题 `#b91c1c` 文字），未新增 CSS；按钮尺寸、stop 图标、文案、位置与取消逻辑均不变。涉及 `src/renderer/src/components/Workspace.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过；未人工查看深色/浅色主题下红色「取消」的实际观感。
 
 ---
 

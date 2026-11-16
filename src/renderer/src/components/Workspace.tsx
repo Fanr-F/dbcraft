@@ -596,15 +596,18 @@ export function Workspace({
         <>
       <div className="editor-pane">
         <div className="pane-toolbar">
+          {/* 执行与取消共用同一个按钮：执行中显示「取消」，查询结束（或取消完成）后回到「执行」。 */}
           <button
             type="button"
-            className="btn btn-run"
-            onClick={() => onRun(selectedSql.trim() ? selectedSql : undefined)}
-            disabled={running || !ready}
-            title={ready ? '执行 SQL（Ctrl+Enter）' : '先连接数据库'}
+            className={running ? 'btn btn-danger' : 'btn btn-run'}
+            onClick={() =>
+              running ? onCancel() : onRun(selectedSql.trim() ? selectedSql : undefined)
+            }
+            disabled={!running && !ready}
+            title={running ? '取消当前查询' : ready ? '执行 SQL（Ctrl+Enter）' : '先连接数据库'}
           >
-            <Icon name="play" size={14} />
-            {running ? '执行中…' : '执行'}
+            <Icon name={running ? 'stop' : 'play'} size={running ? 13 : 14} />
+            {running ? '取消' : '执行'}
           </button>
           {showDatabaseSelect && (
             <label className="db-select-inline" title="切换当前标签的数据库">
@@ -626,16 +629,6 @@ export function Workspace({
               </select>
             </label>
           )}
-          <button
-            type="button"
-            className="btn"
-            onClick={onCancel}
-            disabled={!running}
-            title="取消当前查询"
-          >
-            <Icon name="stop" size={13} />
-            取消
-          </button>
           <button
             type="button"
             className="btn"
