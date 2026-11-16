@@ -1396,7 +1396,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] 历史去重/脱敏开关（设置面板已接入，待人工真机验收）
 - [ ] 网格自动提交/提交确认
 - [ ] 自定义数据目录 + 迁移
-- [ ] 浅色主题对比度与强调色
+- [~] 浅色主题对比度与强调色（W-20261116-02：错误/告警/成功/选中态文字与 `--faint` 在浅色主题下加深；待真机验收）
 - [ ] 快捷键说明与实际行为一致
 
 ### 5.9 真机验收记录
@@ -1600,6 +1600,8 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261113-03 补全收尾：CTE/派生表列、引号标识符、lower_case_table_names**：诉求是把 `FEATURE_MATRIX.md` §2.1 剩余 3 个 🟡 全部做完。变更：`sql-completion` 新增 `extractVirtualTables`（解析 `WITH x[(cols)] AS (...)`、`FROM (SELECT ...) alias` 的列清单，跳过无法静态展开的 `*`）与 `normalizeCompletionNameCase`；`App` 补全把 CTE/派生表列置于物理表元数据之前，并把 CTE/派生表名加入 FROM/JOIN 候选；`extractCompletionContext` 支持 `[us` / `` `us` `` 引号标识符（替换范围连开引号，覆盖已存在闭引号，`[dbo].[us` 可解析限定名）；MySQL/MariaDB 建连时读取 `@@lower_case_table_names`，经 `SessionOpenResult.lowerCaseTableNames` 下发到会话，补全对象名在 `=1` 时折成小写。涉及 `src/renderer/src/utils/sql-completion.ts`、`src/renderer/src/App.tsx`、`src/main/services/DatabaseSession.ts`、`src/main/services/ConnectionManager.ts`、`src/main/services/mysql/MysqlSession.ts`、`src/main/services/mariadb/MariaSession.ts`、`src/shared/ipc-contract.ts`、`src/renderer/src/types.ts`、`scripts/test-sql-completion.mjs`、`prd/FEATURE_MATRIX.md`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`test:sql-completion`、`test:settings`、`npm run build`、`e2e:sqlite` 通过；MySQL/MariaDB 的 `lower_case_table_names` 读取只做代码走查，未连真实实例验证。遗留：补全弹层仍需真实 Electron 人工逐项验收。
 
 - **W-20261116-01 修复补全弹层“闪一下就消失”**：诉求是输入时自动弹出的补全候选一出现就立刻消失。原因是 W-20261113-02 在 `onSelect` 里无条件关闭补全并作废异步请求，而浏览器（含 Chromium/Electron）每输入一个字符都会补发 `select`（`selectionchange`）事件，弹层刚渲染就被这条事件关掉；异步候选场景下该事件还会在 `await` 期间作废请求。变更：`SqlEditor` 新增 `lastInputCaret`，`onChange` 记录输入后的光标位置，`onSelect` 只在“光标位置与最近一次输入不一致或存在选区”时才关闭弹层/作废请求，输入引起的 select 回声只更新括号匹配、签名与选区上报；左右方向键关闭补全时同步作废未完成的异步请求，避免请求晚到后在旧替换区间重新弹层。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run test:sql-completion`、`npm run build` 通过；未在真实 Electron 中手动输入观察弹层（按用户要求不启动自动化窗口），待人工确认。
+
+- **W-20261116-02 浅色主题状态文字对比度修复**：诉求是执行错误等提示在浅色主题下太淡。原因是 `.result-error` / `.form-error` / `.toast-*` / `.badge-*` / `.env-*` / `.session-alert-*` / `.ddl-*` / `.test-*` 等直接写死了深色主题的浅色文字（`#fecaca`、`#fde68a`、`#a7f3d0`、`#7dd3fc`、`#6ee7b7`、`#fcd34d`、`#fca5a5`、`#bae6fd`、`rgba(254,202,202,0.65)`），放在浅色背景或 8%～16% 的浅色底纹上对比度只有约 1.0～1.6:1。变更：`styles.css` 新增一组 `[data-theme='light']` 覆盖，红色文字统一 `#b91c1c`、琥珀色 `#92400e`、绿色 `#047857`、蓝色 `#0369a1`（括号匹配 `#075985`），提示框边框同步加深，标签状态点改用语义色；浅色 `--faint` 由 `#64748b` 调深到 `#5b677b`（`--bg` 上 4.34→5.22:1、`--panel-soft` 上 4.37→4.64:1），SQL 注释同色；顺带修复 `.btn:hover` 浅色下近白文字压浅灰底（改为 `var(--text)`，主按钮/执行/危险按钮保留各自文字色）和 `.modal` 写死的深色边框。对比度在构建版 Electron 里切浅色主题、用探针实测：`.result-error` 5.40:1、meta 6.32:1、hint 5.91:1、badge/状态 4.65～6.13:1、`.toast-error` 6.47:1、`.toast-info` 5.93:1、`--faint` 5.22:1（最低 4.65:1）；标签状态点 3.74/4.41/4.58:1（非文本门槛 3:1）。涉及 `src/renderer/src/styles.css`、`prd/PROJECT_MASTER.md`。验证：`npm run build`、`npm run test:a11y`（20 buttons / 1 form fields）通过，并完成上述实测；未在真实 Electron 中人工逐项查看浅色主题。遗留：驱动消息面板 `.result-message-note.is-error/.is-warn` 只有类名没有样式（错误仍显示为 `--muted` 灰字），本次未改，按需后续补。
 
 ---
 

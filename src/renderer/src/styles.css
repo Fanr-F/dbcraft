@@ -39,7 +39,7 @@
   --text: #0f172a;
   --text-soft: #334155;
   --muted: #475569;
-  --faint: #64748b;
+  --faint: #5b677b;
   --accent: #0284c7;
   --accent-strong: #0369a1;
   --ok: #047857;
@@ -73,6 +73,124 @@
 
 [data-theme='light'] .grid-cell-null {
   color: #64748b;
+}
+
+/* 浅色主题状态色：深色主题用的浅色文字（#fecaca / #fde68a / #7dd3fc 等）放在
+   浅色背景或 8%～16% 的浅色底纹上对比度过低，这里统一换成深一档的同色系颜色。 */
+[data-theme='light'] .result-error {
+  border-color: rgba(185, 28, 28, 0.32);
+  background: rgba(220, 38, 38, 0.06);
+  color: #b91c1c;
+}
+
+[data-theme='light'] .result-error-meta {
+  color: var(--muted);
+}
+
+[data-theme='light'] .result-error-hint {
+  color: #92400e;
+}
+
+[data-theme='light'] .form-error,
+[data-theme='light'] .test-failed,
+[data-theme='light'] .danger-sql,
+[data-theme='light'] .btn-danger,
+[data-theme='light'] .session-alert-error,
+[data-theme='light'] .toast-error,
+[data-theme='light'] .context-menu-item.is-danger,
+[data-theme='light'] .connection-delete:hover,
+[data-theme='light'] .badge-danger,
+[data-theme='light'] .badge.status-failed,
+[data-theme='light'] .env-prod,
+[data-theme='light'] .agent-notice-error {
+  color: #b91c1c;
+}
+
+[data-theme='light'] .test-not-implemented,
+[data-theme='light'] .session-alert-warn,
+[data-theme='light'] .ddl-warnings,
+[data-theme='light'] .badge-warn,
+[data-theme='light'] .badge.status-cancelled,
+[data-theme='light'] .env-test,
+[data-theme='light'] .agent-tag {
+  color: #92400e;
+}
+
+[data-theme='light'] .test-ok,
+[data-theme='light'] .badge-ok,
+[data-theme='light'] .badge.status-success,
+[data-theme='light'] .agent-tag-running {
+  color: #047857;
+}
+
+[data-theme='light'] .chip,
+[data-theme='light'] .env-dev,
+[data-theme='light'] .badge.status-saved,
+[data-theme='light'] .toast-info,
+[data-theme='light'] .ddl-preview,
+[data-theme='light'] .sql-completion-item.is-active,
+[data-theme='light'] .sql-signature strong {
+  color: #0369a1;
+}
+
+[data-theme='light'] .sql-bracket-match {
+  color: #075985;
+}
+
+/* 浅色主题的提示框边框也加深一档，避免和浅色面板糊在一起。 */
+[data-theme='light'] .result-error,
+[data-theme='light'] .form-error,
+[data-theme='light'] .test-failed,
+[data-theme='light'] .session-alert-error,
+[data-theme='light'] .toast-error,
+[data-theme='light'] .agent-notice-error {
+  border-color: rgba(185, 28, 28, 0.35);
+}
+
+[data-theme='light'] .test-not-implemented,
+[data-theme='light'] .session-alert-warn,
+[data-theme='light'] .ddl-warnings {
+  border-color: rgba(180, 83, 9, 0.35);
+}
+
+[data-theme='light'] .test-ok {
+  border-color: rgba(4, 120, 87, 0.35);
+}
+
+[data-theme='light'] .toast-info {
+  border-color: rgba(3, 105, 161, 0.3);
+}
+
+/* .btn:hover 会把文字改成近白色，在浅色按钮底色上几乎看不见。 */
+[data-theme='light'] .btn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+/* 变体按钮有自己的底色，hover 时保持各自的文字色。 */
+[data-theme='light'] .btn-primary:hover:not(:disabled),
+[data-theme='light'] .btn-run:hover:not(:disabled) {
+  color: #f8fafc;
+}
+
+[data-theme='light'] .btn-danger:hover:not(:disabled) {
+  color: #b91c1c;
+}
+
+/* 标签状态点用的是深色主题的亮色，浅色背景上偏淡。 */
+[data-theme='light'] .tab-state.is-running {
+  background: var(--accent);
+}
+
+[data-theme='light'] .tab-state.is-error {
+  background: var(--danger);
+}
+
+[data-theme='light'] .tab-state.is-dirty {
+  background: var(--warn);
+}
+
+[data-theme='light'] .modal {
+  border-color: var(--border);
 }
 
 * {
@@ -1144,7 +1262,7 @@ button:disabled {
 }
 
 [data-theme='light'] .sql-tok-comment {
-  color: #64748b;
+  color: #5b677b;
 }
 
 [data-theme='light'] .sql-tok-operator {
