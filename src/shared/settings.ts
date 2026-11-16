@@ -69,6 +69,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   editorTabSize: 2,
   sqlKeywordCase: 'upper',
   completionEnabled: true,
+  completionAutoTrigger: true,
   completionDelayMs: 0,
   shortcuts: { ...DEFAULT_SHORTCUTS },
 };
@@ -147,6 +148,7 @@ export function normalizeAppSettings(raw: unknown): AppSettings {
         ? record.sqlKeywordCase
         : DEFAULT_APP_SETTINGS.sqlKeywordCase,
     completionEnabled: record.completionEnabled !== false,
+    completionAutoTrigger: record.completionAutoTrigger !== false,
     completionDelayMs: COMPLETION_DELAY_OPTIONS.some(
       (option) => option === Number(record.completionDelayMs),
     )

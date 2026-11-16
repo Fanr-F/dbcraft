@@ -1,4 +1,6 @@
 import type { DatabaseType } from '../../../shared/ipc-contract';
+import { quoteIdent } from '../../../shared/dialect/identifiers.ts';
+import { SQL_KEYWORD_LIST } from './sql-highlight.ts';
 
 /** 补全使用的当前单词前缀（允许 `schema.table` 形式）。 */
 export interface CompletionContext {
@@ -12,12 +14,22 @@ export interface CompletionContext {
   qualifier: string;
   /** 真正替换的起点：保留 `u.`，只替换列前缀。 */
   replaceStart: number;
+  /** 真正替换的终点；通配符展开时会包含 `*` 本身。 */
+  replaceEnd: number;
   /** 光标所在的语句片段（不含前后语句）。 */
   statement: string;
-  /** 当前语句中 FROM/JOIN/UPDATE/INTO 引用的表。 */
+  /** 光标所在语句在原文中的起始偏移。 */
+  statementStart: number;
+  /** 当前语句中 FROM/JOIN/UPDATE/INTO 引用的表（含光标之后的表）。 */
   tables: TableReference[];
   /** 光标前最近的 SQL 子句。 */
   clause: string;
+  /** 光标紧跟在 SELECT 列表的 `*` 上（可展开为列清单）。 */
+  wildcard: boolean;
+  /** 光标位于字符串或注释内；此时不应弹补全。 */
+  inLiteral: boolean;
+  /** 光标处的括号深度。 */
+  depth: number;
 }
 
 export interface TableReference {
@@ -50,6 +62,17 @@ export type CompletionKind =
 export interface CompletionCandidate {
   label: string;
   kind: CompletionKind;
+  /** 右侧说明：列类型、对象类型等。 */
+  detail?: string;
+  /** 实际插入文本；缺省时用 label，并由编辑器跟随输入大小写。 */
+  insertText?: string;
+  /** 同分时的优先级，数字越小越靠前；缺省 0。 */
+  priority?: number;
+}
+
+/** 排序后的补全项，`matches` 是用于高亮的前缀/子序列字符下标。 */
+export interface RankedCompletion extends CompletionCandidate {
+  matches: number[];
 }
 
 /** 基础补全数据：关键字/函数/对象/库/Schema。 */
@@ -71,31 +94,86 @@ export function relationKindsForClause(clause: string): CompletionKind[] {
   return [];
 }
 
+/** 补全项类型的默认展示优先级（数字越小越靠前）。 */
+export function completionKindPriority(kind: CompletionKind): number {
+  switch (kind) {
+    case 'column':
+      return 0;
+    case 'alias':
+      return 1;
+    case 'table':
+      return 2;
+    case 'view':
+      return 3;
+    case 'procedure':
+      return 4;
+    case 'schema':
+      return 5;
+    case 'database':
+      return 6;
+    case 'function':
+      return 7;
+    default:
+      return 8;
+  }
+}
+
 /**
  * 根据光标所在子句给出基础候选：
- * - `FROM/JOIN/...` → 表/视图；`EXEC` → 存储过程；`USE` → 数据库；
+ * - `FROM/JOIN/...` → 表/视图 + 库/Schema；`EXEC` → 存储过程；`USE` → 数据库；
  * - 其他位置 → 关键字 + 函数；
- * - 带限定符（`u.` / `dbo.`）时基础候选为空，由对象查询补充列/库对象。
+ * - 带限定符或通配符时基础候选为空，由对象查询补充列/库对象。
  */
 export function completionCandidatesForContext(
   context: CompletionContext,
   groups: CompletionGroups,
 ): CompletionCandidate[] {
-  if (context.qualifier) return [];
+  if (context.qualifier || context.wildcard) return [];
   const kinds = relationKindsForClause(context.clause);
   if (context.clause === 'use') {
-    return groups.databases.map((label) => ({ label, kind: 'database' }));
+    return groups.databases.map((label) => ({
+      label,
+      kind: 'database',
+      priority: completionKindPriority('database'),
+    }));
   }
   if (kinds.length > 0) {
-    return groups.objects
+    const candidates: CompletionCandidate[] = groups.objects
       .filter((object) => kinds.includes(object.kind))
-      .map((object) => ({ label: object.name, kind: object.kind }));
+      .map((object) => ({
+        label: object.name,
+        kind: object.kind as CompletionKind,
+        priority: completionKindPriority(object.kind),
+      }));
+    // FROM/JOIN 之后也允许先写库名/Schema 名，再点出对象；EXEC 只给存储过程。
+    if (kinds.includes('table')) {
+      candidates.push(
+        ...groups.schemas.map((label) => ({
+          label,
+          kind: 'schema' as const,
+          priority: completionKindPriority('schema'),
+        })),
+        ...groups.databases.map((label) => ({
+          label,
+          kind: 'database' as const,
+          priority: completionKindPriority('database'),
+        })),
+      );
+    }
+    return candidates;
   }
-  const candidates: CompletionCandidate[] = [
-    ...groups.keywords.map((label) => ({ label, kind: 'keyword' as const })),
-    ...groups.functions.map((label) => ({ label, kind: 'function' as const })),
+  return [
+    ...groups.keywords.map((label) => ({
+      label,
+      kind: 'keyword' as const,
+      priority: completionKindPriority('keyword'),
+    })),
+    ...groups.functions.map((label) => ({
+      label,
+      kind: 'function' as const,
+      priority: completionKindPriority('function'),
+    })),
   ];
-  return candidates;
 }
 
 /** 常用函数（不含方言专有函数；Phase 1 先给出名称，后续可带签名）。 */
@@ -224,6 +302,262 @@ export const SQL_FUNCTIONS: Record<DatabaseType, string[]> = {
 export function functionCompletions(dialect: DatabaseType | null | undefined): string[] {
   return dialect ? SQL_FUNCTIONS[dialect] ?? [] : [];
 }
+
+/** 解析服务器版本号；返回 [major, minor]，无法解析时返回 null。 */
+export function parseServerVersion(version: string | null | undefined): [number, number] | null {
+  const match = /(\d+)\.(\d+)/.exec(version ?? '');
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2])];
+}
+
+function versionAtLeast(
+  version: string | null | undefined,
+  major: number,
+  minor: number,
+): boolean {
+  const parsed = parseServerVersion(version);
+  // 版本未知时保持宽松，宁可多给候选也不要少给。
+  if (!parsed) return true;
+  return parsed[0] > major || (parsed[0] === major && parsed[1] >= minor);
+}
+
+export type SqlFeature = 'cte' | 'window' | 'returning' | 'strict';
+
+/** 按方言与服务器版本判断补全特性是否可用。 */
+export function supportsSqlFeature(
+  dialect: DatabaseType | null | undefined,
+  version: string | null | undefined,
+  feature: SqlFeature,
+): boolean {
+  if (!dialect) return true;
+  switch (feature) {
+    case 'cte':
+      if (dialect === 'mysql' || dialect === 'percona') return versionAtLeast(version, 8, 0);
+      if (dialect === 'mariadb') return versionAtLeast(version, 10, 2);
+      if (dialect === 'sqlite') return versionAtLeast(version, 3, 8);
+      return true;
+    case 'window':
+      if (dialect === 'mysql' || dialect === 'percona') return versionAtLeast(version, 8, 0);
+      if (dialect === 'mariadb') return versionAtLeast(version, 10, 2);
+      if (dialect === 'sqlite') return versionAtLeast(version, 3, 25);
+      return true;
+    case 'returning':
+      if (dialect === 'sqlite') return versionAtLeast(version, 3, 35);
+      if (dialect === 'mariadb') return versionAtLeast(version, 10, 5);
+      return false;
+    case 'strict':
+      return dialect === 'sqlite' && versionAtLeast(version, 3, 37);
+    default:
+      return true;
+  }
+}
+
+/** 方言专有关键字；基础关键字列表来自语法高亮模块。 */
+const DIALECT_KEYWORDS: Record<DatabaseType, string[]> = {
+  sqlite: ['ATTACH', 'DETACH', 'PRAGMA', 'VACUUM', 'REINDEX', 'STRICT', 'EXPLAIN'],
+  mysql: ['SHOW', 'DESCRIBE', 'EXPLAIN', 'REPLACE', 'IGNORE'],
+  percona: ['SHOW', 'DESCRIBE', 'EXPLAIN', 'REPLACE', 'IGNORE'],
+  mariadb: ['SHOW', 'DESCRIBE', 'EXPLAIN', 'REPLACE', 'IGNORE'],
+  mssql: [
+    'TOP',
+    'EXEC',
+    'EXECUTE',
+    'DECLARE',
+    'PRINT',
+    'MERGE',
+    'PIVOT',
+    'UNPIVOT',
+    'TRY',
+    'CATCH',
+    'FETCH',
+    'NEXT',
+    'OUTPUT',
+  ],
+};
+
+/**
+ * 关键字候选：基础关键字 + 方言关键字，并按版本过滤 CTE/窗口函数/RETURNING/STRICT。
+ * 版本未知时保持当前宽松行为。
+ */
+export function keywordCompletions(
+  dialect: DatabaseType | null | undefined,
+  version?: string | null,
+): string[] {
+  const base = SQL_KEYWORD_LIST.filter((keyword) => {
+    if (keyword === 'WITH') return supportsSqlFeature(dialect, version, 'cte');
+    if (keyword === 'OVER' || keyword === 'PARTITION') {
+      return supportsSqlFeature(dialect, version, 'window');
+    }
+    if (keyword === 'RETURNING') return supportsSqlFeature(dialect, version, 'returning');
+    if (keyword === 'LIMIT' && dialect === 'mssql') return false;
+    return true;
+  });
+  if (dialect === 'mssql') {
+    return [...new Set([...base, ...DIALECT_KEYWORDS.mssql])];
+  }
+  if (!dialect) return base;
+  return [...new Set([...base, ...(DIALECT_KEYWORDS[dialect] ?? [])])];
+}
+
+const SIMPLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+
+/**
+ * 补全插入标识符：能裸写就裸写；含空格/符号或是关键字时按方言加引号。
+ * 返回的文本不会在插入时再改变大小写。
+ */
+export function quoteCompletionIdentifier(
+  dialect: DatabaseType | null | undefined,
+  name: string,
+): string {
+  const trimmed = name.trim();
+  if (!trimmed) return name;
+  if (SIMPLE_IDENTIFIER.test(trimmed) && !isKeyword(trimmed)) return trimmed;
+  return quoteIdent(dialect ?? 'sqlite', trimmed);
+}
+
+/**
+ * MySQL `lower_case_table_names=1` 时目录里的对象名本来就是小写；
+ * 补全插入显式按设置折成小写，其余取值（0/2/未知）保留对象原名。
+ */
+export function normalizeCompletionNameCase(
+  name: string,
+  lowerCaseTableNames?: number | null,
+): string {
+  return lowerCaseTableNames === 1 ? name.toLowerCase() : name;
+}
+
+/** 由 CTE / 派生表推导出的“虚拟表”列清单。 */
+export interface VirtualTable {
+  name: string;
+  columns: string[];
+}
+
+/** 找与 `open` 处左括号配对的右括号；找不到返回 -1。 */
+function matchingParen(text: string, open: number): number {
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '(') depth += 1;
+    else if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+/** 找顶层（括号深度 0）的 FROM 关键字位置；没有返回 -1。 */
+function topLevelFrom(text: string): number {
+  let depth = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '(') depth += 1;
+    else if (char === ')') depth = Math.max(0, depth - 1);
+    else if (depth === 0 && /^from\b/i.test(text.slice(index, index + 4))) return index;
+  }
+  return -1;
+}
+
+/** 从 SELECT 语句里提取列名：显式别名优先，其次简单列引用。 */
+function selectListColumns(selectSql: string): string[] {
+  const text = selectSql.trim();
+  if (!/^select\b/i.test(text)) return [];
+  const body = text.replace(/^select\s+(?:distinct\s+|all\s+)?/i, '');
+  const fromIndex = topLevelFrom(body);
+  const list = fromIndex >= 0 ? body.slice(0, fromIndex) : body;
+
+  const items: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const char of list) {
+    if (char === '(') depth += 1;
+    else if (char === ')') depth = Math.max(0, depth - 1);
+    if (char === ',' && depth === 0) {
+      items.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim()) items.push(current);
+
+  const columns: string[] = [];
+  for (const item of items) {
+    const expression = item.trim();
+    if (!expression || expression === '*' || /\.\*$/.test(expression)) continue;
+    const asAlias = /^(.*?)\s+as\s+([A-Za-z_][\w$]*)$/i.exec(expression);
+    const bare = /^(?:[A-Za-z_][\w$]*\.)*([A-Za-z_][\w$]*)$/.exec(expression);
+    let name = '';
+    if (asAlias) {
+      name = asAlias[2]!;
+    } else if (bare) {
+      name = bare[1]!;
+    } else {
+      const trailing = /^(.*[^\s])\s+([A-Za-z_][\w$]*)$/.exec(expression);
+      // `a + b` 这类表达式的最后一段不是别名。
+      if (trailing && !/[+\-*/%|&<>=]\s*$/.test(trailing[1]!)) {
+        name = trailing[2]!;
+      }
+    }
+    if (name && !isKeyword(name)) columns.push(name);
+  }
+  return [...new Set(columns)];
+}
+
+/**
+ * 提取语句里的 CTE 与派生表列清单，用于 `WITH x AS (...)`、`FROM (SELECT ...) x`
+ * 之后的列补全。无法静态展开的 `*` 会跳过。
+ */
+export function extractVirtualTables(statement: string): VirtualTable[] {
+  if (statement.length > 50_000) return [];
+  if (!/\bwith\b|\(\s*select\b/i.test(statement)) return [];
+  const masked = scanSql(statement, statement.length).masked;
+  const tables: VirtualTable[] = [];
+  const seen = new Set<string>();
+
+  const push = (name: string, columns: string[]) => {
+    const key = name.toLowerCase();
+    if (!name || columns.length === 0 || seen.has(key)) return;
+    seen.add(key);
+    tables.push({ name, columns });
+  };
+
+  // CTE：`WITH name [(col,...)] AS ( SELECT ... )`，支持多个逗号分隔的 CTE。
+  const ctePattern = /([A-Za-z_][\w$]*)\s*(?:\(([^()]*)\))?\s+as\s*\(/gi;
+  let cte: RegExpExecArray | null;
+  while ((cte = ctePattern.exec(masked)) !== null) {
+    const open = ctePattern.lastIndex - 1;
+    const close = matchingParen(masked, open);
+    if (close < 0) continue;
+    const explicit = (cte[2] ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const columns = explicit.length > 0 ? explicit : selectListColumns(masked.slice(open + 1, close));
+    push(cte[1]!, columns);
+    ctePattern.lastIndex = close + 1;
+  }
+
+  // 派生表：`FROM ( SELECT ... ) [AS] alias`。
+  const derivedPattern = /\(\s*select\b/gi;
+  let derived: RegExpExecArray | null;
+  while ((derived = derivedPattern.exec(masked)) !== null) {
+    const open = derived.index;
+    const close = matchingParen(masked, open);
+    if (close < 0) continue;
+    const tail = /^\s*(?:as\s+)?([A-Za-z_][\w$]*)/i.exec(masked.slice(close + 1));
+    if (!tail) continue;
+    const alias = tail[1]!;
+    if (isKeyword(alias)) continue;
+    const before = masked.slice(0, open);
+    // 只有 FROM/JOIN/逗号之后的子查询才是派生表。
+    if (!/(?:from|join|,)\s*$/i.test(before)) continue;
+    push(alias, selectListColumns(masked.slice(open + 1, close)));
+  }
+
+  return tables;
+}
+
 
 export interface SignatureHelp {
   name: string;
@@ -509,58 +843,271 @@ function isKeyword(value: string): boolean {
   return KEYWORDS.has(value.toLowerCase());
 }
 
+/** 语句内扫描状态；用于跳过字符串/注释里的 `;`、FROM 等。 */
+type ScanMode = 'normal' | 'single' | 'double' | 'backtick' | 'bracket' | 'line' | 'block';
+
+interface SqlScanResult {
+  /** 字符串/注释内容替换成空格后的文本，长度与原文一致。 */
+  masked: string;
+  /** 光标处状态；非 normal 表示在字符串/注释/引号标识符内。 */
+  mode: ScanMode;
+  /** 光标处括号深度。 */
+  depth: number;
+  /** 光标所在语句的起止偏移（不含分号）。 */
+  statementStart: number;
+  statementEnd: number;
+}
+
+function scanSql(text: string, cursor: number): SqlScanResult {
+  const length = text.length;
+  const masked = text.split('');
+  let mode: ScanMode = 'normal';
+  let depth = 0;
+  let cursorMode: ScanMode = 'normal';
+  let cursorDepth = 0;
+  let statementStart = 0;
+  let statementEnd = length;
+  let endFound = false;
+
+  const blank = (index: number) => {
+    if (masked[index] !== '\n') masked[index] = ' ';
+  };
+
+  for (let index = 0; index < length; index += 1) {
+    if (index === cursor) {
+      cursorMode = mode;
+      cursorDepth = depth;
+    }
+    const char = text[index]!;
+    const next = text[index + 1];
+
+    if (mode === 'single') {
+      blank(index);
+      if (char === '\\' && next !== undefined) {
+        blank(index + 1);
+        index += 1;
+      } else if (char === "'" && next === "'") {
+        blank(index + 1);
+        index += 1;
+      } else if (char === "'") {
+        mode = 'normal';
+      }
+      continue;
+    }
+    if (mode === 'double') {
+      // 双引号在不同方言里可能是字符串或标识符；保留内容让 FROM "users" 仍可解析。
+      if (char === '"' && next === '"') {
+        index += 1;
+      } else if (char === '"') {
+        mode = 'normal';
+      }
+      continue;
+    }
+    if (mode === 'backtick') {
+      if (char === '`') mode = 'normal';
+      continue;
+    }
+    if (mode === 'bracket') {
+      if (char === ']' && next === ']') {
+        index += 1;
+      } else if (char === ']') {
+        mode = 'normal';
+      }
+      continue;
+    }
+    if (mode === 'line') {
+      blank(index);
+      if (char === '\n') mode = 'normal';
+      continue;
+    }
+    if (mode === 'block') {
+      blank(index);
+      if (char === '*' && next === '/') {
+        blank(index + 1);
+        mode = 'normal';
+        index += 1;
+      }
+      continue;
+    }
+
+    // normal
+    if (char === "'") {
+      mode = 'single';
+      blank(index);
+    } else if (char === '"') {
+      mode = 'double';
+      blank(index);
+    } else if (char === '`') {
+      mode = 'backtick';
+      blank(index);
+    } else if (char === '[') {
+      mode = 'bracket';
+      blank(index);
+    } else if (char === '-' && next === '-') {
+      mode = 'line';
+      blank(index);
+      blank(index + 1);
+      index += 1;
+    } else if (char === '/' && next === '*') {
+      mode = 'block';
+      blank(index);
+      blank(index + 1);
+      index += 1;
+    } else if (char === '(') {
+      depth += 1;
+    } else if (char === ')') {
+      depth = Math.max(0, depth - 1);
+    } else if (char === ';') {
+      if (index < cursor) {
+        statementStart = index + 1;
+      } else if (!endFound) {
+        statementEnd = index;
+        endFound = true;
+      }
+    }
+  }
+  if (cursor >= length) {
+    cursorMode = mode;
+    cursorDepth = depth;
+  }
+
+  return {
+    masked: masked.join(''),
+    mode: cursorMode,
+    depth: cursorDepth,
+    statementStart,
+    statementEnd,
+  };
+}
+
+/** 把 `FROM/JOIN/UPDATE/INTO` 后面的表引用（含逗号列表、别名）解析出来。 */
 function parseTables(statement: string): TableReference[] {
   const tables: TableReference[] = [];
-  // FROM/JOIN/UPDATE/INTO 后面的表 token；支持引号、点号和可选的 AS 别名。
-  const pattern =
-    /\b(FROM|JOIN|UPDATE|INTO)\s+([`"\[]?[\w$#@]+[`"\]]?(?:\s*\.\s*[`"\[]?[\w$#@]+[`"\]]?){0,2})(?:\s+(?:AS\s+)?([A-Za-z_][\w$]*))?/gi;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(statement)) !== null) {
-    const token = match[2] ?? '';
-    const parts = splitIdentifier(token);
-    if (parts.length === 0) continue;
-    const aliasCandidate = match[3] ?? '';
-    const alias = aliasCandidate && !isKeyword(aliasCandidate) ? aliasCandidate : undefined;
-    const table = parts[parts.length - 1];
-    const schema = parts.length >= 3 ? parts[parts.length - 2] : undefined;
-    const database = parts.length >= 3 ? parts[0] : undefined;
-    tables.push({
-      raw: token.replace(/\s+/g, ''),
-      parts,
-      table,
-      ...(schema ? { schema } : {}),
-      ...(database ? { database } : {}),
-      ...(alias ? { alias } : {}),
-    });
+  const relation = /\b(FROM|JOIN|UPDATE|INTO)\b/gi;
+  const stop =
+    /\b(?:WHERE|ON|JOIN|INNER|LEFT|RIGHT|FULL|CROSS|GROUP|ORDER|HAVING|LIMIT|OFFSET|UNION|EXCEPT|INTERSECT|SET|VALUES|RETURNING|WINDOW|FOR|OPTION|OUTPUT)\b/i;
+  const token =
+    /^([`"\[]?[\w$#@]+[`"\]]?(?:\s*\.\s*[`"\[]?[\w$#@]+[`"\]]?){0,2})(?:\s+(?:AS\s+)?([A-Za-z_][\w$]*))?/i;
+
+  for (const relationMatch of statement.matchAll(relation)) {
+    const segmentStart = (relationMatch.index ?? 0) + relationMatch[0].length;
+    const rest = statement.slice(segmentStart);
+    const stopMatch = stop.exec(rest);
+    const segment = stopMatch ? rest.slice(0, stopMatch.index) : rest;
+
+    // 顶级逗号分表；括号内的子查询/列清单不拆。
+    const items: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const char of segment) {
+      if (char === '(') depth += 1;
+      else if (char === ')') depth = Math.max(0, depth - 1);
+      if (char === ',' && depth === 0) {
+        items.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    if (current.trim()) items.push(current);
+
+    for (const item of items) {
+      const trimmed = item.trim();
+      if (!trimmed || trimmed.startsWith('(')) continue;
+      const parsed = token.exec(trimmed);
+      if (!parsed) continue;
+      const raw = parsed[1] ?? '';
+      const parts = splitIdentifier(raw);
+      if (parts.length === 0) continue;
+      const aliasCandidate = parsed[2] ?? '';
+      const alias = aliasCandidate && !isKeyword(aliasCandidate) ? aliasCandidate : undefined;
+      const table = parts[parts.length - 1]!;
+      const schema = parts.length >= 3 ? parts[parts.length - 2] : undefined;
+      const database = parts.length >= 3 ? parts[0] : undefined;
+      tables.push({
+        raw: raw.replace(/\s+/g, ''),
+        parts,
+        table,
+        ...(schema ? { schema } : {}),
+        ...(database ? { database } : {}),
+        ...(alias ? { alias } : {}),
+      });
+    }
   }
   return tables;
 }
 
 function clauseAt(statement: string): string {
-  const before = statement.slice(0, statement.length);
-  const matches = before.match(
-    /\b(SELECT|FROM|JOIN|WHERE|ON|SET|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|VALUES|UPDATE|INSERT|INTO|RETURNING|EXEC|EXECUTE|USE)\b/gi,
+  const matches = statement.match(
+    /\b(SELECT|FROM|JOIN|WHERE|ON|SET|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|FETCH|VALUES|UPDATE|INSERT|INTO|RETURNING|EXEC|EXECUTE|USE)\b/gi,
   );
-  return (matches?.[matches.length - 1] ?? '').toLowerCase();
+  return (matches?.[matches.length - 1] ?? '').replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * 找 SELECT 列表里的通配符：光标在 `*` 上或紧跟其后，且不在括号内。
+ * 只接受 `SELECT *` / `SELECT DISTINCT *` / `SELECT a, *` 这类位置，避免把乘号当通配符。
+ */
+function wildcardStarIndex(text: string, cursor: number, depth: number): number | null {
+  if (depth !== 0) return null;
+  let star = -1;
+  if (text[cursor] === '*') {
+    star = cursor;
+  } else {
+    let index = cursor - 1;
+    while (index >= 0 && /\s/.test(text[index]!)) index -= 1;
+    if (text[index] === '*') star = index;
+  }
+  if (star < 0) return null;
+
+  let before = star - 1;
+  while (before >= 0 && /\s/.test(text[before]!)) before -= 1;
+  if (before < 0) return star;
+  if (text[before] === ',' || text[before] === '(') return star;
+  let wordStart = before;
+  while (wordStart >= 0 && /[A-Za-z_]/.test(text[wordStart]!)) wordStart -= 1;
+  const word = text.slice(wordStart + 1, before + 1).toLowerCase();
+  return ['select', 'distinct', 'all', 'top'].includes(word) ? star : null;
 }
 
 export function extractCompletionContext(text: string, cursor: number): CompletionContext {
   const safeCursor = Math.max(0, Math.min(cursor, text.length));
   let start = safeCursor;
-  while (start > 0 && /[A-Za-z0-9_$\u0080-\uffff.]/.test(text[start - 1]!)) {
+  // 引号标识符（`[a]` / `` `a` ``）也算标识符片段，便于 `[dbo].[us` 这种限定名。
+  while (start > 0 && /[A-Za-z0-9_$\u0080-\uffff.\[\]`]/.test(text[start - 1]!)) {
     start -= 1;
   }
-  const prefix = text.slice(start, safeCursor);
+  let prefix = text.slice(start, safeCursor);
   const dot = prefix.lastIndexOf('.');
-  const qualifier = dot >= 0 ? prefix.slice(0, dot) : '';
-  const needle = dot >= 0 ? prefix.slice(dot + 1) : prefix;
-  const replaceStart = start + (dot >= 0 ? dot + 1 : 0);
+  let qualifier = dot >= 0 ? prefix.slice(0, dot) : '';
+  let needle = dot >= 0 ? prefix.slice(dot + 1) : prefix;
+  let replaceStart = start + (dot >= 0 ? dot + 1 : 0);
 
-  const statementStart = text.lastIndexOf(';', safeCursor - 1) + 1;
-  const nextSemicolon = text.indexOf(';', safeCursor);
-  const statementEnd = nextSemicolon === -1 ? text.length : nextSemicolon;
-  const statement = text.slice(statementStart, statementEnd);
-  const beforeCursor = text.slice(statementStart, safeCursor);
+  const scan = scanSql(text, safeCursor);
+  const statement = text.slice(scan.statementStart, scan.statementEnd);
+  const maskedStatement = scan.masked.slice(scan.statementStart, scan.statementEnd);
+  const maskedBefore = scan.masked.slice(scan.statementStart, safeCursor);
+  const literalModes: ScanMode[] = ['single', 'double', 'line', 'block'];
+  const inLiteral = literalModes.includes(scan.mode);
+  const star = wildcardStarIndex(text, safeCursor, scan.depth);
+  let replaceEnd = safeCursor;
+  if (star !== null && !inLiteral) {
+    prefix = '';
+    qualifier = '';
+    needle = '';
+    replaceStart = star;
+    replaceEnd = star + 1;
+  } else if (scan.mode === 'bracket' || scan.mode === 'backtick') {
+    // 在 `[us` / `` `us` `` 内补全：连开引号一起替换，插入时带完整引号。
+    const quote = scan.mode === 'bracket' ? '[' : '`';
+    const closeQuote = scan.mode === 'bracket' ? ']' : '`';
+    const segmentStart = start + (dot >= 0 ? dot + 1 : 0);
+    if (text[segmentStart] === quote) {
+      replaceStart = segmentStart;
+      if (needle.startsWith(quote)) needle = needle.slice(1);
+      replaceEnd = safeCursor + (text[safeCursor] === closeQuote ? 1 : 0);
+    }
+  }
 
   return {
     prefix,
@@ -568,9 +1115,14 @@ export function extractCompletionContext(text: string, cursor: number): Completi
     needle,
     qualifier,
     replaceStart,
+    replaceEnd,
     statement,
-    tables: parseTables(beforeCursor),
-    clause: clauseAt(beforeCursor),
+    statementStart: scan.statementStart,
+    tables: parseTables(maskedStatement),
+    clause: clauseAt(maskedBefore),
+    wildcard: star !== null,
+    inLiteral,
+    depth: scan.depth,
   };
 }
 
@@ -609,7 +1161,96 @@ export function filterCompletions(
 }
 
 /**
- * 补全大小写跟随输入：
+ * 带排序的补全过滤：
+ * - 前缀匹配 > 单词开头匹配 > 模糊子序列匹配；
+ * - 同分时按候选类型优先级（列 > 别名 > 表 > 库/Schema > 函数 > 关键字），再按字母序；
+ * - 返回匹配字符下标，供弹层高亮。
+ */
+export function rankCompletions(
+  candidates: CompletionCandidate[],
+  needle: string,
+  limit = 50,
+): RankedCompletion[] {
+  const query = needle.trim().toLowerCase();
+  const seen = new Set<string>();
+  const ranked: RankedCompletion[] = [];
+
+  for (const candidate of candidates) {
+    const label = candidate.label.trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+
+    const lower = key;
+    let matches: number[] = [];
+    if (!query) {
+      // 无前缀时全部保留，按类型优先级与字母序排列。
+    } else if (lower === query) {
+      matches = Array.from({ length: Math.min(label.length, query.length) }, (_, index) => index);
+    } else if (lower.startsWith(query)) {
+      matches = Array.from({ length: query.length }, (_, index) => index);
+    } else {
+      const subsequence = matchSubsequence(lower, query);
+      if (!subsequence) continue;
+      matches = subsequence;
+    }
+
+    seen.add(key);
+    ranked.push({
+      ...candidate,
+      label,
+      matches,
+    });
+  }
+
+  const priorityOf = (item: RankedCompletion) =>
+    item.priority ?? completionKindPriority(item.kind);
+  ranked.sort((left, right) => {
+    const leftScore = scoreOf(left, query);
+    const rightScore = scoreOf(right, query);
+    if (leftScore !== rightScore) return leftScore - rightScore;
+    const priority = priorityOf(left) - priorityOf(right);
+    if (priority !== 0) return priority;
+    return left.label.localeCompare(right.label, 'en');
+  });
+  return ranked.slice(0, Math.max(1, limit));
+}
+
+function scoreOf(item: RankedCompletion, query: string): number {
+  if (!query) return 10;
+  const lower = item.label.toLowerCase();
+  if (lower === query) return 0;
+  if (lower.startsWith(query)) return 1;
+  const wordStarts = item.matches.every(
+    (index) => index === 0 || !/[A-Za-z0-9]/.test(lower[index - 1] ?? ''),
+  );
+  return wordStarts ? 2 : 3;
+}
+
+/** 贪心匹配子序列，优先命中单词开头，返回命中的字符下标；匹配失败返回 null。 */
+function matchSubsequence(value: string, query: string): number[] | null {
+  const indices: number[] = [];
+  let position = 0;
+  for (const char of query) {
+    let found = -1;
+    for (let index = position; index < value.length; index += 1) {
+      if (value[index] !== char) continue;
+      const boundary = index === 0 || !/[A-Za-z0-9]/.test(value[index - 1] ?? '');
+      if (boundary) {
+        found = index;
+        break;
+      }
+    }
+    if (found < 0) found = value.indexOf(char, position);
+    if (found < 0) return null;
+    indices.push(found);
+    position = found + 1;
+  }
+  return indices;
+}
+
+
+/** 补全大小写跟随输入：
  * - `sel` → `select`，`SEL` → `SELECT`；
  * - 补全项本身是混合大小写（例如真实表名 `DemoUsers`）时保持原样，避免改坏标识符。
  */
@@ -656,25 +1297,37 @@ export function shouldOpenCompletionOnInput(
   options: { inserted?: boolean } = {},
 ): boolean {
   const safeCursor = Math.max(0, Math.min(cursor, text.length));
+  // PRD §4.2.4：超长 SQL 禁用补全，避免每次输入都做全量扫描。
+  if (text.length > 1_000_000) return false;
   const typed = text[safeCursor - 1] ?? '';
+  const context = extractCompletionContext(text, safeCursor);
+  // 字符串/注释内不自动弹补全（手动 Ctrl+Space 也由编辑器按 inLiteral 拦掉）。
+  if (context.inLiteral) return false;
   if (typed === '.') return true;
   if (shouldAutoTriggerCompletion(text, safeCursor)) return true;
   if (options.inserted === false) return false;
   if (!/[A-Za-z0-9_$\u0080-\uffff]/.test(typed)) return false;
-  return extractCompletionContext(text, safeCursor).needle.length > 0;
+  return context.needle.length > 0;
 }
 
-/** 用补全项替换 [start, end) 区间，返回新文本与光标位置。 */
+/**
+ * 用补全项替换 [start, end) 区间，返回新文本与光标位置。
+ * 传 `options.insertText` 时原样插入（标识符已按方言加引号），不再改写大小写。
+ */
 export function applyCompletion(
   text: string,
   start: number,
   end: number,
   completion: string,
+  options: { insertText?: string } = {},
 ): { text: string; cursor: number } {
   const safeStart = Math.max(0, Math.min(start, text.length));
   const safeEnd = Math.max(safeStart, Math.min(end, text.length));
   const typed = text.slice(safeStart, safeEnd);
-  const value = matchCompletionCase(completion, typed);
+  const value =
+    options.insertText !== undefined
+      ? options.insertText
+      : matchCompletionCase(completion, typed);
   const next = `${text.slice(0, safeStart)}${value}${text.slice(safeEnd)}`;
   return { text: next, cursor: safeStart + value.length };
 }

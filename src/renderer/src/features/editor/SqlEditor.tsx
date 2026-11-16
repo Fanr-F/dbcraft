@@ -10,11 +10,13 @@ import {
   completionCandidatesForContext,
   extractCompletionContext,
   extractSignatureHelp,
-  filterCompletions,
+  rankCompletions,
   shouldOpenCompletionOnInput,
   type CompletionCandidate,
   type CompletionContext,
   type CompletionGroups,
+  type CompletionKind,
+  type RankedCompletion,
   type SignatureHelp,
 } from '../../utils/sql-completion';
 import { ContextMenu } from '../../components/ContextMenu';
@@ -34,10 +36,10 @@ interface SqlEditorProps {
   onSelectionChange?: (selected: string) => void;
   /** 关键字 + 当前连接对象名（按分类供上下文过滤）。 */
   completionGroups?: CompletionGroups;
-  /** 补全项的类型详情（列名 → 类型）。 */
-  completionDetails?: Record<string, string>;
   /** 是否启用补全。 */
   completionEnabled?: boolean;
+  /** 是否在输入时自动弹补全；关闭后仍可用快捷键手动触发。 */
+  completionAutoTrigger?: boolean;
   /** 自动补全延迟（毫秒）。 */
   completionDelayMs?: number;
   /** 按光标上下文异步补充列/别名等候选。 */
@@ -48,10 +50,30 @@ interface SqlEditorProps {
 }
 
 interface CompletionState {
-  items: string[];
+  items: RankedCompletion[];
   start: number;
   end: number;
+  left: number;
+  top: number;
 }
+
+interface CompletionPosition {
+  left: number;
+  top: number;
+}
+
+/** 补全项类型的中文标签，显示在候选右侧。 */
+const KIND_LABELS: Record<CompletionKind, string> = {
+  keyword: '关键字',
+  function: '函数',
+  table: '表',
+  view: '视图',
+  procedure: '存储过程',
+  database: '数据库',
+  schema: 'Schema',
+  column: '列',
+  alias: '别名',
+};
 
 export function SqlEditor({
   value,
@@ -63,8 +85,8 @@ export function SqlEditor({
   insertRequest,
   onSelectionChange,
   completionGroups,
-  completionDetails,
   completionEnabled = true,
+  completionAutoTrigger = true,
   completionDelayMs = 0,
   onRequestCompletion,
   dialect = null,
@@ -75,9 +97,14 @@ export function SqlEditor({
   const lastInsertToken = useRef<number | null>(null);
   const completionRequest = useRef(0);
   const completionTimer = useRef<number | null>(null);
+  /** 最近一次输入后的光标位置：用来识别浏览器在每次输入后补发的 select 事件。 */
+  const lastInputCaret = useRef<number | null>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const measureCanvas = useRef<HTMLCanvasElement | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [composing, setComposing] = useState(false);
   const [completion, setCompletion] = useState<CompletionState | null>(null);
+  const [completionLoading, setCompletionLoading] = useState<CompletionPosition | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [cursorLine, setCursorLine] = useState(0);
@@ -130,11 +157,66 @@ export function SqlEditor({
     onSelectionChange?.(element.value.slice(element.selectionStart, element.selectionEnd));
   };
 
+  /** 用 canvas 量出光标前文本宽度，让补全弹层贴着光标而不是固定在左下角。 */
+  const measureLineWidth = (element: HTMLTextAreaElement, lineText: string): number => {
+    const style = getComputedStyle(element);
+    const canvas = measureCanvas.current ?? document.createElement('canvas');
+    measureCanvas.current = canvas;
+    const context = canvas.getContext('2d');
+    const fallback = lineText.length * (Number.parseFloat(style.fontSize) || 13) * 0.6;
+    if (!context) return fallback;
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const tabSize =
+      Number.parseInt(
+        getComputedStyle(document.documentElement).getPropertyValue('--sql-tab-size'),
+        10,
+      ) || 2;
+    return context.measureText(lineText.replace(/\t/g, ' '.repeat(tabSize))).width;
+  };
+
+  const caretPosition = (element: HTMLTextAreaElement): CompletionPosition => {
+    const before = element.value.slice(0, element.selectionStart);
+    const lineIndex = (before.match(/\n/g) ?? []).length;
+    const lineText = before.slice(before.lastIndexOf('\n') + 1);
+    const style = getComputedStyle(element);
+    const measured = Number.parseFloat(style.lineHeight);
+    const line = Number.isFinite(measured) && measured > 0 ? measured : lineHeight;
+    const textWidth = measureLineWidth(element, lineText);
+    const maxLeft = Math.max(gutterWidth + 4, element.clientWidth - 230);
+    const left = Math.max(
+      gutterWidth + 4,
+      Math.min(gutterWidth + textWidth - element.scrollLeft, maxLeft),
+    );
+    const caretTop = 12 + lineIndex * line - element.scrollTop;
+    const menuHeight = 200;
+    const above = caretTop + line + menuHeight > element.clientHeight;
+    const top = above
+      ? Math.max(4, caretTop - menuHeight - 4)
+      : Math.max(
+          4,
+          Math.min(caretTop + line + 2, Math.max(4, element.clientHeight - menuHeight - 4)),
+        );
+    return { left, top };
+  };
+
   const openCompletion = async () => {
     if (!completionEnabled) return;
     const element = textareaRef.current;
     if (!element) return;
-    const context = extractCompletionContext(element.value, element.selectionStart);
+    const text = element.value;
+    // 超长 SQL 不做补全（与执行前的 >1MB 提示保持一致）。
+    if (text.length > 1_000_000) {
+      setCompletion(null);
+      setCompletionLoading(null);
+      return;
+    }
+    const context = extractCompletionContext(text, element.selectionStart);
+    // 字符串/注释里不弹补全，避免把列名插进字面量。
+    if (context.inLiteral) {
+      setCompletion(null);
+      setCompletionLoading(null);
+      return;
+    }
     const groups: CompletionGroups = completionGroups ?? {
       keywords: [],
       functions: [],
@@ -142,9 +224,16 @@ export function SqlEditor({
       databases: [],
       schemas: [],
     };
-    const base: CompletionCandidate[] = completionCandidatesForContext(context, groups);
+    const base = completionCandidatesForContext(context, groups);
     const request = completionRequest.current + 1;
     completionRequest.current = request;
+
+    // 只有需要异步加载（列/限定对象）时才显示加载态，避免本地关键字候选闪烁。
+    let loadingTimer: number | null = null;
+    if (onRequestCompletion && base.length === 0) {
+      const position = caretPosition(element);
+      loadingTimer = window.setTimeout(() => setCompletionLoading(position), 120);
+    }
 
     let extra: CompletionCandidate[] = [];
     if (onRequestCompletion) {
@@ -154,26 +243,21 @@ export function SqlEditor({
         extra = [];
       }
     }
+    if (loadingTimer !== null) window.clearTimeout(loadingTimer);
+    setCompletionLoading(null);
     if (completionRequest.current !== request) return;
 
-    // 按上下文分类的候选先合并去重，再做前缀/包含匹配。
-    const seen = new Set<string>();
-    const labels: string[] = [];
-    for (const candidate of [...extra, ...base]) {
-      const key = candidate.label.trim().toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      labels.push(candidate.label);
-    }
-    const filtered = filterCompletions(labels, context.needle);
-    if (filtered.length === 0) {
+    // 排序规则：前缀 > 单词开头 > 模糊子序列；同分再按列/别名/表等类型优先级。
+    const ranked = rankCompletions([...extra, ...base], context.needle);
+    if (ranked.length === 0) {
       setCompletion(null);
       return;
     }
     setCompletion({
-      items: filtered,
+      items: ranked,
       start: context.replaceStart,
-      end: element.selectionStart,
+      end: context.replaceEnd,
+      ...caretPosition(element),
     });
     setActiveIndex(0);
   };
@@ -193,6 +277,12 @@ export function SqlEditor({
     }, Math.max(0, completionDelayMs));
   };
 
+  // 键盘选择超出可视区时自动滚动，避免“选中项看不见”。
+  useEffect(() => {
+    if (!completion) return;
+    itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, completion]);
+
   const acceptCompletion = (index: number) => {
     clearCompletionTimer();
     const element = textareaRef.current;
@@ -204,7 +294,8 @@ export function SqlEditor({
       element.value,
       completion.start,
       completion.end,
-      item,
+      item.label,
+      { insertText: item.insertText },
     );
     onChange(next.text);
     setCompletion(null);
@@ -235,6 +326,60 @@ export function SqlEditor({
       element.setSelectionRange(cursor, cursor);
     });
   }, [insertRequest, onChange]);
+
+  /** 把命中的前缀/子序列字符包成高亮片段。 */
+  const renderCompletionLabel = (item: RankedCompletion) => {
+    if (item.matches.length === 0) return item.label;
+    const marked = new Set(item.matches);
+    return item.label.split('').map((char, index) =>
+      marked.has(index) ? (
+        <mark key={index} className="sql-completion-match">
+          {char}
+        </mark>
+      ) : (
+        char
+      ),
+    );
+  };
+
+  /** 引号/括号自动配对：仅在光标无选区时插入成对字符，闭括号已存在时跳过而不是重复输入。 */
+  const handleAutoPair = (event: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (event.nativeEvent.isComposing) return false;
+    const element = event.currentTarget;
+    const start = element.selectionStart;
+    const end = element.selectionEnd;
+    if (start !== end) return false;
+    const key = event.key;
+    const pairs: Record<string, string> = {
+      '(': ')',
+      '[': ']',
+      "'": "'",
+      '"': '"',
+      '`': '`',
+    };
+    const closing = pairs[key];
+    if (closing !== undefined) {
+      // 单词中间的单引号（如 O'Brien）不配对，避免破坏已有内容。
+      if (key === "'" && /[A-Za-z0-9_]/.test(element.value[start - 1] ?? '')) return false;
+      event.preventDefault();
+      setCompletion(null);
+      const next = `${element.value.slice(0, start)}${key}${closing}${element.value.slice(start)}`;
+      onChange(next);
+      requestAnimationFrame(() => {
+        element.setSelectionRange(start + 1, start + 1);
+      });
+      return true;
+    }
+    if ([')', ']', "'", '"', '`'].includes(key) && element.value[start] === key) {
+      event.preventDefault();
+      requestAnimationFrame(() => {
+        element.setSelectionRange(start + 1, start + 1);
+      });
+      return true;
+    }
+    return false;
+  };
 
   return (
     <div
@@ -293,13 +438,18 @@ export function SqlEditor({
           const next = event.target.value;
           const cursor = event.target.selectionStart;
           const inserted = next.length >= value.length;
+          lastInputCaret.current = cursor;
           onChange(next);
           updateCursorLine(event.currentTarget);
           requestAnimationFrame(() => {
             const element = textareaRef.current;
             if (element) updateSignatureHelp(element);
           });
-          if (!composing && shouldOpenCompletionOnInput(next, cursor, { inserted })) {
+          if (
+            !composing &&
+            completionAutoTrigger &&
+            shouldOpenCompletionOnInput(next, cursor, { inserted })
+          ) {
             scheduleCompletion();
           }
           reportSelection(event.currentTarget);
@@ -309,10 +459,23 @@ export function SqlEditor({
           setScrollTop(event.currentTarget.scrollTop);
         }}
         onSelect={(event) => {
-          updateBracketMatch(event.currentTarget);
-          updateSignatureHelp(event.currentTarget);
-          updateCursorLine(event.currentTarget);
-          reportSelection(event.currentTarget);
+          const element = event.currentTarget;
+          // 浏览器在每次输入后也会补发 select（光标随字符移动）。这类 select 不能关掉刚弹出的
+          // 补全，否则弹层会“闪一下就消失”；只有真的移动光标/选中文本才作废旧上下文。
+          const caret = element.selectionStart;
+          const typingEcho =
+            caret === element.selectionEnd && lastInputCaret.current === caret;
+          if (!typingEcho) {
+            // 光标移动/点击后旧补全的替换区间已失效，先关闭并作废未完成的异步请求。
+            lastInputCaret.current = null;
+            completionRequest.current += 1;
+            setCompletion(null);
+            setCompletionLoading(null);
+          }
+          updateBracketMatch(element);
+          updateSignatureHelp(element);
+          updateCursorLine(element);
+          reportSelection(element);
         }}
         onKeyUp={(event) => {
           updateBracketMatch(event.currentTarget);
@@ -321,6 +484,9 @@ export function SqlEditor({
           reportSelection(event.currentTarget);
         }}
         onClick={(event) => {
+          completionRequest.current += 1;
+          setCompletion(null);
+          setCompletionLoading(null);
           updateBracketMatch(event.currentTarget);
           updateSignatureHelp(event.currentTarget);
           updateCursorLine(event.currentTarget);
@@ -332,6 +498,7 @@ export function SqlEditor({
           completionRequest.current += 1;
           clearCompletionTimer();
           setCompletion(null);
+          setCompletionLoading(null);
           setSignatureHelp(null);
         }}
         onContextMenu={(event) => {
@@ -344,6 +511,8 @@ export function SqlEditor({
             openCompletion();
             return;
           }
+
+          if (handleAutoPair(event)) return;
 
           if (completion) {
             if (event.key === 'ArrowDown') {
@@ -358,6 +527,16 @@ export function SqlEditor({
               );
               return;
             }
+            if (event.key === 'Home' || event.key === 'PageUp') {
+              event.preventDefault();
+              setActiveIndex(0);
+              return;
+            }
+            if (event.key === 'End' || event.key === 'PageDown') {
+              event.preventDefault();
+              setActiveIndex(completion.items.length - 1);
+              return;
+            }
             if (event.key === 'Enter' || event.key === 'Tab') {
               event.preventDefault();
               acceptCompletion(activeIndex);
@@ -369,6 +548,11 @@ export function SqlEditor({
               clearCompletionTimer();
               setCompletion(null);
               return;
+            }
+            // 左右移动光标会让替换区间失效，直接关闭由浏览器处理移动。
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              completionRequest.current += 1;
+              setCompletion(null);
             }
           }
 
@@ -394,10 +578,18 @@ export function SqlEditor({
       />
 
       {completion && (
-        <div className="sql-completion" role="listbox" aria-label="SQL 补全">
+        <div
+          className="sql-completion"
+          role="listbox"
+          aria-label="SQL 补全"
+          style={{ left: completion.left, top: completion.top }}
+        >
           {completion.items.map((item, index) => (
             <button
-              key={item}
+              key={`${item.label}-${index}`}
+              ref={(element) => {
+                itemRefs.current[index] = element;
+              }}
               type="button"
               role="option"
               aria-selected={index === activeIndex}
@@ -406,12 +598,23 @@ export function SqlEditor({
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => acceptCompletion(index)}
             >
-              {item}
-              {completionDetails?.[item] && (
-                <span className="sql-completion-detail">{completionDetails[item]}</span>
-              )}
+              <span className="sql-completion-label">{renderCompletionLabel(item)}</span>
+              <span className="sql-completion-detail">
+                {item.detail ?? KIND_LABELS[item.kind]}
+              </span>
             </button>
           ))}
+        </div>
+      )}
+
+      {!completion && completionLoading && (
+        <div
+          className="sql-completion is-loading"
+          role="status"
+          aria-label="正在加载补全"
+          style={{ left: completionLoading.left, top: completionLoading.top }}
+        >
+          <span className="sql-completion-loading">正在加载补全…</span>
         </div>
       )}
 

@@ -62,6 +62,8 @@ export interface SessionOpenResult {
   message: string;
   elapsedMs: number;
   serverVersion?: string;
+  /** MySQL 系 `lower_case_table_names`；用于补全插入大小写。 */
+  lowerCaseTableNames?: 0 | 1 | 2;
   /** SQLite 文件被占用/不可写时以只读方式打开。 */
   readonly?: boolean;
 }
@@ -691,6 +693,8 @@ export interface AppSettings {
   sqlKeywordCase: 'upper' | 'lower' | 'preserve';
   /** 是否启用补全（含自动与快捷键触发）。 */
   completionEnabled: boolean;
+  /** 是否在输入时自动弹补全；关闭后仍可用快捷键手动触发。 */
+  completionAutoTrigger: boolean;
   /** 自动补全延迟（毫秒）。 */
   completionDelayMs: number;
   /** 可自定义快捷键；与设置面板共用同一映射。 */

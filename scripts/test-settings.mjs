@@ -122,6 +122,7 @@ assert(
     editorTabSize: 4,
     sqlKeywordCase: 'lower',
     completionEnabled: false,
+    completionAutoTrigger: false,
     completionDelayMs: 300,
   }).editorFontFamily === 'consolas' &&
     normalizeAppSettings({
@@ -136,6 +137,14 @@ assert(
       resultRowLimit: 500,
       completionEnabled: false,
     }).completionEnabled === false &&
+    normalizeAppSettings({
+      resultRowLimit: 500,
+      completionAutoTrigger: false,
+    }).completionAutoTrigger === false &&
+    normalizeAppSettings({
+      resultRowLimit: 500,
+      completionAutoTrigger: 'no',
+    }).completionAutoTrigger === true &&
     normalizeAppSettings({
       resultRowLimit: 500,
       completionDelayMs: 300,

@@ -164,8 +164,8 @@ interface WorkspaceProps {
   /** 编辑器右键「从历史插入」。 */
   onOpenHistory: () => void;
   completionGroups: CompletionGroups;
-  completionDetails?: Record<string, string>;
   completionEnabled: boolean;
+  completionAutoTrigger: boolean;
   completionDelayMs: number;
   shortcuts: ShortcutMap;
   onRequestCompletion: (context: CompletionContext) => Promise<CompletionCandidate[]>;
@@ -272,8 +272,8 @@ export function Workspace({
   onFormatSql,
   onOpenHistory,
   completionGroups,
-  completionDetails,
   completionEnabled,
+  completionAutoTrigger,
   completionDelayMs,
   shortcuts,
   onRequestCompletion,
@@ -754,8 +754,8 @@ export function Workspace({
           onFormat={onFormatSql}
           onOpenHistory={onOpenHistory}
           completionGroups={completionGroups}
-          completionDetails={completionDetails}
           completionEnabled={completionEnabled}
+          completionAutoTrigger={completionAutoTrigger}
           completionDelayMs={completionDelayMs}
           shortcuts={shortcuts}
           onRequestCompletion={onRequestCompletion}

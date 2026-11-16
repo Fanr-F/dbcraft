@@ -23,10 +23,14 @@ import type {
 } from '@shared/ipc-contract';
 import { DEFAULT_APP_SETTINGS, EDITOR_FONT_FAMILIES } from '@shared/settings';
 import { matchesShortcut } from './utils/shortcuts';
-import { SQL_KEYWORD_LIST } from './utils/sql-highlight';
 import {
+  completionKindPriority,
   extractAttachedDatabases,
+  extractVirtualTables,
   functionCompletions,
+  keywordCompletions,
+  normalizeCompletionNameCase,
+  quoteCompletionIdentifier,
   relationKindsForClause,
   splitQualifier,
   type CompletionCandidate,
@@ -521,9 +525,8 @@ export default function App() {
   );
   const noticeTimer = useRef<number | null>(null);
   const runningRequests = useRef<Record<string, string>>({});
-  const columnCache = useRef<Record<string, string[]>>({});
+  const columnCache = useRef<Record<string, Array<{ name: string; type: string }>>>({});
   const schemaObjectCache = useRef<Record<string, SchemaObject[]>>({});
-  const completionDetails = useRef<Record<string, string>>({});
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
   const restoredSessions = useRef(false);
@@ -782,21 +785,8 @@ export default function App() {
       ),
     );
     const dialect = activeConnection?.input.type ?? null;
-    const version = /(\d+)\.(\d+)/.exec(activeVersion);
-    const major = version ? Number(version[1]) : 0;
-    const minor = version ? Number(version[2]) : 0;
-    const modern = (() => {
-      if (dialect === 'mysql' || dialect === 'percona') return !major || major >= 8;
-      if (dialect === 'mariadb') return !major || major > 10 || (major === 10 && minor >= 2);
-      if (dialect === 'sqlite') return !major || major > 3 || (major === 3 && minor >= 35);
-      return true;
-    })();
     return {
-      keywords: modern
-        ? SQL_KEYWORD_LIST
-        : SQL_KEYWORD_LIST.filter(
-            (keyword) => !['WITH', 'OVER', 'PARTITION', 'RETURNING'].includes(keyword),
-          ),
+      keywords: keywordCompletions(dialect, activeVersion),
       functions: functionCompletions(dialect),
       objects: activeSchema.map((object) => ({ name: object.name, kind: object.type })),
       schemas: schemaNames,
@@ -822,18 +812,64 @@ export default function App() {
       currentDatabaseByTab[tab.id] ??
       (dialect === 'sqlite' ? 'main' : connection.input.database);
     const databases = databasesByTab[tab.id] ?? [];
-    // FROM/JOIN 只给表/视图，EXEC 只给存储过程，USE 只给数据库。
+    const lowerCaseTableNames = sessions[tab.id]?.lowerCaseTableNames;
+    // FROM/JOIN 只给表/视图（外加库/Schema），EXEC 只给存储过程，USE 只给数据库。
     const contextKinds: CompletionKind[] = relationKindsForClause(context.clause);
+    const allowSchemas = contextKinds.includes('table');
     const pick = (candidates: CompletionCandidate[]): CompletionCandidate[] =>
       contextKinds.length === 0
         ? candidates
         : candidates.filter((candidate) => contextKinds.includes(candidate.kind));
+    const quoteObjectName = (label: string) =>
+      quoteCompletionIdentifier(
+        dialect,
+        normalizeCompletionNameCase(label, lowerCaseTableNames),
+      );
+    const quoteColumnName = (label: string) => quoteCompletionIdentifier(dialect, label);
+    const virtualTables = extractVirtualTables(context.statement);
+    /** 按表名（可带限定符）找 CTE / 派生表的列。 */
+    const virtualColumns = (tableName: string): string[] | null => {
+      const last = tableName.split('.').pop()?.toLowerCase() ?? '';
+      const match = virtualTables.find(
+        (table) =>
+          table.name.toLowerCase() === last ||
+          table.name.toLowerCase() === tableName.toLowerCase(),
+      );
+      return match?.columns ?? null;
+    };
     const toCandidates = (
       names: string[],
       kind: CompletionKind,
-    ): CompletionCandidate[] => names.map((label) => ({ label, kind }));
+      priority = completionKindPriority(kind),
+    ): CompletionCandidate[] =>
+      names.map((label) => ({
+        label,
+        kind,
+        insertText: quoteObjectName(label),
+        priority,
+      }));
     const objectCandidates = (objects: SchemaObject[]): CompletionCandidate[] =>
-      objects.map((object) => ({ label: object.name, kind: object.type }));
+      objects.map((object) => ({
+        label: object.name,
+        kind: object.type,
+        insertText: quoteObjectName(object.name),
+        priority: completionKindPriority(object.type),
+      }));
+    const schemaCandidates = (schemas: string[]): CompletionCandidate[] =>
+      toCandidates(schemas, 'schema');
+    const databaseCandidates = (names: string[]): CompletionCandidate[] =>
+      toCandidates(names, 'database');
+    const columnCandidates = (
+      columns: Array<{ name: string; type: string }>,
+      priority = 0,
+    ): CompletionCandidate[] =>
+      columns.map((column) => ({
+        label: column.name,
+        kind: 'column' as const,
+        detail: column.type || undefined,
+        insertText: quoteColumnName(column.name),
+        priority,
+      }));
 
     /** 读取某个库的对象（不切换会话当前库；SQLite 忽略 database）。补全包含系统对象。 */
     const loadObjects = async (targetDatabase: string): Promise<SchemaObject[]> => {
@@ -869,21 +905,27 @@ export default function App() {
     };
 
     const loadColumns = async (tableName: string): Promise<CompletionCandidate[]> => {
-      const key = `${tab.id}:${database}:${tableName.toLowerCase()}`;
+      // CTE / 派生表的列来自语句本身，优先于物理表元数据。
+      const virtual = virtualColumns(tableName);
+      if (virtual) {
+        return columnCandidates(virtual.map((name) => ({ name, type: '' })));
+      }
+      // 限定表名（db.table / schema.table）已包含库信息，缓存 key 直接用完整名。
+      const key = `${tab.id}:${tableName.toLowerCase()}`;
       const cached = columnCache.current[key];
-      if (cached) return toCandidates(cached, 'column');
+      if (cached) return columnCandidates(cached);
       try {
         let result = await api.schema.table(tab.id, tableName, 'table');
         if (!result.ok) {
           result = await api.schema.table(tab.id, tableName, 'view');
         }
         const columns = result.ok ? result.meta.columns : [];
-        for (const column of columns) {
-          completionDetails.current[column.name] = column.declaredType;
-        }
-        const names = columns.map((column) => column.name);
-        columnCache.current[key] = names;
-        return toCandidates(names, 'column');
+        const entries = columns.map((column) => ({
+          name: column.name,
+          type: column.declaredType,
+        }));
+        columnCache.current[key] = entries;
+        return columnCandidates(entries);
       } catch {
         return [];
       }
@@ -916,10 +958,40 @@ export default function App() {
     const objectsInSchema = (objects: SchemaObject[], schema: string) =>
       objects.filter((object) => (object.schema ?? '').toLowerCase() === schema.toLowerCase());
 
-    // `SELECT *` 后手动触发补全时，直接展开当前表/别名的列。
-    if (context.needle === '*') {
-      const reference = context.tables[0];
-      if (reference) return loadColumns(resolveTable(reference) ?? reference.table);
+    /** 通配符展开：列出当前语句涉及的表的全部列，并额外给一个“一次展开”候选。 */
+    if (context.wildcard) {
+      const tableNames = Array.from(
+        new Set(
+          context.tables
+            .map((reference) => resolveTable(reference))
+            .filter((name): name is string => Boolean(name)),
+        ),
+      );
+      if (tableNames.length === 0) return [];
+      const lists = await Promise.all(tableNames.map((name) => loadColumns(name)));
+      const seen = new Set<string>();
+      const columns: CompletionCandidate[] = [];
+      for (const list of lists) {
+        for (const column of list) {
+          const key = column.label.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          columns.push(column);
+        }
+      }
+      if (columns.length === 0) return [];
+      const insertAll = columns.map((column) => column.insertText ?? column.label).join(', ');
+      const preview = columns.map((column) => column.label).join(', ');
+      return [
+        {
+          label: `展开为 ${columns.length} 列`,
+          kind: 'column',
+          detail: preview.length > 90 ? `${preview.slice(0, 90)}…` : preview,
+          insertText: insertAll,
+          priority: -1,
+        },
+        ...columns,
+      ];
     }
 
     if (context.qualifier) {
@@ -942,10 +1014,14 @@ export default function App() {
         }
 
         if (dialect === 'sqlite') {
-          // main./temp. 可查；ATTACH 的别名目前没有元数据接口，先不返回错误候选。
-          return last === 'main' || last === 'temp'
-            ? pick(objectCandidates(await loadObjects(last)))
-            : [];
+          // main / temp / ATTACH 别名 -> 库内对象；否则按当前库的表名解析列。
+          const databaseMatch = databases.find(
+            (item) => item.name.toLowerCase() === last,
+          );
+          if (databaseMatch || last === 'main' || last === 'temp') {
+            return pick(objectCandidates(await loadObjects(last)));
+          }
+          return loadColumns(last);
         }
 
         if (dialect === 'mssql') {
@@ -965,7 +1041,7 @@ export default function App() {
           const databaseMatch = databases.find((item) => item.name.toLowerCase() === last);
           if (databaseMatch) {
             const objects = await loadObjects(databaseMatch.name);
-            return toCandidates(
+            return schemaCandidates(
               Array.from(
                 new Set(
                   objects
@@ -973,10 +1049,10 @@ export default function App() {
                     .filter((name): name is string => Boolean(name)),
                 ),
               ),
-              'schema',
             );
           }
-          return [];
+          // 直接写 `表名.` 时按当前库解析列。
+          return loadColumns(last);
         }
 
         if (isMysqlFamily) {
@@ -985,12 +1061,12 @@ export default function App() {
             const objects = await loadObjects(databaseMatch.name);
             return pick(objectCandidates(objects));
           }
-          return [];
+          return loadColumns(last);
         }
         return [];
       }
 
-      // 两段：MSSQL 可能是 `库.Schema.` 或 `Schema.表.`；MySQL 是 `库.表.`
+      // 两段：MSSQL 可能是 `库.Schema.` 或 `Schema.表.`；MySQL/SQLite 是 `库.表.`
       if (parts.length === 2) {
         if (dialect === 'mssql') {
           const databaseMatch = databases.find(
@@ -1002,15 +1078,8 @@ export default function App() {
           }
           return loadColumns(`${parts[0]}.${parts[1]}`);
         }
-        if (isMysqlFamily) {
-          if (parts[0]!.toLowerCase() !== database.toLowerCase()) return [];
-          return loadColumns(parts[1]!);
-        }
-        if (dialect === 'sqlite') {
-          if (parts[0]!.toLowerCase() !== 'main' && parts[0]!.toLowerCase() !== 'temp') {
-            return [];
-          }
-          return loadColumns(parts[1]!);
+        if (isMysqlFamily || dialect === 'sqlite') {
+          return loadColumns(`${parts[0]}.${parts[1]}`);
         }
         return [];
       }
@@ -1030,10 +1099,21 @@ export default function App() {
         .map((reference) => resolveTable(reference))
         .filter((name): name is string => Boolean(name));
       const uniqueTables = Array.from(new Set(tables));
-      const columnLists = await Promise.all(uniqueTables.map((name) => loadColumns(name)));
+      const columnLists = await Promise.all(
+        uniqueTables.map((name, index) => loadColumns(name).then((list) =>
+          list.map((item) => ({ ...item, priority: index })),
+        )),
+      );
       for (const columns of columnLists) items.push(...columns);
       for (const table of context.tables) {
-        if (table.alias) items.push({ label: table.alias, kind: 'alias' });
+        if (table.alias) {
+          items.push({
+            label: table.alias,
+            kind: 'alias',
+            insertText: quoteColumnName(table.alias),
+            priority: 20,
+          });
+        }
       }
     } else if (
       ['from', 'join', 'into', 'update', 'table', 'view', 'exec', 'execute'].includes(
@@ -1055,15 +1135,36 @@ export default function App() {
       }
       // 关系位置只保留表/视图（或 EXEC 的存储过程），不再混入函数与关键字。
       items.push(...pick(objectCandidates(objects)));
-      for (const schema of new Set(
-        objects
-          .map((object) => object.schema)
-          .filter((name): name is string => Boolean(name)),
-      )) {
-        items.push({ label: schema, kind: 'schema' });
+      if (allowSchemas) {
+        // CTE / 派生表名也参与 FROM/JOIN 补全。
+        items.push(
+          ...virtualTables.map((table) => ({
+            label: table.name,
+            kind: 'table' as const,
+            insertText: quoteObjectName(table.name),
+            priority: completionKindPriority('table'),
+          })),
+        );
+        items.push(
+          ...schemaCandidates(
+            Array.from(
+              new Set(
+                objects
+                  .map((object) => object.schema)
+                  .filter((name): name is string => Boolean(name)),
+              ),
+            ),
+          ),
+          ...databaseCandidates(databases.map((item) => item.name)),
+        );
       }
     }
-    return contextKinds.length > 0 ? pick(items) : items;
+    if (contextKinds.length === 0) return items;
+    return items.filter(
+      (candidate) =>
+        contextKinds.includes(candidate.kind) ||
+        (allowSchemas && (candidate.kind === 'schema' || candidate.kind === 'database')),
+    );
   };
   const tabLabels = useMemo(() => {
     const labels: Record<string, string> = {};
@@ -1459,6 +1560,7 @@ export default function App() {
             status: 'ready',
             message: result.message,
             version: result.serverVersion,
+            lowerCaseTableNames: result.lowerCaseTableNames,
             readonly: result.readonly === true,
           },
         }));
@@ -4780,8 +4882,8 @@ export default function App() {
           onFormatSql={formatActiveSql}
           onOpenHistory={() => setHistoryOpen(true)}
           completionGroups={completionGroups}
-          completionDetails={completionDetails.current}
           completionEnabled={settings.completionEnabled}
+          completionAutoTrigger={settings.completionAutoTrigger}
           completionDelayMs={settings.completionDelayMs}
           shortcuts={settings.shortcuts}
           onRequestCompletion={requestCompletion}

@@ -78,6 +78,7 @@ export class MysqlSession implements DatabaseSession {
   readonly label: string;
   readonly dialect: DatabaseType;
   readonly serverVersion: string;
+  readonly lowerCaseTableNames?: 0 | 1 | 2;
   readonly note?: string;
   readonly alive = true;
   readonly cancelDisconnects = false;
@@ -91,11 +92,13 @@ export class MysqlSession implements DatabaseSession {
     version: string,
     dialect: DatabaseType,
     note?: string,
+    lowerCaseTableNames?: 0 | 1 | 2,
   ) {
     this.label = label;
     this.serverVersion = version;
     this.dialect = dialect;
     this.note = note;
+    this.lowerCaseTableNames = lowerCaseTableNames;
   }
 
   static async create(
@@ -135,9 +138,17 @@ export class MysqlSession implements DatabaseSession {
     }
 
     const [rows] = await connection.query(
-      'SELECT VERSION() AS version, @@version_comment AS comment',
+      'SELECT VERSION() AS version, @@version_comment AS comment, @@lower_case_table_names AS lowerCaseTableNames',
     );
-    const info = (rows as Array<{ version: string; comment: string }>)[0];
+    const info = (rows as Array<{
+      version: string;
+      comment: string;
+      lowerCaseTableNames?: number;
+    }>)[0];
+    const lowerCaseTableNames =
+      info?.lowerCaseTableNames === 0 || info?.lowerCaseTableNames === 1 || info?.lowerCaseTableNames === 2
+        ? (info.lowerCaseTableNames as 0 | 1 | 2)
+        : undefined;
 
     return new MysqlSession(
       connection,
@@ -147,6 +158,7 @@ export class MysqlSession implements DatabaseSession {
       info?.version ?? 'unknown',
       config.type,
       note,
+      lowerCaseTableNames,
     );
   }
 

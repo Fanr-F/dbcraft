@@ -9,9 +9,14 @@ import {
   extractAttachedDatabases,
   extractCompletionContext,
   extractSignatureHelp,
+  extractVirtualTables,
   filterCompletions,
   functionCompletions,
+  keywordCompletions,
   matchCompletionCase,
+  normalizeCompletionNameCase,
+  quoteCompletionIdentifier,
+  rankCompletions,
   shouldAutoTriggerCompletion,
   shouldOpenCompletionOnInput,
   splitQualifier,
@@ -184,5 +189,191 @@ const useLabels = labelsOf('USE ');
 assert(useLabels.length === 1 && useLabels[0] === 'fanr', `USE completion wrong: ${useLabels.join(',')}`);
 const qualifiedLabels = labelsOf('SELECT u.');
 assert(qualifiedLabels.length === 0, 'qualified completion should not use base candidates');
+
+// 表引用从整条语句解析：FROM 在光标之后也要能补列（PRD AC）。
+const selectList = extractCompletionContext('SELECT u. FROM users u', 9);
+assert(
+  selectList.tables.length === 1 && selectList.tables[0].table === 'users',
+  `select-list tables wrong: ${JSON.stringify(selectList.tables)}`,
+);
+const bareColumn = extractCompletionContext('SELECT na FROM users', 9);
+assert(
+  bareColumn.tables.length === 1 && bareColumn.clause === 'select',
+  'column completion before FROM should see the table',
+);
+
+// 引号/注释/字符串里的分号不切语句，也不弹补全。
+const stringSemicolon = extractCompletionContext("SELECT 'a;b' FROM users u WHERE u.", 34);
+assert(
+  stringSemicolon.tables.length === 1 && stringSemicolon.qualifier === 'u',
+  `string semicolon broke statement: ${JSON.stringify(stringSemicolon.tables)}`,
+);
+assert(stringSemicolon.inLiteral === false, 'cursor after literal should not be literal');
+const inString = extractCompletionContext("SELECT 'ab", 10);
+assert(inString.inLiteral === true, 'cursor inside string should be literal');
+assert(
+  shouldOpenCompletionOnInput("SELECT 'ab", 10) === false,
+  'completion should not auto-open inside a string',
+);
+const inComment = extractCompletionContext('SELECT -- note', 14);
+assert(inComment.inLiteral === true, 'cursor inside line comment should be literal');
+
+// 逗号多表、双空格 ORDER BY。
+const commaSql = 'SELECT * FROM users u, orders o WHERE ';
+const commaTables = extractCompletionContext(commaSql, commaSql.length);
+assert(
+  commaTables.tables.length === 2 && commaTables.tables[1].alias === 'o',
+  `comma tables wrong: ${JSON.stringify(commaTables.tables)}`,
+);
+const spacedSql = 'SELECT * FROM users ORDER  BY name';
+const spacedClause = extractCompletionContext(spacedSql, spacedSql.length);
+assert(spacedClause.clause === 'order by', `spaced order by wrong: ${spacedClause.clause}`);
+
+// 通配符只在 SELECT 列表生效，函数参数里的 * 不算。
+const wildcard = extractCompletionContext('SELECT * FROM users', 8);
+assert(wildcard.wildcard === true, 'SELECT * should be wildcard');
+assert(wildcard.replaceStart === 7 && wildcard.replaceEnd === 8, 'wildcard replacement range wrong');
+assert(extractCompletionContext('SELECT COUNT(*) FROM users', 13).wildcard === false, 'COUNT(*) is not wildcard');
+assert(extractCompletionContext('SELECT a * b FROM t', 10).wildcard === false, 'multiplication is not wildcard');
+
+// 排序：前缀优先，同分按类型优先级；返回命中下标供高亮。
+const ranked = rankCompletions(
+  [
+    { label: 'SELECT', kind: 'keyword' },
+    { label: 'orders', kind: 'table' },
+    { label: 'users', kind: 'table', priority: 0 },
+    { label: 'user_roles', kind: 'table' },
+    { label: 'zzz', kind: 'table' },
+  ],
+  'us',
+);
+assert(
+  JSON.stringify(ranked.map((item) => item.label)) === JSON.stringify(['users', 'user_roles']),
+  `rank order wrong: ${ranked.map((item) => item.label).join(',')}`,
+);
+assert(JSON.stringify(ranked[0].matches) === JSON.stringify([0, 1]), 'match indices wrong');
+const fuzzy = rankCompletions([{ label: 'created_at', kind: 'column' }], 'ca');
+assert(fuzzy.length === 1 && JSON.stringify(fuzzy[0].matches) === JSON.stringify([0, 8]), 'fuzzy match wrong');
+
+// 版本感知：方言关键字与特性开关。
+assert(keywordCompletions('mssql', '16.0').includes('TOP'), 'mssql should suggest TOP');
+assert(!keywordCompletions('sqlite', '3.45').includes('TOP'), 'sqlite should not suggest TOP');
+assert(keywordCompletions('sqlite', '3.35').includes('RETURNING'), 'sqlite 3.35 should suggest RETURNING');
+assert(!keywordCompletions('sqlite', '3.34').includes('RETURNING'), 'sqlite 3.34 should hide RETURNING');
+assert(!keywordCompletions('mysql', '5.7.44').includes('WITH'), 'mysql 5.7 should hide CTE keyword');
+assert(keywordCompletions('mysql', '8.0.44').includes('WITH'), 'mysql 8 should suggest CTE keyword');
+
+// 标识符按方言加引号；无需引号时保持原样。
+assert(quoteCompletionIdentifier('mssql', 'users') === 'users', 'plain identifier changed');
+assert(quoteCompletionIdentifier('mssql', 'my table') === '[my table]', 'mssql quoting wrong');
+assert(quoteCompletionIdentifier('mysql', 'select') === '`select`', 'mysql keyword quoting wrong');
+assert(quoteCompletionIdentifier('sqlite', 'a-b') === '"a-b"', 'sqlite quoting wrong');
+
+// 带 insertText 时原样插入，不再跟随输入大小写。
+const inserted = applyCompletion('SELECT * FROM ', 14, 14, 'my table', {
+  insertText: '[my table]',
+});
+assert(inserted.text === 'SELECT * FROM [my table]', `insertText apply wrong: ${inserted.text}`);
+
+// FROM/JOIN 之后允许库名/Schema 名；EXEC 仍然只给存储过程。
+const fromGroups = {
+  keywords: [],
+  functions: [],
+  objects: [{ name: 'users', kind: 'table' }],
+  databases: ['fanr'],
+  schemas: ['dbo'],
+};
+const fromContext = extractCompletionContext('SELECT * FROM ', 14);
+const fromAll = completionCandidatesForContext(fromContext, fromGroups);
+assert(
+  fromAll.some((item) => item.kind === 'schema') &&
+    fromAll.some((item) => item.kind === 'database'),
+  'FROM should offer schema/database names',
+);
+const execContext = extractCompletionContext('EXEC ', 5);
+assert(
+  completionCandidatesForContext(execContext, fromGroups).length === 0,
+  'EXEC should not offer schemas/databases when no procedures exist',
+);
+
+// CTE / 派生表列推导。
+const cte = extractVirtualTables(
+  'WITH recent AS (SELECT id, name FROM users WHERE id > 1) SELECT * FROM recent',
+);
+assert(
+  cte.length === 1 && cte[0].name === 'recent',
+  `cte should be parsed: ${JSON.stringify(cte)}`,
+);
+assert(
+  JSON.stringify(cte[0].columns) === JSON.stringify(['id', 'name']),
+  `cte columns wrong: ${JSON.stringify(cte[0]?.columns)}`,
+);
+const explicitCte = extractVirtualTables(
+  'WITH x(a, b) AS (SELECT id, name FROM users) SELECT * FROM x',
+);
+assert(
+  JSON.stringify(explicitCte[0]?.columns) === JSON.stringify(['a', 'b']),
+  `explicit cte columns wrong: ${JSON.stringify(explicitCte[0]?.columns)}`,
+);
+const derived = extractVirtualTables(
+  'SELECT u.user_id FROM (SELECT id AS user_id, name FROM users) u',
+);
+assert(
+  derived.length === 1 && derived[0].name === 'u',
+  `derived table should be parsed: ${JSON.stringify(derived)}`,
+);
+assert(
+  JSON.stringify(derived[0].columns) === JSON.stringify(['user_id', 'name']),
+  `derived columns wrong: ${JSON.stringify(derived[0]?.columns)}`,
+);
+assert(
+  extractVirtualTables('SELECT * FROM (SELECT * FROM users) u').length === 0,
+  'star-derived table should not produce column list',
+);
+
+// lower_case_table_names=1 时对象名按小写插入。
+assert(normalizeCompletionNameCase('Users', 1) === 'users', 'lctn=1 should fold lower');
+assert(normalizeCompletionNameCase('Users', 0) === 'Users', 'lctn=0 should keep case');
+assert(normalizeCompletionNameCase('Users', 2) === 'Users', 'lctn=2 should keep case');
+
+// 引号标识符内补全：连开引号一起替换，已存在的闭引号也被覆盖。
+const bracketContext = extractCompletionContext('SELECT [us', 10);
+assert(
+  bracketContext.needle === 'us' &&
+    bracketContext.replaceStart === 7 &&
+    bracketContext.replaceEnd === 10 &&
+    bracketContext.inLiteral === false,
+  `bracket context wrong: ${JSON.stringify({
+    needle: bracketContext.needle,
+    start: bracketContext.replaceStart,
+    end: bracketContext.replaceEnd,
+  })}`,
+);
+assert(
+  applyCompletion('SELECT [us', 7, 10, 'users', { insertText: '[users]' }).text ===
+    'SELECT [users]',
+  'bracket completion apply wrong',
+);
+const bracketClosed = extractCompletionContext('SELECT [us]', 10);
+assert(
+  bracketClosed.replaceEnd === 11 && bracketClosed.needle === 'us',
+  `closed bracket range wrong: ${bracketClosed.replaceEnd}/${bracketClosed.needle}`,
+);
+const backtickContext = extractCompletionContext('SELECT `us', 10);
+assert(
+  backtickContext.needle === 'us' && backtickContext.replaceStart === 7,
+  `backtick context wrong: ${JSON.stringify(backtickContext)}`,
+);
+const quotedQualifier = extractCompletionContext('SELECT [dbo].[us', 16);
+assert(
+  quotedQualifier.qualifier === '[dbo]' &&
+    quotedQualifier.needle === 'us' &&
+    quotedQualifier.replaceStart === 13,
+  `quoted qualifier wrong: ${JSON.stringify({
+    q: quotedQualifier.qualifier,
+    n: quotedQualifier.needle,
+    s: quotedQualifier.replaceStart,
+  })}`,
+);
 
 console.log('sql completion check passed');

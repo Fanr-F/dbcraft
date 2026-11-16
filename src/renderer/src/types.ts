@@ -130,6 +130,7 @@ export interface SessionRuntime {
   status: SessionStatus;
   message?: string;
   version?: string;
+  lowerCaseTableNames?: 0 | 1 | 2;
   readonly?: boolean;
 }
 

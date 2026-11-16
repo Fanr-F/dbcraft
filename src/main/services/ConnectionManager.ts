@@ -295,6 +295,7 @@ async function openSession(
       message: sessionMessage(session),
       elapsedMs: Date.now() - startedAt,
       serverVersion: session.serverVersion,
+      lowerCaseTableNames: session.lowerCaseTableNames,
       readonly: session.isReadOnly,
     };
   } catch (error) {

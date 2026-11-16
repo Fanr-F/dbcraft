@@ -311,12 +311,12 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 | 模块 | 状态 | 估算 | 已有能力摘要 | 主要缺口 |
 |---|---|---:|---|---|
 | MOD-01 连接管理 | 🟡 | 91% | 五类连接表单、测试连接、元数据库持久化（safeStorage）、编辑/复制/删除/断开、多级分组、搜索、最近使用、系统对象开关、生产危险语句拦截、SQLite 只读降级、库级 DDL、连接导入/导出、字符集、证书错误解释、超时、MSSQL 连接、多数据库对象树（库/schema/表/视图/存储过程/表子对象）、服务器实体与分组、独立 browse session | **v1.0 P0**：SQLite 文件拖入、认证插件字段、全量错误码、真实 Percona 与 MySQL 多库回归；H-02/H-03/H-04/H-08/H-09 |
-| MOD-02 SQL 编辑器 | 🟡 | 92% | 多标签、选区执行、取消、语法高亮、行号、括号匹配、格式化、关键字+函数+对象名补全、列/别名/限定名补全（W-20261109-19）、函数签名（W-20261109-20）、库/Schema/多段限定名/大小写跟随（W-20261109-21）、编辑器内多语句/多结果页签/消息面板与 `GO`/`DELIMITER` 分句（W-20261109-22）、草稿自动保存/恢复、关闭标签时写入查询历史（W-20261111-128）、SQL 文件打开/保存、多语句脚本窗口 | **v1.0 P0**：版本感知、补全类型提示、光标语句；**v1.x**：错误波浪线、最近文件、参数化执行、快捷键自定义 |
+| MOD-02 SQL 编辑器 | 🟡 | 97% | 多标签、选区执行、取消、语法高亮、行号、括号匹配、格式化、关键字+函数+对象名补全、列/别名/限定名补全（W-20261109-19）、函数签名（W-20261109-20）、库/Schema/多段限定名/大小写跟随（W-20261109-21）、编辑器内多语句/多结果页签/消息面板与 `GO`/`DELIMITER` 分句（W-20261109-22）、草稿自动保存/恢复、关闭标签时写入查询历史（W-20261111-128）、SQL 文件打开/保存、多语句脚本窗口、整条语句表解析、`*` 展开、类型提示、版本感知、ATTACH/跨库列、排序/高亮、标识符引号、弹层定位/加载态/自动配对（W-20261113-02）、CTE/派生表列、引号标识符补全、`lower_case_table_names`（W-20261113-03） | **v1.0 P0**：人工真机逐项验收；**v1.x**：错误波浪线、参数化执行 |
 | MOD-03 查询历史 | 🟢 | 99% | history 表、成功/失败/取消记录、可关闭的 60s 去重、保留条数（含不限制）、FTS5 trigram 搜索（短查询回退 LIKE）、命中片段高亮、组合过滤（今天/自定义时间）、时间/耗时排序、详情、插入光标处、再次执行回到原连接/原库、复制/仅看此连接、连接已删除标记、JSON 导出、删除/清空、默认脱敏、写入队列与退出前 flush | 更完整的敏感内容识别、历史列表分页/加载更多 |
 | MOD-04 UI DDL | 🟢 | 97% | 查看/复制 DDL、新建表/编辑表结构页签（列差异生成 ALTER、SQLite 整表重建、删除列输入表名确认）、MSSQL schema + IDENTITY、新建视图、加/删/重命名/修改列、重命名/删除表、删除视图、索引管理、表结构（列/索引/外键/CHECK/注释）、表注释编辑、多语句脚本逐条结果、库级 DDL | CHECK 约束编辑、列序调整、编辑页签内唯一约束/索引变更、SQLite 重建保留外键/触发器、MSSQL 默认值/computed/rowversion 编辑 |
 | MOD-05 表数据编辑 | 🟢 | 96% | 数据页、50/200/500/1000 分页、多列排序、类型化多条件过滤、单元格编辑、多行粘贴、增删行/批量删行、单事务提交/回滚、乐观锁与 rowversion、本地撤销栈、主键修改确认、自增列写入、NULL/默认值、类型化编辑器、列布局记忆、必填标记、自动提交/确认、冲突预检/跳过、退出三选一、rowid 表、TSV 区域复制、网格右键菜单 | BLOB/大文本 hex 查看器仍只保留前 32 字节 |
 | MOD-06 结果与导出 | 🟡 | 96% | 结果网格、NULL 灰斜体、数字/日期右对齐、长文本悬停、列头本地排序、复制列名/单元格、单元格查看器、多结果页签/消息面板、CSV/JSON/SQL/Excel 导出、选中区域/多结果集导出、表数据流式 CSV（进度/取消/100MB 提示） | 任意 SQL 的流式分页仍先加载最多 1 万行；BLOB hex 查看；执行计划（v1.x） |
-| MOD-07 设置与偏好 | 🟢 | 94% | settings 表与面板、深浅/跟随系统主题、编辑器字号/字体/Tab 宽度、关键字大小写、补全开关/延迟、结果行数上限、历史配置、查询/连接超时、数据目录迁移、本地统计、诊断日志、元数据库备份/恢复、快捷键自定义与冲突检测、网格自动提交/确认 | 逐版本 migration/升级备份（R-04）、浅色主题个别强调色、i18n（v1.x） |
+| MOD-07 设置与偏好 | 🟢 | 94% | settings 表与面板、深浅/跟随系统主题、编辑器字号/字体/Tab 宽度、关键字大小写、补全开关/自动触发开关/延迟、结果行数上限、历史配置、查询/连接超时、数据目录迁移、本地统计、诊断日志、元数据库备份/恢复、快捷键自定义与冲突检测、网格自动提交/确认 | 逐版本 migration/升级备份（R-04）、浅色主题个别强调色、i18n（v1.x） |
 | MOD-08 MSSQL Agent | 🟡 | 80% | 对象树 `SQL Server Agent → 作业 → 作业项`、树内搜索/状态、详情页签（步骤/计划/最近 100/500 条历史）、启动/停止/启用/禁用、`sp_update_job*` 脚本生成、共享计划警告、多服务器只读、步骤命令在编辑器打开、`agent-control` 历史 | 30s 自动刷新、运行中/空闲状态、Agent XPs 禁用/权限失败真机回归、>1000 作业分页、右键菜单完整化 |
 
 > PRD v0.17 的 v1.0 P0 中，完整补全、编辑器内多语句/多结果页签、`GO`/`DELIMITER`、结果集「不限制」档位已落地；版本感知、补全类型提示仍是缺口。
@@ -330,7 +330,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 | D-3 | 切换连接时是否保留当前 SQL 标签 | 已按「标签 ↔ 会话一一对应」处理：选择另一个连接时激活该连接已有标签，没有则新建标签，绝不改绑当前标签 | 已解决，见 B-2 修复记录 |
 | D-4 | 编辑器是否支持多语句/多结果 | 已实现：编辑器多语句走 `query:execute-script`，逐条执行、遇错停止，结果区支持多结果页签与消息面板；`query:execute` 保留单语句内部路径（W-20261109-22） | 保留；后续补真正的驱动级多结果与 warning/PRINT 消息 |
 | D-5 | 结果集默认上限与「不限制」 | 已实现：默认 2000，档位 100/500/1000/2000/5000/不限制；`maxRows=0` 在驱动层转 `Infinity`，设置面板提示内存风险（W-20261109-24） | 保留；大结果集卡顿风险由用户确认提示承担，后续可补流式/分页 |
-| D-6 | SQL 补全范围 | PRD v0.17：完整补全为 v1.0；已实现列/别名/限定名/函数/库/Schema/多段限定名/大小写跟随/自动触发（W-20261109-19/21） | 继续补版本感知、类型提示、SQLite ATTACH 库内对象、MySQL 跨库列 |
+| D-6 | SQL 补全范围 | PRD v0.17：完整补全为 v1.0；已实现列/别名/限定名/函数/库/Schema/多段限定名/大小写跟随/自动触发（W-20261109-19/21）、整条语句表解析、`*` 展开、类型提示、版本感知、ATTACH/跨库列、排序高亮与标识符引号（W-20261113-02）、CTE/派生表列、引号标识符内补全、`lower_case_table_names`（W-20261113-03） | 仅剩人工真机验收 |
 | D-7 | MSSQL Agent 入口 | PRD v0.17 已改为左侧树 + 详情页签；当前实现一致 | 已解决，保留树形态 |
 | D-8 | 网格事务是否独立连接 | PRD §4.5.3 仍写独立连接/事务，当前实现使用同一会话 | 待 Q16 决策；建议 v1.0 保持同一会话并改写 PRD |
 | D-9 | 连接/服务器/标签模型 | 服务器实体/分组、独立 browse session、browse 搜索、删除连接快照持久化已实现；服务器级 Agent 明确不做 | **Q21 A / Q26 B 主路径已实现**；保持连接级 Agent |
@@ -390,7 +390,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 
 | 缺口 | 说明 |
 |---|---|
-| 补全剩余（PRD v1.0 P0） | 版本感知、补全类型提示、通配符展开、SQLite ATTACH 库内对象、MySQL 跨库列、解析失败降级 |
+| 补全剩余（PRD v1.0 P0） | 功能项已全部实现（见 `FEATURE_MATRIX.md` §2.1，W-20261113-02/03）；仅剩真实 Electron 中逐项手点验收 |
 | 光标所在语句（PRD v1.0 P0） | 只支持选区执行，未按光标定位语句 |
 | 驱动级多结果 | 仍是逐条 IPC，不是驱动级多结果集；MSSQL `PRINT`/`RAISERROR`、MySQL warning 未进消息面板 |
 | `GO` 重复次数 | `GO 5` 未实现；`GO` 只按独立行识别 |
@@ -1336,12 +1336,13 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 
 ### 5.4 SQL 编辑器与补全（MOD-02）
 
-- [~] 补全弹层：列名、`别名.`、`表名.`、函数（W-20261109-19；待人工验收）
+- [~] 补全弹层：列名、`别名.`、`表名.`、函数（W-20261109-19；整条语句解析，FROM 在光标后也能补列，W-20261113-02；待人工验收）
 - [~] 函数签名提示：输入 `(`/`,` 后显示参数并高亮当前参数（W-20261109-20；待人工验收）
-- [~] 补全弹层：MSSQL `库.Schema.表`、MySQL `库.表`、SQLite `main.`/`temp.`、库名/Schema 名（W-20261109-21；待人工验收）
-- [~] 补全触发：`.`、普通单词输入、`FROM/JOIN/INTO/UPDATE/TABLE/VIEW/EXEC/USE/SET` 后空格自动触发、手动 Ctrl+Space、大小写跟随、按子句分类（FROM 只给表/视图等，W-20261111-131；待人工验收）
-- [ ] 补全弹层：版本感知、类型提示、通配符展开、SQLite ATTACH 库内对象、MySQL 跨库列
-- [ ] 补全弹层定位、滚动、键盘选择、Esc 关闭、IME 不冲突
+- [~] 补全弹层：MSSQL `库.Schema.表`、MySQL `库.表`、SQLite `main.`/`temp.`/ATTACH 别名、库名/Schema 名（W-20261109-21；ATTACH/跨库列 W-20261113-02；待人工验收）
+- [~] 补全触发：`.`、普通单词输入、`FROM/JOIN/INTO/UPDATE/TABLE/VIEW/EXEC/USE/SET` 后空格自动触发、手动 Ctrl+Space、大小写跟随、按子句分类、自动触发独立开关（W-20261111-131/20261113-02；待人工验收）
+- [~] 补全弹层：版本感知、类型提示、`*` 展开、SQLite ATTACH 库内对象、MySQL 跨库列（W-20261113-02；待人工验收）
+- [~] 补全弹层定位、上下翻转、键盘选择自动滚动、Esc/移动关闭、异步加载态、引号/括号配对（W-20261113-02；输入后弹层被 `select` 事件误关已修，W-20261116-01；IME 与真机待验收）
+- [~] CTE / 子查询别名列展开、引号标识符内补全、`lower_case_table_names` 大小写策略（W-20261113-03；待人工验收）
 - [ ] 错误波浪线（解析失败/可定位错误）
 - [ ] 未选中时执行“光标所在语句”
 - [~] 多语句执行：`;` / MSSQL `GO` / MySQL `DELIMITER` 分句、逐条执行、遇错停止（W-20261109-22；E2E 覆盖 SQLite 主路径，待人工验收）
@@ -1593,6 +1594,12 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261112-03 DDL 执行成功反馈**：诉求是 DDL 执行完没有明显返回（例如“执行成功”）。根因：单条 `change` 语句没有结果列，`ResultGrid` 会显示“还没有结果”，而编辑器执行路径也没有成功提示。变更：`Workspace` 对单条无结果集的 change 语句显示「执行成功 · N 行受影响 · X ms」面板，结果工具栏同步加「执行成功」前缀；`App` 新增 `isDdlSql()`（跳过开头注释识别 CREATE/ALTER/DROP/TRUNCATE/RENAME/COMMENT），单条执行与脚本执行成功且包含 DDL 时弹出 toast（`DDL 执行成功 · N 条语句/耗时`）。涉及 `src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过；未在真实 Electron 中执行 DDL 查看提示。
 
 - **W-20261113-01 补记：历史记录点击改为新建标签**：诉求是点击查询历史时在标签栏打开新标签，而不是把 SQL 插入当前编辑器（原先无标签时会丢失）。变更：`HistoryDialog` 的插入回调改为传递完整 `HistoryRecord`，`App` 新增 `openHistoryInNewTab()`，每次点击历史记录都新建标签并填入 SQL，尽量绑定原连接与原库；原“插入到光标处”的 `insertRequest` 链路一并移除。涉及 `src/renderer/src/components/HistoryDialog.tsx`、`src/renderer/src/components/HistoryDetailDialog.tsx`、`src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/features/editor/SqlEditor.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过（本条为补记，未新增自动化验证）。
+
+- **W-20261113-02 SQL 补全缺口集中修复**：诉求是复核 PRD §4.2 后把补全没做/做错的项补齐。变更：重写补全上下文解析（整条语句解析表引用，FROM 在光标后也能补列；字符串/注释/分号感知的语句边界；逗号多表、`AS` 别名、`ORDER  BY` 空白归一；`SELECT *` 通配符识别）；`rankCompletions` 按前缀 > 单词开头 > 模糊子序列排序并返回命中下标，弹层高亮、类型标签、同分类型优先级；补全插入按方言加引号；版本感知关键字/方言关键字；新增自动触发开关；`App` 补全 provider 支持 ATTACH 库对象、MySQL 跨库列、MSSQL 多段限定、Schema/库名候选，列类型随候选返回并按完整表名缓存；`SqlEditor` 弹层改为跟随光标、上下翻转、`scrollIntoView`、异步加载态、点击/左右移动关闭；新增引号/括号自动配对；移除全局 `completionDetails` 字典。涉及 `src/renderer/src/utils/sql-completion.ts`、`src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/components/SettingsDialog.tsx`、`src/renderer/src/styles.css`、`src/shared/ipc-contract.ts`、`src/shared/settings.ts`、`scripts/test-sql-completion.mjs`、`scripts/test-settings.mjs`、`prd/FEATURE_MATRIX.md`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`test:sql-completion`、`test:settings`、`test:sql-highlight`、`npm run build` 通过；未在真实 Electron 中逐项点击补全弹层。遗留：CTE/子查询别名列展开、引号标识符内补全、`lower_case_table_names` 大小写策略（已列入 `FEATURE_MATRIX.md` §2.1 的 🟡）。
+
+- **W-20261113-03 补全收尾：CTE/派生表列、引号标识符、lower_case_table_names**：诉求是把 `FEATURE_MATRIX.md` §2.1 剩余 3 个 🟡 全部做完。变更：`sql-completion` 新增 `extractVirtualTables`（解析 `WITH x[(cols)] AS (...)`、`FROM (SELECT ...) alias` 的列清单，跳过无法静态展开的 `*`）与 `normalizeCompletionNameCase`；`App` 补全把 CTE/派生表列置于物理表元数据之前，并把 CTE/派生表名加入 FROM/JOIN 候选；`extractCompletionContext` 支持 `[us` / `` `us` `` 引号标识符（替换范围连开引号，覆盖已存在闭引号，`[dbo].[us` 可解析限定名）；MySQL/MariaDB 建连时读取 `@@lower_case_table_names`，经 `SessionOpenResult.lowerCaseTableNames` 下发到会话，补全对象名在 `=1` 时折成小写。涉及 `src/renderer/src/utils/sql-completion.ts`、`src/renderer/src/App.tsx`、`src/main/services/DatabaseSession.ts`、`src/main/services/ConnectionManager.ts`、`src/main/services/mysql/MysqlSession.ts`、`src/main/services/mariadb/MariaSession.ts`、`src/shared/ipc-contract.ts`、`src/renderer/src/types.ts`、`scripts/test-sql-completion.mjs`、`prd/FEATURE_MATRIX.md`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`test:sql-completion`、`test:settings`、`npm run build`、`e2e:sqlite` 通过；MySQL/MariaDB 的 `lower_case_table_names` 读取只做代码走查，未连真实实例验证。遗留：补全弹层仍需真实 Electron 人工逐项验收。
+
+- **W-20261116-01 修复补全弹层“闪一下就消失”**：诉求是输入时自动弹出的补全候选一出现就立刻消失。原因是 W-20261113-02 在 `onSelect` 里无条件关闭补全并作废异步请求，而浏览器（含 Chromium/Electron）每输入一个字符都会补发 `select`（`selectionchange`）事件，弹层刚渲染就被这条事件关掉；异步候选场景下该事件还会在 `await` 期间作废请求。变更：`SqlEditor` 新增 `lastInputCaret`，`onChange` 记录输入后的光标位置，`onSelect` 只在“光标位置与最近一次输入不一致或存在选区”时才关闭弹层/作废请求，输入引起的 select 回声只更新括号匹配、签名与选区上报；左右方向键关闭补全时同步作废未完成的异步请求，避免请求晚到后在旧替换区间重新弹层。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run test:sql-completion`、`npm run build` 通过；未在真实 Electron 中手动输入观察弹层（按用户要求不启动自动化窗口），待人工确认。
 
 ---
 

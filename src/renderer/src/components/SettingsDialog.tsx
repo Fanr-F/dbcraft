@@ -50,6 +50,9 @@ export function SettingsDialog({
   const [editorTabSize, setEditorTabSize] = useState(settings.editorTabSize);
   const [sqlKeywordCase, setSqlKeywordCase] = useState(settings.sqlKeywordCase);
   const [completionEnabled, setCompletionEnabled] = useState(settings.completionEnabled);
+  const [completionAutoTrigger, setCompletionAutoTrigger] = useState(
+    settings.completionAutoTrigger,
+  );
   const [completionDelayMs, setCompletionDelayMs] = useState(settings.completionDelayMs);
   const [historyRetention, setHistoryRetention] = useState(settings.historyRetention);
   const [queryTimeoutMs, setQueryTimeoutMs] = useState(settings.queryTimeoutMs);
@@ -182,6 +185,7 @@ export function SettingsDialog({
     setEditorTabSize(DEFAULT_APP_SETTINGS.editorTabSize);
     setSqlKeywordCase(DEFAULT_APP_SETTINGS.sqlKeywordCase);
     setCompletionEnabled(DEFAULT_APP_SETTINGS.completionEnabled);
+    setCompletionAutoTrigger(DEFAULT_APP_SETTINGS.completionAutoTrigger);
     setCompletionDelayMs(DEFAULT_APP_SETTINGS.completionDelayMs);
     setHistoryRetention(DEFAULT_APP_SETTINGS.historyRetention);
     setQueryTimeoutMs(DEFAULT_APP_SETTINGS.queryTimeoutMs);
@@ -266,6 +270,7 @@ export function SettingsDialog({
         editorTabSize,
         sqlKeywordCase,
         completionEnabled,
+        completionAutoTrigger,
         completionDelayMs,
         historyRetention,
         queryTimeoutMs,
@@ -392,11 +397,20 @@ export function SettingsDialog({
               onChange={(event) => setCompletionEnabled(event.target.checked)}
             />
           </label>
+          <label className="field field-check">
+            <span>输入时自动弹出补全</span>
+            <input
+              type="checkbox"
+              checked={completionAutoTrigger}
+              disabled={!completionEnabled}
+              onChange={(event) => setCompletionAutoTrigger(event.target.checked)}
+            />
+          </label>
           <label className="field">
             <span>自动补全延迟</span>
             <select
               value={completionDelayMs}
-              disabled={!completionEnabled}
+              disabled={!completionEnabled || !completionAutoTrigger}
               onChange={(event) => setCompletionDelayMs(Number(event.target.value))}
             >
               {COMPLETION_DELAY_OPTIONS.map((option) => (
@@ -691,6 +705,7 @@ export function SettingsDialog({
                 editorTabSize === settings.editorTabSize &&
                 sqlKeywordCase === settings.sqlKeywordCase &&
                 completionEnabled === settings.completionEnabled &&
+                completionAutoTrigger === settings.completionAutoTrigger &&
                 completionDelayMs === settings.completionDelayMs &&
                 historyRetention === settings.historyRetention &&
                 queryTimeoutMs === settings.queryTimeoutMs &&

@@ -59,6 +59,7 @@ export class MariaSession implements DatabaseSession {
   readonly dialect = 'mariadb' as const;
   readonly label = 'MariaDB';
   readonly serverVersion: string;
+  readonly lowerCaseTableNames?: 0 | 1 | 2;
   readonly note?: string;
   readonly alive = true;
   readonly cancelDisconnects = false;
@@ -70,9 +71,11 @@ export class MariaSession implements DatabaseSession {
     private readonly threadId: number | null,
     version: string,
     note?: string,
+    lowerCaseTableNames?: 0 | 1 | 2,
   ) {
     this.serverVersion = version;
     this.note = note;
+    this.lowerCaseTableNames = lowerCaseTableNames;
   }
 
   static async create(
@@ -112,8 +115,14 @@ export class MariaSession implements DatabaseSession {
     }
 
     const rows = (await connection.query(
-      'SELECT VERSION() AS version, @@version_comment AS comment',
-    )) as Array<{ version: string; comment: string }>;
+      'SELECT VERSION() AS version, @@version_comment AS comment, @@lower_case_table_names AS lowerCaseTableNames',
+    )) as Array<{ version: string; comment: string; lowerCaseTableNames?: number }>;
+    const lowerCaseTableNames =
+      rows[0]?.lowerCaseTableNames === 0 ||
+      rows[0]?.lowerCaseTableNames === 1 ||
+      rows[0]?.lowerCaseTableNames === 2
+        ? (rows[0].lowerCaseTableNames as 0 | 1 | 2)
+        : undefined;
 
     return new MariaSession(
       connection,
@@ -121,6 +130,7 @@ export class MariaSession implements DatabaseSession {
       connection.threadId,
       rows[0]?.version ?? 'unknown',
       note,
+      lowerCaseTableNames,
     );
   }
 

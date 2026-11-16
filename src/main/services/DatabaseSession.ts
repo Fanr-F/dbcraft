@@ -16,6 +16,8 @@ export interface DatabaseSession {
   readonly label: string;
   readonly isReadOnly: boolean;
   readonly serverVersion: string;
+  /** MySQL 系 `lower_case_table_names`；用于补全插入大小写，其他驱动不设置。 */
+  readonly lowerCaseTableNames?: 0 | 1 | 2;
   readonly note?: string;
   /** 取消查询后会话是否失效（SQLite Worker 只能终止）。 */
   readonly cancelDisconnects: boolean;
