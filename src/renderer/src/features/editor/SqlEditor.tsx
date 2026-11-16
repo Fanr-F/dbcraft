@@ -101,7 +101,14 @@ export function SqlEditor({
   const lastInputCaret = useRef<number | null>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const measureCanvas = useRef<HTMLCanvasElement | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    hasSelection: boolean;
+    canPaste: boolean;
+  } | null>(null);
+  /** 右键菜单读取剪贴板的请求序号，避免旧请求覆盖新菜单的状态。 */
+  const menuRequest = useRef(0);
   const [composing, setComposing] = useState(false);
   const [completion, setCompletion] = useState<CompletionState | null>(null);
   const [completionLoading, setCompletionLoading] = useState<CompletionPosition | null>(null);
@@ -155,6 +162,19 @@ export function SqlEditor({
   /** 上报选区文本，供工具栏“执行”决定只跑选中内容还是全文。 */
   const reportSelection = (element: HTMLTextAreaElement) => {
     onSelectionChange?.(element.value.slice(element.selectionStart, element.selectionEnd));
+  };
+
+  /** 执行选区；没有选区时执行光标所在语句，定位失败时执行全文（与 Ctrl+Enter 一致）。 */
+  const runSelectionOrStatement = (element: HTMLTextAreaElement) => {
+    const selected = element.value
+      .slice(element.selectionStart, element.selectionEnd)
+      .trim();
+    onRun(
+      selected.length > 0
+        ? selected
+        : statementAtCursor(element.value, element.selectionStart, dialect ?? undefined) ??
+            undefined,
+    );
   };
 
   /** 用 canvas 量出光标前文本宽度，让补全弹层贴着光标而不是固定在左下角。 */
@@ -381,6 +401,82 @@ export function SqlEditor({
     return false;
   };
 
+  /** 复制当前选区；复制失败时保持原样，不误删内容。 */
+  const copySelection = async () => {
+    const element = textareaRef.current;
+    if (!element) return;
+    const start = element.selectionStart;
+    const end = element.selectionEnd;
+    if (start === end) return;
+    try {
+      await navigator.clipboard.writeText(element.value.slice(start, end));
+    } catch {
+      return;
+    }
+    element.focus();
+    element.setSelectionRange(start, end);
+  };
+
+  /** 剪切当前选区：先写剪贴板，成功后再改文本，避免复制失败却删掉内容。 */
+  const cutSelection = async () => {
+    const element = textareaRef.current;
+    if (!element) return;
+    const start = element.selectionStart;
+    const end = element.selectionEnd;
+    if (start === end) return;
+    try {
+      await navigator.clipboard.writeText(element.value.slice(start, end));
+    } catch {
+      return;
+    }
+    const next = `${element.value.slice(0, start)}${element.value.slice(end)}`;
+    completionRequest.current += 1;
+    clearCompletionTimer();
+    setCompletion(null);
+    setCompletionLoading(null);
+    lastInputCaret.current = start;
+    onChange(next);
+    requestAnimationFrame(() => {
+      element.focus();
+      element.setSelectionRange(start, start);
+      updateBracketMatch(element);
+      updateSignatureHelp(element);
+      updateCursorLine(element);
+      reportSelection(element);
+    });
+  };
+
+  /** 粘贴剪贴板文本到光标/选区处。 */
+  const pasteFromClipboard = async () => {
+    const element = textareaRef.current;
+    if (!element) return;
+    let text = '';
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return;
+    }
+    if (!text) return;
+    const start = element.selectionStart;
+    const end = element.selectionEnd;
+    const next = `${element.value.slice(0, start)}${text}${element.value.slice(end)}`;
+    const cursor = start + text.length;
+    completionRequest.current += 1;
+    clearCompletionTimer();
+    setCompletion(null);
+    setCompletionLoading(null);
+    lastInputCaret.current = cursor;
+    onChange(next);
+    requestAnimationFrame(() => {
+      element.focus();
+      element.setSelectionRange(cursor, cursor);
+      updateBracketMatch(element);
+      updateSignatureHelp(element);
+      updateCursorLine(element);
+      reportSelection(element);
+    });
+  };
+
   return (
     <div
       className={`sql-editor-wrap ${composing ? 'is-composing' : ''}`}
@@ -503,7 +599,28 @@ export function SqlEditor({
         }}
         onContextMenu={(event) => {
           event.preventDefault();
-          setMenu({ x: event.clientX, y: event.clientY });
+          const element = event.currentTarget;
+          const hasSelection = element.selectionStart !== element.selectionEnd;
+          const x = event.clientX;
+          const y = event.clientY;
+          // 打开菜单前读取剪贴板，决定「粘贴」是否可用；读取失败时保守地保持可用。
+          completionRequest.current += 1;
+          setCompletion(null);
+          setCompletionLoading(null);
+          const request = menuRequest.current + 1;
+          menuRequest.current = request;
+          const openMenu = (canPaste: boolean) => {
+            if (menuRequest.current !== request) return;
+            setMenu({ x, y, hasSelection, canPaste });
+          };
+          if (!navigator.clipboard?.readText) {
+            openMenu(true);
+            return;
+          }
+          void navigator.clipboard.readText().then(
+            (text) => openMenu(text.length > 0),
+            () => openMenu(true),
+          );
         }}
         onKeyDown={(event) => {
           if (matchesShortcut(event, shortcuts.complete)) {
@@ -558,15 +675,7 @@ export function SqlEditor({
 
           if (matchesShortcut(event, shortcuts.run)) {
             event.preventDefault();
-            const target = event.currentTarget;
-            const selected = target.value
-              .slice(target.selectionStart, target.selectionEnd)
-              .trim();
-            onRun(
-              selected.length > 0
-                ? selected
-                : statementAtCursor(target.value, target.selectionStart, dialect ?? undefined) ?? undefined,
-            );
+            runSelectionOrStatement(event.currentTarget);
           } else if (matchesShortcut(event, shortcuts.save)) {
             event.preventDefault();
             onSave?.();
@@ -642,17 +751,42 @@ export function SqlEditor({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          onClose={() => setMenu(null)}
+          onClose={() => {
+            menuRequest.current += 1;
+            setMenu(null);
+          }}
           items={[
             {
-              label: '从历史插入',
-              disabled: !onOpenHistory,
-              onSelect: () => onOpenHistory?.(),
+              label: '执行 SQL',
+              onSelect: () => {
+                const element = textareaRef.current;
+                if (element) runSelectionOrStatement(element);
+              },
             },
             {
               label: '格式化 SQL',
               disabled: !onFormat,
               onSelect: () => onFormat?.(),
+            },
+            {
+              label: '复制',
+              disabled: !menu.hasSelection,
+              onSelect: () => void copySelection(),
+            },
+            {
+              label: '剪切',
+              disabled: !menu.hasSelection,
+              onSelect: () => void cutSelection(),
+            },
+            {
+              label: '粘贴',
+              disabled: !menu.canPaste,
+              onSelect: () => void pasteFromClipboard(),
+            },
+            {
+              label: '从历史插入',
+              disabled: !onOpenHistory,
+              onSelect: () => onOpenHistory?.(),
             },
           ]}
         />
