@@ -6,6 +6,9 @@
   "author": "fanzhouqi",
   "license": "MIT",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "electron-vite dev",
     "preview": "electron-vite preview",
@@ -30,6 +33,8 @@
     "test:sql-highlight": "node --no-warnings --experimental-strip-types scripts/test-sql-highlight.mjs",
     "test:sql-format": "node --no-warnings --experimental-strip-types scripts/test-sql-format.mjs",
     "test:sql-completion": "node --no-warnings --experimental-strip-types scripts/test-sql-completion.mjs",
+    "test:completion-core": "npm --workspace @dbcraft/sql-completion test",
+    "typecheck:completion": "npm --workspace @dbcraft/sql-completion run typecheck",
     "test:metadata": "node --no-warnings --experimental-strip-types scripts/test-metadata-store.mjs",
     "test:sql-brackets": "node --no-warnings --experimental-strip-types scripts/test-sql-brackets.mjs",
     "test:sql-mask": "node --no-warnings --experimental-strip-types scripts/test-sql-mask.mjs",
@@ -49,6 +54,7 @@
     "dist": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
+    "@dbcraft/sql-completion": "workspace:*",
     "@codemirror/autocomplete": "^6.20.4",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-sql": "^6.10.0",

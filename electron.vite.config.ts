@@ -28,6 +28,7 @@ export default defineConfig({
       alias: {
         ...sharedAlias,
         '@renderer': resolve('src/renderer/src'),
+        '@dbcraft/sql-completion': resolve('packages/sql-completion/src/index.ts'),
       },
     },
     // Stencil 组件（RevoGrid）自带懒加载入口；交给 Vite 预打包会拆错运行时，

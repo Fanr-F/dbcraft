@@ -13,7 +13,7 @@
 
 | 能力 | 现状 |
 |---|---|
-| 编辑器内核 | CodeMirror 6 + `@codemirror/lang-sql`，补全源在 `utils/sql-completion.ts` |
+| 编辑器内核 | CodeMirror 6 + `@codemirror/lang-sql`；补全内核在 `packages/sql-completion`，`utils/sql-completion.ts` 只注入 AST 分析器 |
 | 语句分析 | `utils/sql-analysis.ts`：`node-sql-parser` 按方言懒加载 chunk，解析表/别名/CTE；失败回退扫描 |
 | 排序 | 严格前缀 + 匹配层级 + 类型权重 + 子句/qualifier/所属表权重 + `boost` + 去重 |
 | 元数据 | `utils/metadata-store.ts`：用户/系统分区、Promise 合并、错误退避、generation 失效、LRU、AST 预取 |
@@ -21,7 +21,7 @@
 | 对象 | MSSQL 系统视图/DMV/DMF（`function`）、扩展存储过程（`extended`）、DBCC 子命令/`WITH` 选项 |
 | 其他 | 自动别名开关、通配符「展开为 N 列」、大小写跟随、DBCC、CTE/派生表列 |
 
-验证命令：`npm run test:sql-completion`、`npm run test:metadata`、`npm run test:settings`、`npm run typecheck`、`npm run build`；MSSQL 真实实例用 `npm run check:mssql`。
+验证命令：`npm run test:sql-completion`、`npm run test:completion-core`、`npm run typecheck:completion`、`npm run test:metadata`、`npm run test:settings`、`npm run typecheck`、`npm run build`；MSSQL 真实实例用 `npm run check:mssql`。
 
 ## 3. SQL Prompt 对照
 
