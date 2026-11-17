@@ -886,7 +886,8 @@ export default function App() {
       functions: functionCompletions(dialect),
       objects: userSchema.map((object) => ({
         name: object.name,
-        kind: object.type,
+        // 表值函数/DMF 在补全里按视图参与 FROM/JOIN；对象树暂不展示。
+        kind: object.type === 'function' ? ('view' as const) : object.type,
         schema: object.schema,
       })),
       schemas: schemaNames,
@@ -952,12 +953,13 @@ export default function App() {
     const objectCandidates = (objects: SchemaObject[]): CompletionCandidate[] =>
       objects.map((object) => {
         const system = isSystemSchemaObject(dialect, object);
+        const kind = object.type === 'function' ? ('view' as const) : object.type;
         return {
           label: object.name,
-          kind: object.type,
+          kind,
           insertText: quoteObjectName(object.name),
           // 系统对象仍然可用，但排在用户对象之后（例如 EXEC 时先给用户存储过程）。
-          priority: completionKindPriority(object.type) + (system ? 10 : 0),
+          priority: completionKindPriority(kind) + (system ? 10 : 0),
           boost: system ? -20 : 0,
           schema: object.schema,
         };
@@ -4534,6 +4536,8 @@ export default function App() {
     let failed = 0;
 
     for (const object of schema.objects) {
+      // 表值函数/DMF 与扩展存储过程没有可导出的 SQL 定义，跳过避免生成错误 DDL。
+      if (object.type === 'function' || object.extended) continue;
       const result = await api.ddl.get(activeTab.id, object.name, object.type);
       if (result.ok) {
         parts.push(

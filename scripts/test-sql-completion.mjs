@@ -598,6 +598,66 @@ assert(
   `AST inferred CTE columns wrong: ${JSON.stringify(astInferredCte)}`,
 );
 
+// DBCC 子命令：只提示命令，不在命令后重复提示。
+const emptyGroups = {
+  keywords: [],
+  functions: [],
+  objects: [],
+  databases: [],
+  schemas: [],
+};
+const dbccCtx = extractCompletionContext('DBCC ', 5);
+assert(dbccCtx.clause === 'dbcc', `DBCC clause wrong: ${dbccCtx.clause}`);
+const dbccCandidates = completionCandidatesForContext(dbccCtx, emptyGroups);
+assert(
+  dbccCandidates.some((item) => item.label === 'CHECKDB') &&
+    dbccCandidates.some((item) => item.label === 'SHOW_STATISTICS'),
+  `DBCC commands missing: ${dbccCandidates.map((item) => item.label)}`,
+);
+const dbccPartial = extractCompletionContext('DBCC CHECK', 10);
+assert(
+  dbccPartial.clause === 'dbcc' && dbccPartial.needle === 'CHECK',
+  `DBCC partial context wrong: ${dbccPartial.clause}/${dbccPartial.needle}`,
+);
+const dbccRanked = rankCompletions(dbccCandidates, 'CHECKDB', {
+  context: dbccPartial,
+});
+assert(dbccRanked[0]?.label === 'CHECKDB', `DBCC exact match wrong: ${dbccRanked.map((i) => i.label)}`);
+assert(shouldOpenCompletionOnInput('DBCC ', 5), 'DBCC space should auto-open completion');
+const dbccCommandText = 'DBCC CHECKDB ';
+assert(
+  extractCompletionContext(dbccCommandText, dbccCommandText.length).clause !== 'dbcc',
+  'DBCC command with trailing space should not re-open command list',
+);
+const dbccWithText = 'DBCC CHECKDB WITH ';
+const dbccWithCtx = extractCompletionContext(dbccWithText, dbccWithText.length);
+assert(dbccWithCtx.clause === 'dbcc-with', `DBCC WITH clause wrong: ${dbccWithCtx.clause}`);
+const dbccOptions = completionCandidatesForContext(dbccWithCtx, emptyGroups);
+assert(
+  dbccOptions.some((item) => item.label === 'NO_INFOMSGS') &&
+    !dbccOptions.some((item) => item.label === 'REPAIR_ALLOW_DATA_LOSS'),
+  `DBCC options wrong: ${dbccOptions.map((item) => item.label)}`,
+);
+assert(
+  shouldOpenCompletionOnInput(dbccWithText, dbccWithText.length),
+  'DBCC WITH should auto-open option completion',
+);
+
+// EXEC sys. 的系统存储过程候选（基础数据来自对象列表）。
+const execCtx = extractCompletionContext('EXEC ', 5);
+const execGroups = {
+  ...emptyGroups,
+  objects: [
+    { name: 'sys.sp_who', kind: 'procedure', schema: 'sys' },
+    { name: 'dbo.user_proc', kind: 'procedure', schema: 'dbo' },
+  ],
+};
+const execCandidates = completionCandidatesForContext(execCtx, execGroups);
+assert(
+  execCandidates.some((item) => item.label === 'sys.sp_who'),
+  `sys procedure should be a candidate: ${execCandidates.map((i) => i.label)}`,
+);
+
 // 版本感知：方言关键字与特性开关。
 assert(keywordCompletions('mssql', '16.0').includes('TOP'), 'mssql should suggest TOP');
 assert(

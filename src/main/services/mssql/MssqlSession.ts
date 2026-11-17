@@ -315,7 +315,7 @@ export class MssqlSession implements DatabaseSession {
       `SELECT s.name AS schema_name, o.name, o.type
        FROM ${prefix}sys.all_objects o
        JOIN ${prefix}sys.schemas s ON s.schema_id = o.schema_id
-       WHERE o.type IN ('U', 'V', 'P', 'PC')
+       WHERE o.type IN ('U', 'V', 'P', 'PC', 'X', 'IF', 'TF', 'FT')
          ${options.includeSystemObjects ? '' : 'AND o.is_ms_shipped = 0'}
        ORDER BY s.name, o.name`,
     );
@@ -324,10 +324,22 @@ export class MssqlSession implements DatabaseSession {
       // sys.objects.type 是 char(2)，会带尾部空格。
       const type = asString(row[2]?.value).trim();
       const schema = asString(row[0]?.value);
+      // IF/TF/FT 是表值函数（含 sys.dm_exec_sql_text 等 DMF）；补全按关系处理，
+      // 对象树暂不展示（SchemaObject.type='function'）。
+      // X 是扩展存储过程（如 sp_executesql），按 procedure 返回并标记 extended。
+      const kind =
+        type === 'V'
+          ? ('view' as const)
+          : type === 'U'
+            ? ('table' as const)
+            : type === 'IF' || type === 'TF' || type === 'FT'
+              ? ('function' as const)
+              : ('procedure' as const);
       return {
         name: qualifiedName(schema, asString(row[1]?.value)),
-        type: type === 'V' ? ('view' as const) : type === 'U' ? ('table' as const) : ('procedure' as const),
+        type: kind,
         schema,
+        ...(type === 'X' ? { extended: true } : {}),
       };
     });
   }
@@ -411,6 +423,9 @@ export class MssqlSession implements DatabaseSession {
   async getDdl(name: string, kind: DdlObjectKind): Promise<string> {
     const object = await this.objectInfo(name);
     if (!object) throw new Error(`对象「${name}」不存在。`);
+    if (object.type === 'X') {
+      throw new Error(`「${name}」是扩展存储过程，没有 SQL 定义。`);
+    }
 
     if (object.type === 'V' || object.type === 'P') {
       const definition = await this.run(
@@ -654,8 +669,9 @@ export class MssqlSession implements DatabaseSession {
 
   private async objectInfo(name: string): Promise<ObjectInfo | null> {
     const result = await this.run(
+      // sys.objects 不包含 sys schema 下的系统对象；补全/详情需要 sys.all_objects。
       `SELECT s.name AS schema_name, o.name, o.type
-       FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id
+       FROM sys.all_objects o JOIN sys.schemas s ON s.schema_id = o.schema_id
        WHERE o.object_id = OBJECT_ID(@p1)`,
       [name],
     );
@@ -680,7 +696,7 @@ export class MssqlSession implements DatabaseSession {
               dc.name AS default_constraint_name,
               CASE WHEN ty.name IN ('timestamp', 'rowversion') THEN 1 ELSE 0 END AS is_rowversion,
               ident.seed_value, ident.increment_value
-       FROM sys.columns c
+       FROM sys.all_columns c
        JOIN sys.types ty ON ty.user_type_id = c.user_type_id
        LEFT JOIN sys.computed_columns cc
          ON cc.object_id = c.object_id AND cc.column_id = c.column_id

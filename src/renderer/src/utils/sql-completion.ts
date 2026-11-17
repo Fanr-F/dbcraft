@@ -180,6 +180,7 @@ export function completionKindPriority(kind: CompletionKind): number {
 /**
  * 根据光标所在子句给出基础候选：
  * - `FROM/JOIN/...` → 表/视图 + 库/Schema；`EXEC` → 存储过程；`USE` → 数据库；
+ * - `DBCC` 后 → DBCC 子命令；`DBCC ... WITH` 后 → 常用选项；
  * - 其他位置 → 关键字 + 函数；
  * - 带限定符或通配符时基础候选为空，由对象查询补充列/库对象。
  */
@@ -190,6 +191,15 @@ export function completionCandidatesForContext(
   // INSERT 列清单里只应出现该表的列（由异步元数据补充），不要混入表名/关键字。
   if (context.insertColumnList) return [];
   if (context.qualifier || context.wildcard) return [];
+  if (context.clause === 'dbcc' || context.clause === 'dbcc-with') {
+    const labels = context.clause === 'dbcc' ? DBCC_COMMANDS : DBCC_OPTIONS;
+    return labels.map((label) => ({
+      label,
+      kind: 'keyword' as const,
+      priority: completionKindPriority('keyword'),
+      boost: 20,
+    }));
+  }
   const kinds = relationKindsForClause(context.clause);
   if (context.clause === 'use') {
     return groups.databases.map((label) => ({
@@ -948,6 +958,78 @@ const COMMON_KEYWORDS = new Set([
   'PARTITION',
 ]);
 
+/**
+ * DBCC 子命令是 T-SQL 命令而不是目录对象，sys.all_objects 里查不到，
+ * 需要单独维护词表；只用于 `DBCC <光标>` 的第一段补全。
+ */
+export const DBCC_COMMANDS = [
+  'CHECKALLOC',
+  'CHECKCATALOG',
+  'CHECKCONSTRAINTS',
+  'CHECKDB',
+  'CHECKFILEGROUP',
+  'CHECKIDENT',
+  'CHECKPRIMARYFILE',
+  'CHECKSTORAGE',
+  'CHECKTABLE',
+  'CLEANTABLE',
+  'CLONEDATABASE',
+  'DBINFO',
+  'DBREINDEX',
+  'DBREPAIR',
+  'DROPCLEANBUFFERS',
+  'FLUSHAUTHCACHE',
+  'FLUSHPROCINDB',
+  'FREEPROCCACHE',
+  'FREESESSIONCACHE',
+  'FREESYSTEMCACHE',
+  'FREETABLECACHE',
+  'HELP',
+  'IND',
+  'INDEXDEFRAG',
+  'INPUTBUFFER',
+  'LOGINFO',
+  'OPENTRAN',
+  'OUTPUTBUFFER',
+  'PAGE',
+  'PINTABLE',
+  'PROCCACHE',
+  'REINDEX',
+  'SHOWCONTIG',
+  'SHOWSTATISTICS',
+  'SHOW_STATISTICS',
+  'SHRINKDATABASE',
+  'SHRINKFILE',
+  'SQLPERF',
+  'TRACEOFF',
+  'TRACEON',
+  'TRACESTATUS',
+  'UNPINTABLE',
+  'UPDATEUSAGE',
+  'USEROPTIONS',
+  'WRITETRACEFILE',
+] as const;
+
+/**
+ * DBCC ... WITH 的常用选项。故意不包含 REPAIR_ALLOW_DATA_LOSS 等破坏性选项，
+ * 避免补全鼓励直接修库。
+ */
+export const DBCC_OPTIONS = [
+  'ALL_ERRORMSGS',
+  'DATA_PURITY',
+  'ESTIMATEONLY',
+  'EXTENDED_LOGICAL_CHECKS',
+  'HISTOGRAM',
+  'MAXDOP',
+  'NO_INFOMSGS',
+  'NOINDEX',
+  'PHYSICAL_ONLY',
+  'STAT_IO',
+  'STAT_TIME',
+  'TABLERESULT',
+  'TABLERESULTS',
+] as const;
+
 const KEYWORDS = new Set([
   'select',
   'from',
@@ -1359,6 +1441,14 @@ export function extractCompletionContext(
   const analyzed = dialect ? analyzeStatement(statement, dialect) : null;
   const tables =
     analyzed && analyzed.tables.length > 0 ? analyzed.tables : parseTables(maskedStatement);
+  // DBCC 子命令只在「DBCC + 空白」或「DBCC + 正在输入的第一个词」时提示；
+  // 子命令后已有空格/参数时不再重复给命令列表。
+  const dbccContext =
+    /\bDBCC\s*$/i.test(maskedBefore) ||
+    /\bDBCC\s+[A-Za-z_][\w$]*$/i.test(maskedBefore);
+  const dbccWithContext =
+    /\bDBCC\s+[A-Za-z_][\w$]*\s+WITH\s*$/i.test(maskedBefore) ||
+    /\bDBCC\s+[A-Za-z_][\w$]*\s+WITH\s+[A-Za-z_][\w$]*$/i.test(maskedBefore);
 
   return {
     prefix,
@@ -1370,7 +1460,11 @@ export function extractCompletionContext(
     statement,
     statementStart: scan.statementStart,
     tables,
-    clause: clauseAt(maskedBefore),
+    clause: dbccContext
+      ? 'dbcc'
+      : dbccWithContext
+        ? 'dbcc-with'
+        : clauseAt(maskedBefore),
     wildcard: star !== null,
     inLiteral,
     depth: scan.depth,
@@ -1844,7 +1938,9 @@ export function shouldAutoTriggerCompletion(text: string, cursor: number): boole
   const before = text.slice(0, Math.max(0, Math.min(cursor, text.length)));
   // JOIN ... ON 需要列补全；CREATE INDEX ... ON 需要表补全，所以 ON 只在 JOIN 语句里自动触发。
   if (/\bON\s+$/i.test(before) && /\bJOIN\b/i.test(before)) return true;
-  return /(?:^|[^\w])(SELECT|DISTINCT|FROM|JOIN|INTO|UPDATE|TABLE|VIEW|EXEC|EXECUTE|USE|SET|WHERE|HAVING|ORDER\s+BY|GROUP\s+BY)\s+$/i.test(
+  // DBCC ... WITH 后给常用选项。
+  if (/\bDBCC\b[\s\S]*\bWITH\s+$/i.test(before)) return true;
+  return /(?:^|[^\w])(SELECT|DISTINCT|FROM|JOIN|INTO|UPDATE|TABLE|VIEW|EXEC|EXECUTE|USE|SET|WHERE|HAVING|ORDER\s+BY|GROUP\s+BY|DBCC)\s+$/i.test(
     before,
   );
 }

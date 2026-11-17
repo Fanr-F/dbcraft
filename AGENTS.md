@@ -71,6 +71,9 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   解析失败或解析器尚未加载时回退 `extractCompletionContext` 的扫描实现，不要让补全依赖解析成功。
   补全元数据缓存统一走 `utils/metadata-store.ts`：用户/系统分区、loading Promise 合并、错误退避、
   generation 失效；不要在 `App.tsx` 里重新建列/对象/外键缓存。系统分区懒加载，DDL 只失效用户分区。
+  DBCC 子命令/`WITH` 选项是 T-SQL 命令而不是目录对象，词表在 `sql-completion.ts` 的
+  `DBCC_COMMANDS` / `DBCC_OPTIONS`；`DBCC ` 与 `DBCC ... WITH ` 分别标记为 `dbcc` / `dbcc-with`，
+  不要试图从 `sys.all_objects` 查 DBCC。
   方言关键字从 `@codemirror/lang-sql` 的 dialect spec 合并，不要再维护一份不完整的 T-SQL 关键字表；
   MSSQL `sys.`/`dbo.` 的候选来自 `sys.all_objects`（系统对象开关只影响对象树展示，补全需要完整词表）；
   常规 FROM/JOIN 只加载用户对象，系统对象通过 `sys.`/`INFORMATION_SCHEMA.` 或 EXEC 进入，避免数千个系统对象淹没用户表。
@@ -87,6 +90,12 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   `datetimeoffset` 由驱动归一化为时间点（原始偏移丢失），`decimal` 超过 15 位有效数字会丢精度，
   `datetime2` 只保留到毫秒——这些是驱动限制，不要假装已完全保真。
   MSSQL 的 `sys.objects.type` 是 `char(2)`，读取后必须 trim。
+  MSSQL 元数据读取（`objectInfo` / `columnInfo`）必须走 `sys.all_objects` / `sys.all_columns`：
+  `sys.objects` / `sys.columns` 不包含 `sys` schema 下的系统视图，否则 `sys.objects.`、`sys.databases` 和 DMV 补全拿不到列。
+  `schema()` 同时收录表值函数/DMF（`IF`/`TF`/`FT` → `SchemaObject.type='function'`）；
+  补全按视图参与 FROM/JOIN，对象树暂不展示（不要把它们塞进 `table`/`view` 类型）。
+  `X`（扩展存储过程，如 `sys.sp_executesql`）按 `procedure` 返回并标记 `extended: true`；
+  扩展存储过程没有 SQL 定义，`getDdl` 和 DDL 导出必须跳过，不能生成伪造的 CREATE TABLE。
 - MSSQL 命名实例：`instanceName` 与 `port` 互斥；命名实例走 SQL Browser（UDP 1434），
   `normalizeMssqlAddress`（`shared/mssql-address.ts`）负责 `host\instance` / `host:port` 归一化。
   联调脚本可用 `DBCRAFT_MSSQL_INSTANCE=MSSQLSERVER` 覆盖；默认实例路径已于 2016 SP2 真机回归。

@@ -278,7 +278,10 @@ export interface HistoryListOptions {
 export interface SchemaObject {
   /** 后端使用的对象名；MSSQL 为 `schema.table`。 */
   name: string;
-  type: 'table' | 'view' | 'procedure';
+  /** `function` 目前仅 MSSQL 的表值函数/DMF 使用；对象树暂不展示。 */
+  type: 'table' | 'view' | 'procedure' | 'function';
+  /** MSSQL 扩展存储过程（sys.all_objects.type='X'，例如 sp_executesql）；没有 SQL 定义。 */
+  extended?: boolean;
   /** MSSQL 的对象 schema；其他方言为空。 */
   schema?: string;
 }

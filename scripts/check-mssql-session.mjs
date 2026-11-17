@@ -101,6 +101,43 @@ try {
   assert(meta.columns.find((c) => c.name === 'amount')?.declaredType === 'decimal(18,2)', 'declared type wrong');
   console.log('[表元数据] columns=', meta.columns.map((c) => c.name).join(','));
 
+  // 系统视图/DMV/DMF 不在 sys.objects/sys.columns 里，元数据必须走
+  // sys.all_objects/sys.all_columns，否则补全拿不到列。
+  for (const systemView of [
+    'sys.objects',
+    'sys.databases',
+    'sys.dm_exec_sessions',
+    'sys.dm_exec_requests',
+    'sys.dm_exec_sql_text',
+    'sys.dm_exec_query_plan',
+  ]) {
+    const systemMeta = await session.getTableMeta(systemView, 'table');
+    assert(systemMeta.columns.length > 0, `${systemView} should expose columns`);
+    console.log(`[系统视图] ${systemView} columns=`, systemMeta.columns.length);
+  }
+  const systemSchema = await session.schema({ includeSystemObjects: true });
+  assert(
+    systemSchema.some((object) => object.name === 'sys.dm_exec_sessions' && object.type === 'view'),
+    'sys.dm_exec_sessions should be listed as a view',
+  );
+  assert(
+    systemSchema.some((object) => object.name === 'sys.dm_exec_sql_text' && object.type === 'function'),
+    'sys.dm_exec_sql_text should be listed as a function',
+  );
+  assert(
+    systemSchema.some((object) => object.name === 'sys.sp_who' && object.type === 'procedure'),
+    'sys.sp_who should be listed as a procedure',
+  );
+  assert(
+    systemSchema.some(
+      (object) =>
+        object.name === 'sys.sp_executesql' &&
+        object.type === 'procedure' &&
+        object.extended === true,
+    ),
+    'sys.sp_executesql should be listed as an extended procedure',
+  );
+
   const detail = await session.getTableDetail('dbo.dbcraft_check');
   assert(detail.comment === null, 'comment should be null');
   assert(detail.indexes.length === 0, 'only PK index expected');
