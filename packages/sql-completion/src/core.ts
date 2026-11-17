@@ -1532,6 +1532,9 @@ export function rankCompletions(
   const limit = options.limit ?? 50;
   const rankContext = describeRankContext(options.context);
   const ranked: RankedCompletion[] = [];
+  // 限定符补全时允许单段命中文档中的某个词段：`sys.sql` → `dm_exec_sql_text`。
+  // 非限定符输入仍保持严格前缀，避免 `se` → `user_sessions` 的噪音。
+  const allowSegmentSingle = Boolean(options.context?.qualifier);
 
   for (const candidate of candidates) {
     const label = candidate.label.trim();
@@ -1546,9 +1549,13 @@ export function rankCompletions(
     } else if (lower.startsWith(query)) {
       matches = Array.from({ length: query.length }, (_, index) => index);
     } else {
+      // 词段匹配优先：贪心子序列可能为了命中后面的词首而跳过当前词段
+      // （`file` 在 `host_summary_by_file_io` 里会先命中 `io` 的 `i`，导致 `l` 失败）。
+      const segmentMatches = matchSegmentIndices(lower, query, allowSegmentSingle);
       const subsequence = matchSubsequence(lower, query);
-      if (!subsequence) continue;
-      matches = subsequence;
+      const found = segmentMatches ?? subsequence;
+      if (!found) continue;
+      matches = found;
     }
 
     ranked.push({
@@ -1560,9 +1567,6 @@ export function rankCompletions(
 
   const priorityOf = (item: RankedCompletion) =>
     item.priority ?? completionKindPriority(item.kind);
-  // 限定符补全时允许单段命中文档中的某个词段：`sys.sql` → `dm_exec_sql_text`。
-  // 非限定符输入仍保持严格前缀，避免 `se` → `user_sessions` 的噪音。
-  const allowSegmentSingle = Boolean(options.context?.qualifier);
   const scored = ranked.map((item) => {
     const tier = matchTier(item, query);
     // 多段前缀：`dm_sql` 命中 `dm_exec_sql_text` 的 `dm` + `sql` 两段。
@@ -1906,23 +1910,31 @@ export function excludeReferencedTables(
  * - 单段输入默认不启用（保持严格前缀）；只有限定符补全传入
  *   `allowSingleSegment` 时才允许，例如 `sys.sql` 命中 `dm_exec_sql_text`。
  */
-function matchSegmentPrefix(
+function matchSegmentIndices(
   value: string,
   query: string,
   allowSingleSegment = false,
-): boolean {
+): number[] | null {
   const querySegments = query.split('_').filter(Boolean);
-  if (querySegments.length === 0) return false;
+  if (querySegments.length === 0) return null;
   // 单段输入默认不走段匹配（避免 `se` 命中 `user_sessions` 这类噪音）；
   // 限定符补全（`sys.`/`别名.`）下允许，例如 `sys.sql` → `dm_exec_sql_text`。
-  if (querySegments.length === 1 && !allowSingleSegment) return false;
-  const valueSegments = value.split('_');
+  if (querySegments.length === 1 && !allowSingleSegment) return null;
+
+  const valueSegments: Array<{ text: string; start: number }> = [];
+  let offset = 0;
+  for (const text of value.split('_')) {
+    valueSegments.push({ text, start: offset });
+    offset += text.length + 1;
+  }
+
+  const indices: number[] = [];
   let cursor = 0;
   for (let index = 0; index < querySegments.length; index += 1) {
     const segment = querySegments[index]!;
     let found = -1;
     for (let position = cursor; position < valueSegments.length; position += 1) {
-      if (valueSegments[position]!.startsWith(segment)) {
+      if (valueSegments[position]!.text.startsWith(segment)) {
         found = position;
         break;
       }
@@ -1932,11 +1944,23 @@ function matchSegmentPrefix(
       found < 0 ||
       (index === 0 && querySegments.length > 1 && found !== 0)
     ) {
-      return false;
+      return null;
+    }
+    const target = valueSegments[found]!;
+    for (let char = 0; char < segment.length; char += 1) {
+      indices.push(target.start + char);
     }
     cursor = found + 1;
   }
-  return true;
+  return indices;
+}
+
+function matchSegmentPrefix(
+  value: string,
+  query: string,
+  allowSingleSegment = false,
+): boolean {
+  return matchSegmentIndices(value, query, allowSingleSegment) !== null;
 }
 
 /** 贪心匹配子序列，优先命中单词开头，返回命中的字符下标；匹配失败返回 null。 */

@@ -534,6 +534,37 @@ assert(
   `unqualified single-segment should stay strict: ${plainSqlRanked.map((item) => item.label)}`,
 );
 
+// 词段命中的候选不能因为贪心子序列失败被提前丢弃：
+// `sys.file` 下 `host_summary_by_file_io` 的 `file` 段要保留，
+// 真正以 `file` 开头的候选仍排在前面。
+const sysFileText = 'SELECT * FROM sys.file';
+const sysFileCtx = extractCompletionContext(sysFileText, sysFileText.length, 'mysql');
+const sysFileRanked = rankCompletions(
+  [
+    { label: 'host_summary_by_file_io', kind: 'view' },
+    { label: 'file_summary_by_instance', kind: 'view' },
+  ],
+  'file',
+  { context: sysFileCtx },
+);
+assert(
+  JSON.stringify(sysFileRanked.map((item) => item.label)) ===
+    JSON.stringify(['file_summary_by_instance', 'host_summary_by_file_io']),
+  `segment match should survive greedy subsequence failure: ${sysFileRanked.map((item) => item.label)}`,
+);
+const plainFileRanked = rankCompletions(
+  [
+    { label: 'host_summary_by_file_io', kind: 'view' },
+    { label: 'file_summary_by_instance', kind: 'view' },
+  ],
+  'file',
+);
+assert(
+  JSON.stringify(plainFileRanked.map((item) => item.label)) ===
+    JSON.stringify(['file_summary_by_instance']),
+  `unqualified single-segment file should stay strict: ${plainFileRanked.map((item) => item.label)}`,
+);
+
 // 期望模型：FROM 只要表，WHERE 要列，JOIN ... ON 要列且是 joinOn。
 const fromExp = completionExpectation(extractCompletionContext('SELECT * FROM ', 14));
 assert(fromExp.tables && fromExp.schemas && !fromExp.columns, 'FROM expectation wrong');
