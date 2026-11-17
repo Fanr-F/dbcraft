@@ -69,7 +69,6 @@ export function StatusBar({
                 : '—'}
       </span>
       <span>{run.executedAt && !run.error ? `${scriptElapsed} ms` : ''}</span>
-      {run.truncated && <span className="status-warn">已截断</span>}
       <span className="status-sep" />
       <span>{sessionCount} 个会话</span>
 

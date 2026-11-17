@@ -506,7 +506,7 @@ export function saveAppSettings(raw: unknown): SettingsSaveResult {  try {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
       )
       .run(SETTINGS_KEY, JSON.stringify(settings));
-    log.info('应用设置已保存', { resultRowLimit: settings.resultRowLimit });
+    log.info('应用设置已保存');
     return { ok: true, settings };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };

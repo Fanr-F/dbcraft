@@ -19,6 +19,7 @@ const KEYWORDS = new Set(
    foreign references unique not null default check constraint and or in is like between exists case when
    then else end distinct union all with begin commit rollback transaction pragma explain asc desc if
    replace truncate show use database schema grant revoke cast count sum avg min max coalesce
+   exec execute print declare merge procedure function trigger cursor out inout
    current_timestamp true false autoincrement auto_increment integer text varchar int bigint decimal
    boolean date datetime timestamp blob json real numeric returning over partition`
     .split(/\s+/)

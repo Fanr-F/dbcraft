@@ -19,12 +19,9 @@ import type {
   TableMeta,
   TableTriggerInfo,
 } from '../../../shared/ipc-contract';
-import { resolveRowLimit } from '../../../shared/settings.ts';
 import { normalizeMssqlAddress } from '../../../shared/mssql-address.ts';
 import type { DatabaseSession } from '../DatabaseSession';
 import { formatMssqlCell } from './values.ts';
-
-const MAX_ROWS = 2000;
 
 interface ColumnMeta {
   colName: string;
@@ -39,14 +36,12 @@ interface RawCell {
 interface ExecResultSet {
   columns: ColumnMeta[];
   rows: RawCell[][];
-  truncated: boolean;
 }
 
 interface ExecResult {
   columns: ColumnMeta[];
   rows: RawCell[][];
   rowCount: number;
-  truncated: boolean;
   messages: QueryMessage[];
   resultSets: ExecResultSet[];
 }
@@ -143,7 +138,7 @@ function referentialAction(action: string): string {
 
 /**
  * MSSQL 会话：一个标签一个 tedious Connection（一个物理连接），不引入连接池。
- * 查询走事件式结果读取，超过 maxRows 后只丢弃后续行，避免整表进内存。
+ * 查询走事件式结果读取并保留全部行；大结果集的内存由调用方 SQL 范围控制。
  */
 export class MssqlSession implements DatabaseSession {
   readonly dialect = 'mssql' as const;
@@ -230,16 +225,28 @@ export class MssqlSession implements DatabaseSession {
   }
 
   /** 查询并维护当前请求句柄，供 cancel() 使用。 */
-  private run(sql: string, params: QueryCell[] = [], rowLimit?: number): Promise<ExecResult> {
-    return execOn(this.connection, sql, params, rowLimit, (request) => {
-      this.currentRequest = request;
-    });
+  /**
+   * tedious 的单个 Connection 同一时刻只能有一个 Request；补全会并发请求多张表的
+   * 元数据，这里用队列串行化，避免 SentClientRequest 状态下的并发错误。
+   */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  private run(sql: string, params: QueryCell[] = []): Promise<ExecResult> {
+    const execute = () =>
+      execOn(this.connection, sql, params, (request) => {
+        this.currentRequest = request;
+      });
+    const task = this.queue.then(execute, execute);
+    this.queue = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
   }
 
-  async query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult> {
+  async query(sql: string, params?: QueryCell[]): Promise<QueryResult> {
     const startedAt = Date.now();
-    const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
-    const result = await this.run(sql, params ?? [], rowLimit);
+    const result = await this.run(sql, params ?? []);
     const formatRow = (row: RawCell[]): QueryCell[] =>
       row.map((cell) => formatMssqlCell(cell.value, cell.metadata?.type?.name ?? ''));
     const resultSets = result.resultSets.map((set) => {
@@ -252,7 +259,6 @@ export class MssqlSession implements DatabaseSession {
         columns,
         rows,
         rowCount: rows.length,
-        truncated: set.truncated,
       };
     });
     const primary =
@@ -266,7 +272,6 @@ export class MssqlSession implements DatabaseSession {
         elapsedMs: Date.now() - startedAt,
         statementType: 'change',
         changes: result.rowCount,
-        truncated: false,
         ...(result.messages.length > 0 ? { messages: result.messages } : {}),
       };
     }
@@ -305,8 +310,10 @@ export class MssqlSession implements DatabaseSession {
     const database = options.database?.trim();
     const prefix = database ? `${quoteMssql(database)}.` : '';
     const result = await this.run(
+      // sys.objects 不包含 sys schema 下的系统视图/存储过程；补全 `sys.` 需要
+      // sys.all_objects。用户对象在 includeSystemObjects=false 时用 is_ms_shipped 过滤。
       `SELECT s.name AS schema_name, o.name, o.type
-       FROM ${prefix}sys.objects o
+       FROM ${prefix}sys.all_objects o
        JOIN ${prefix}sys.schemas s ON s.schema_id = o.schema_id
        WHERE o.type IN ('U', 'V', 'P', 'PC')
          ${options.includeSystemObjects ? '' : 'AND o.is_ms_shipped = 0'}
@@ -743,14 +750,12 @@ function execOn(
   connection: Connection,
   sql: string,
   params: QueryCell[] = [],
-  rowLimit?: number,
   onRequest?: (request: Request | null) => void,
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
     const resultSets: ExecResultSet[] = [];
     let currentColumns: ColumnMeta[] = [];
     let currentRows: RawCell[][] = [];
-    let currentTruncated = false;
     const messages: QueryMessage[] = [];
     let settled = false;
 
@@ -759,11 +764,9 @@ function execOn(
       resultSets.push({
         columns: currentColumns,
         rows: currentRows,
-        truncated: currentTruncated,
       });
       currentColumns = [];
       currentRows = [];
-      currentTruncated = false;
     };
 
     const onInfo = (info: { message?: string; class?: number }) => {
@@ -792,7 +795,6 @@ function execOn(
         columns: first?.columns ?? [],
         rows: first?.rows ?? [],
         rowCount: rowCount ?? first?.rows.length ?? 0,
-        truncated: resultSets.some((set) => set.truncated),
         messages,
         resultSets,
       });
@@ -804,10 +806,6 @@ function execOn(
       currentColumns = metadata as unknown as ColumnMeta[];
     });
     request.on('row', (cells) => {
-      if (typeof rowLimit === 'number' && currentRows.length >= rowLimit) {
-        currentTruncated = true;
-        return;
-      }
       currentRows.push(cells as RawCell[]);
     });
 

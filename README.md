@@ -8,6 +8,7 @@
 
 - Electron 45 + TypeScript
 - React 18 + Vite
+- CodeMirror 6（`@codemirror/lang-sql`）SQL 编辑器 + `sql-formatter` 格式化
 - RevoGrid Core 数据网格
 - electron-vite 开发/构建，electron-builder 打包
 - zod 校验 IPC 输入
@@ -133,7 +134,7 @@ src/
 - DATETIME、DECIMAL、JSON、BIGINT 按数据库返回形态展示
 - 查询取消：MySQL/MariaDB 用 `KILL QUERY`，连接保留；SQLite 终止 Worker，需要重连
 - 每个 SQL 标签一个独立会话/物理连接；标签间查询与取消互不阻塞
-- 结果默认最多返回 2,000 行（设置可调 100/500/1000/2000/5000/不限制，超出标记截断；「不限制」会提示内存风险）
+- 结果集不设行数上限，查询/导出默认加载全部行；大结果集请用 `WHERE`/`LIMIT` 控制范围（内存随行数增长）
 
 尚未接入：
 

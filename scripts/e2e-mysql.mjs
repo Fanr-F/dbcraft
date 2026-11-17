@@ -101,7 +101,7 @@ try {
     { timeout: 20000 },
   );
 
-  await page.locator('.sql-editor').fill('SELECT id, name FROM items ORDER BY id;');
+  await page.locator('.cm-content').fill('SELECT id, name FROM items ORDER BY id;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('revo-grid')?.textContent?.includes('alpha') ?? false,
@@ -111,7 +111,7 @@ try {
   assert((await statusText(page)).includes('2 行'), 'status bar should show 2 rows');
 
   // 多语句：结果页签 + 消息面板。
-  await page.locator('.sql-editor').fill('SELECT 1 AS a; SELECT 2 AS b;');
+  await page.locator('.cm-content').fill('SELECT 1 AS a; SELECT 2 AS b;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForSelector('.result-tabs', { timeout: 15000 });
   await page.waitForFunction(

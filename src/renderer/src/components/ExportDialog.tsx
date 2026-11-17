@@ -38,7 +38,6 @@ interface ExportDialogProps {
     message?: string;
     columns?: QueryColumn[];
     rows?: QueryCell[][];
-    truncated?: boolean;
   }>;
 }
 
@@ -170,11 +169,7 @@ export function ExportDialog({
       }
       if (result.columns) setExportColumns(result.columns);
       if (result.rows) setExportRows(result.rows);
-      setLoadMessage(
-        result.truncated
-          ? `已加载前 ${result.rows?.length ?? 0} 行（超过上限，仍为截断结果）。`
-          : `已加载 ${result.rows?.length ?? 0} 行。`,
-      );
+      setLoadMessage(`已加载 ${result.rows?.length ?? 0} 行。`);
     } finally {
       setLoadingAll(false);
     }

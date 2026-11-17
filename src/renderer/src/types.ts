@@ -94,7 +94,6 @@ export interface RunStatement {
   elapsedMs: number;
   statementType: 'select' | 'change' | null;
   changes: number | null;
-  truncated: boolean;
   error: string | null;
   errorMeta: string | null;
   errorHint: string | null;
@@ -109,7 +108,6 @@ export interface RunState {
   elapsedMs: number;
   statementType: 'select' | 'change' | null;
   changes: number | null;
-  truncated: boolean;
   executedAt: number | null;
   error: string | null;
   errorMeta: string | null;

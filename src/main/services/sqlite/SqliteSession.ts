@@ -26,7 +26,7 @@ type Pending = {
 
 type WorkerRequest =
   | { type: 'open'; filePath: string; readOnly?: boolean }
-  | { type: 'query'; sql: string; params?: QueryCell[]; maxRows?: number }
+  | { type: 'query'; sql: string; params?: QueryCell[] }
   | { type: 'close' };
 
 type WorkerResponse =
@@ -96,8 +96,8 @@ export class SqliteSession implements DatabaseSession {
     return session;
   }
 
-  query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult> {
-    return this.request<QueryResult>({ type: 'query', sql, params, maxRows });
+  query(sql: string, params?: QueryCell[]): Promise<QueryResult> {
+    return this.request<QueryResult>({ type: 'query', sql, params });
   }
 
   async schema(options: SchemaGetOptions = {}): Promise<SchemaObject[]> {

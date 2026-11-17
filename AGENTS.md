@@ -64,9 +64,19 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   SQLite / MySQL / MariaDB / MSSQL 适配器分别在 `services/` 下。
 - 渲染进程只能通过 `window.dbcraft` 访问主进程；保持 `contextIsolation`、`sandbox`、CSP，
   不要把 Node 或数据库驱动引入 renderer。
+- SQL 编辑器内核是 CodeMirror 6（`@codemirror/lang-sql`），不要换回 textarea + 高亮层；
+  补全候选/排序仍由 `utils/sql-completion.ts` 提供，编辑器只负责弹层与插入。
+  方言关键字从 `@codemirror/lang-sql` 的 dialect spec 合并，不要再维护一份不完整的 T-SQL 关键字表；
+  MSSQL `sys.`/`dbo.` 的候选来自 `sys.all_objects`（系统对象开关只影响对象树展示，补全需要完整词表）；
+  常规 FROM/JOIN 只加载用户对象，系统对象通过 `sys.`/`INFORMATION_SCHEMA.` 或 EXEC 进入，避免数千个系统对象淹没用户表。
+  格式化优先走 `sql-formatter`，MySQL `DELIMITER` 例程脚本因第三方会拆坏 `END$$`/`DELIMITER ;`
+  而走 `utils/sql-format.ts` 的本地保守实现；改格式化后跑 `npm run test:sql-format`。
+  PRD 附录 A.2 / Q20 仍写 Monaco，属未同步的文档偏差（见 PROJECT_MASTER D-1），不要据此回退。
 - 驱动分工：MySQL / Percona 用 `mysql2`；MariaDB 用 `mariadb`（`ed25519` 只能走它）；
   MSSQL 直接用 `tedious` 的单个 `Connection`（一个标签一个物理连接，不用 `mssql` 的池包装），
   参数占位符是 `@p1`/`@p2`（`mssql` 包只保留给探活脚本）。
+  单个 `Connection` 同一时刻只能有一个 Request，`MssqlSession.run` 已用 Promise 队列串行化；
+  补全会并发请求多张表的列元数据，不要绕过这个队列直接 `execSql`。
   Percona 与 MySQL 共用代码路径，但还没有真实 Percona 实例验证。
 - MSSQL 值保真：连接固定 `useUTC: true`，datetime/date/time 按 UTC 分量拼回字符串，不做应用层时区转换；
   `datetimeoffset` 由驱动归一化为时间点（原始偏移丢失），`decimal` 超过 15 位有效数字会丢精度，
@@ -86,9 +96,9 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   MySQL / MariaDB 多库路径目前只有类型检查与 SQL 走查，需真实实例回归。
 - 结果值保真：`dateStrings`、`bigNumberStrings`、`jsonStrings`；不要做时区转换，
   也不要把 DECIMAL 转成 number。
-- 结果默认最多 2,000 行（设置面板可调 100/500/1000/2000/5000/不限制，通过 `QueryRequest.maxRows` 下发）。
-  「不限制」用 `maxRows = 0` 哨兵，`resolveRowLimit` 在驱动层转成 `Infinity`，不做额外硬上限；
-  设置面板会提示内存风险。大结果集仍可能卡顿，不要把它描述成「安全地无限加载」。
+- 结果集不设行数上限：查询与导出默认加载全部行，不要再引入 `maxRows`/`resolveRowLimit`/截断逻辑。
+  大结果集内存随行数增长，需在 SQL 侧用 `WHERE` / `LIMIT` 控制范围；不要把它描述成「安全地无限加载」。
+  表格数据页仍有 50/200/500 行分页，那是浏览分页，不是查询结果截断。
   `query:execute` 仍是单语句路径，SQLite 直接多语句会被明确拒绝；
   编辑器多语句走 `query:execute-script`：渲染层按方言分句（`;` / MSSQL `GO` / MySQL `DELIMITER`），
   主进程逐条执行、遇错停止，每条语句一个结果或进入消息面板，不要用简单 split 绕过。

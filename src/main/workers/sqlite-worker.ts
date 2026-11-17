@@ -1,12 +1,11 @@
 import { parentPort } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import type { QueryCell, QueryColumn, QueryResult } from '../../shared/ipc-contract';
-import { resolveRowLimit } from '../../shared/settings';
 import { encodeCell } from '../services/query-values';
 
 type WorkerRequest =
   | { id: number; type: 'open'; filePath: string; readOnly?: boolean }
-  | { id: number; type: 'query'; sql: string; params?: QueryCell[]; maxRows?: number }
+  | { id: number; type: 'query'; sql: string; params?: QueryCell[] }
   | { id: number; type: 'close' };
 
 type WorkerFailure = {
@@ -22,8 +21,6 @@ const port = parentPort;
 if (!port) {
   throw new Error('sqlite worker requires a parent port');
 }
-
-const MAX_ROWS = 2000;
 
 let database: Database.Database | null = null;
 function errorInfo(error: unknown): WorkerFailure {
@@ -92,12 +89,11 @@ function bindParams(params?: QueryCell[]): Array<string | number | null> {
   });
 }
 
-function execute(sql: string, params?: QueryCell[], maxRows?: number): QueryResult {
+function execute(sql: string, params?: QueryCell[]): QueryResult {
   if (!database) {
     throw new Error('SQLite 连接尚未打开');
   }
 
-  const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
   const startedAt = Date.now();
   const bindings = bindParams(params);
   let statement: Database.Statement;
@@ -119,7 +115,6 @@ function execute(sql: string, params?: QueryCell[], maxRows?: number): QueryResu
       elapsedMs: Date.now() - startedAt,
       statementType: 'change',
       changes: Number(info.changes),
-      truncated: false,
     };
   }
 
@@ -129,13 +124,8 @@ function execute(sql: string, params?: QueryCell[], maxRows?: number): QueryResu
   }));
 
   const rows: QueryCell[][] = [];
-  let truncated = false;
 
   for (const row of statement.raw().iterate(...bindings) as IterableIterator<unknown[]>) {
-    if (rows.length >= rowLimit) {
-      truncated = true;
-      break;
-    }
     rows.push(row.map(encodeCell));
   }
 
@@ -146,7 +136,6 @@ function execute(sql: string, params?: QueryCell[], maxRows?: number): QueryResu
     elapsedMs: Date.now() - startedAt,
     statementType: 'select',
     changes: null,
-    truncated,
   };
 }
 
@@ -173,7 +162,7 @@ port.on('message', (request: WorkerRequest) => {
         reply({
           id: request.id,
           ok: true,
-          value: execute(request.sql, request.params, request.maxRows),
+          value: execute(request.sql, request.params),
         });
         break;
       case 'close':

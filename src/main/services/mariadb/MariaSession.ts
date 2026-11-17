@@ -21,11 +21,8 @@ import type {
 } from '../../../shared/ipc-contract';
 import { quoteIdent } from '../../../shared/dialect/identifiers.ts';
 import { parseTimeoutMs } from '../../../shared/timeouts.ts';
-import { resolveRowLimit } from '../../../shared/settings.ts';
 import type { DatabaseSession } from '../DatabaseSession';
 import { encodeCell } from '../query-values.ts';
-
-const MAX_ROWS = 2000;
 
 /** 能确认返回结果集的语句；其余走普通 query 以保留 affectedRows。 */
 const ROW_STATEMENT = /^(?:select|show|describe|desc|explain|with|table|values|call)\b/i;
@@ -134,15 +131,14 @@ export class MariaSession implements DatabaseSession {
     );
   }
 
-  async query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult> {
+  async query(sql: string, params?: QueryCell[]): Promise<QueryResult> {
     // mariadb 的流式接口不会返回 OkPacket（affectedRows），DML/DDL 继续走普通查询。
     if (isRowStatement(sql)) {
-      return this.queryStreamed(sql, params, maxRows);
+      return this.queryStreamed(sql, params);
     }
-    return this.queryBuffered(sql, params, maxRows);
+    return this.queryBuffered(sql, params);
   }
 
-  /** 流式读取结果集，最多保留 maxRows 行，其余行只消费不入内存。 */
   private async readWarnings(): Promise<QueryMessage[]> {
     try {
       const rows = await this.connection.query('SHOW WARNINGS');
@@ -161,17 +157,14 @@ export class MariaSession implements DatabaseSession {
   private queryStreamed(
     sql: string,
     params?: QueryCell[],
-    maxRows?: number,
   ): Promise<QueryResult> {
     const startedAt = Date.now();
-    const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     const stream = this.connection.queryStream({ sql, rowsAsArray: true }, params);
 
     return new Promise<QueryResult>((resolve, reject) => {
       let columns: QueryColumn[] = [];
       let isSelect = false;
       const rows: QueryCell[][] = [];
-      let truncated = false;
       let settled = false;
 
       stream.on('fields', (meta: FieldInfo[] | undefined) => {
@@ -186,10 +179,6 @@ export class MariaSession implements DatabaseSession {
       stream.on('data', (row: unknown) => {
         if (!Array.isArray(row) || !isSelect) return;
 
-        if (rows.length >= rowLimit) {
-          truncated = true;
-          return;
-        }
         rows.push(row.map(encodeCell));
       });
 
@@ -211,7 +200,6 @@ export class MariaSession implements DatabaseSession {
           elapsedMs: Date.now() - startedAt,
           statementType: 'select',
           changes: null,
-          truncated,
           ...(messages.length > 0 ? { messages } : {}),
         });
       });
@@ -221,10 +209,8 @@ export class MariaSession implements DatabaseSession {
   private async queryBuffered(
     sql: string,
     params?: QueryCell[],
-    maxRows?: number,
   ): Promise<QueryResult> {
     const startedAt = Date.now();
-    const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     const rows = await this.connection.query({ sql, rowsAsArray: true }, params);
     const messages = await this.readWarnings();
 
@@ -236,16 +222,14 @@ export class MariaSession implements DatabaseSession {
       }));
 
       const encoded = (rows as unknown[][]).map((row) => row.map(encodeCell));
-      const truncated = encoded.length > rowLimit;
 
       return {
         columns,
-        rows: truncated ? encoded.slice(0, rowLimit) : encoded,
-        rowCount: truncated ? rowLimit : encoded.length,
+        rows: encoded,
+        rowCount: encoded.length,
         elapsedMs: Date.now() - startedAt,
         statementType: 'select',
         changes: null,
-        truncated,
         ...(messages.length > 0 ? { messages } : {}),
       };
     }
@@ -260,7 +244,6 @@ export class MariaSession implements DatabaseSession {
       elapsedMs: Date.now() - startedAt,
       statementType: 'change',
       changes,
-      truncated: false,
       ...(messages.length > 0 ? { messages } : {}),
     };
   }

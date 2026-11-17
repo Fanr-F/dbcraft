@@ -60,6 +60,20 @@ assert(
     'SELECT * FROM [users] ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 200 ROWS ONLY;',
   'mssql default order wrong',
 );
+// limit=0 表示导出全部：不拼 LIMIT/OFFSET。
+assert(
+  buildTablePageSql('sqlite', 'users', 0, 0) === 'SELECT * FROM "users";',
+  'sqlite unlimited SQL wrong',
+);
+assert(
+  buildTablePageSql('mysql', 'users', 0, 0, { column: 'id', direction: 'asc' }) ===
+    'SELECT * FROM `users` ORDER BY `id` ASC;',
+  'mysql unlimited sorted SQL wrong',
+);
+assert(
+  buildTablePageSql('mssql', 'users', 0, 0) === 'SELECT * FROM [users];',
+  'mssql unlimited SQL wrong',
+);
 assert(
   buildTablePageSql('sqlite', 'users', 200, 0, [
     { column: 'name', direction: 'asc' },

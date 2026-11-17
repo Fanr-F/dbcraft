@@ -33,6 +33,7 @@ import {
   quoteCompletionIdentifier,
   relationKindsForClause,
   splitQualifier,
+  stripSchemaPrefix,
   type CompletionCandidate,
   type CompletionContext,
   type CompletionGroups,
@@ -241,7 +242,6 @@ const EMPTY_RUN: RunState = {
   elapsedMs: 0,
   statementType: null,
   changes: null,
-  truncated: false,
   executedAt: null,
   error: null,
   errorMeta: null,
@@ -259,7 +259,6 @@ function toRunStatement(statement: QueryScriptStatement): RunStatement {
       elapsedMs: statement.result.elapsedMs,
       statementType: statement.result.statementType,
       changes: statement.result.changes,
-      truncated: statement.result.truncated,
       error: null,
       errorMeta: null,
       errorHint: null,
@@ -275,13 +274,31 @@ function toRunStatement(statement: QueryScriptStatement): RunStatement {
     elapsedMs: statement.elapsedMs,
     statementType: null,
     changes: null,
-    truncated: false,
     error: error?.message ?? '执行失败。',
     errorMeta: error ? formatErrorMeta(error) : null,
     errorHint: error ? explainQueryError(error) : null,
     canceled: statement.canceled,
     timedOut: statement.timedOut,
   };
+}
+
+/** MSSQL 的 sys/INFORMATION_SCHEMA、SQLite 的 sqlite_* 不算常规表/视图候选。 */
+function isSystemSchemaObject(
+  dialect: DatabaseType | null | undefined,
+  object: SchemaObject,
+): boolean {
+  const schema = (object.schema ?? '').toLowerCase();
+  const name = object.name.toLowerCase();
+  if (dialect === 'mssql') {
+    return (
+      schema === 'sys' ||
+      schema === 'information_schema' ||
+      name.startsWith('sys.') ||
+      name.startsWith('information_schema.')
+    );
+  }
+  if (dialect === 'sqlite') return name.startsWith('sqlite_');
+  return false;
 }
 
 interface ConnectionDialogState {
@@ -777,18 +794,30 @@ export default function App() {
   const activeDatabases = databasesByTab[activeTab.id] ?? [];
   const activeVersion = sessions[activeTab.id]?.version ?? '';
   const completionGroups = useMemo<CompletionGroups>(() => {
+    const dialect = activeConnection?.input.type ?? null;
+    // 常规 FROM/JOIN 只给用户对象；sys/INFORMATION_SCHEMA 通过 schema 候选进入，
+    // 避免系统对象（MSSQL 约 1,800 个）淹没用户表。
+    const userSchema = activeSchema.filter(
+      (object) => !isSystemSchemaObject(dialect, object),
+    );
     const schemaNames = Array.from(
       new Set(
-        activeSchema
+        userSchema
           .map((object) => object.schema)
           .filter((name): name is string => Boolean(name)),
       ),
     );
-    const dialect = activeConnection?.input.type ?? null;
+    if (dialect === 'mssql') {
+      for (const schema of ['sys', 'INFORMATION_SCHEMA']) {
+        if (!schemaNames.some((name) => name.toLowerCase() === schema.toLowerCase())) {
+          schemaNames.push(schema);
+        }
+      }
+    }
     return {
       keywords: keywordCompletions(dialect, activeVersion),
       functions: functionCompletions(dialect),
-      objects: activeSchema.map((object) => ({ name: object.name, kind: object.type })),
+      objects: userSchema.map((object) => ({ name: object.name, kind: object.type })),
       schemas: schemaNames,
       databases: [
         ...activeDatabases.map((database) => database.name),
@@ -853,7 +882,10 @@ export default function App() {
         label: object.name,
         kind: object.type,
         insertText: quoteObjectName(object.name),
-        priority: completionKindPriority(object.type),
+        // 系统对象仍然可用，但排在用户对象之后（例如 EXEC 时先给用户存储过程）。
+        priority:
+          completionKindPriority(object.type) +
+          (isSystemSchemaObject(dialect, object) ? 10 : 0),
       }));
     const schemaCandidates = (schemas: string[]): CompletionCandidate[] =>
       toCandidates(schemas, 'schema');
@@ -871,15 +903,20 @@ export default function App() {
         priority,
       }));
 
-    /** 读取某个库的对象（不切换会话当前库；SQLite 忽略 database）。补全包含系统对象。 */
-    const loadObjects = async (targetDatabase: string): Promise<SchemaObject[]> => {
-      const key = `${tab.id}:${targetDatabase.toLowerCase()}`;
+    /** 读取某个库的对象（不切换会话当前库；SQLite 忽略 database）。 */
+    const loadObjects = async (
+      targetDatabase: string,
+      includeSystemObjects = true,
+    ): Promise<SchemaObject[]> => {
+      const key = `${tab.id}:${targetDatabase.toLowerCase()}:${
+        includeSystemObjects ? 'all' : 'user'
+      }`;
       const cached = schemaObjectCache.current[key];
       if (cached) return cached;
       try {
         const result = await api.schema.get(tab.id, {
           database: targetDatabase,
-          includeSystemObjects: true,
+          includeSystemObjects,
         });
         const objects = result.ok ? result.objects : [];
         schemaObjectCache.current[key] = objects;
@@ -919,12 +956,15 @@ export default function App() {
         if (!result.ok) {
           result = await api.schema.table(tab.id, tableName, 'view');
         }
-        const columns = result.ok ? result.meta.columns : [];
-        const entries = columns.map((column) => ({
+        if (!result.ok) {
+          // 会话忙/元数据暂不可用时不要缓存空结果，否则后续补全会一直被毒化。
+          return [];
+        }
+        const entries = result.meta.columns.map((column) => ({
           name: column.name,
           type: column.declaredType,
         }));
-        columnCache.current[key] = entries;
+        if (entries.length > 0) columnCache.current[key] = entries;
         return columnCandidates(entries);
       } catch {
         return [];
@@ -957,6 +997,16 @@ export default function App() {
     /** 取指定 schema 下的对象，并判断是否属于表/视图/存储过程。 */
     const objectsInSchema = (objects: SchemaObject[], schema: string) =>
       objects.filter((object) => (object.schema ?? '').toLowerCase() === schema.toLowerCase());
+
+    /**
+     * 已经输入 `schema.` 时，候选只能带对象名，不能再带 `schema.` 前缀，
+     * 否则会插成 `sys.sys.tables`。dbo 对象本来就不带前缀，这里是无操作。
+     */
+    const unqualifiedObjects = (objects: SchemaObject[], schema: string) =>
+      objects.map((object) => ({
+        ...object,
+        name: stripSchemaPrefix(object.name, schema),
+      }));
 
     /** 通配符展开：列出当前语句涉及的表的全部列，并额外给一个“一次展开”候选。 */
     if (context.wildcard) {
@@ -994,6 +1044,12 @@ export default function App() {
       ];
     }
 
+    // INSERT INTO t (col1, col2) 的列清单：只给该表的列。
+    if (context.insertColumnList && context.insertTable) {
+      const tableName = resolveTable(context.insertTable);
+      return tableName ? loadColumns(tableName) : [];
+    }
+
     if (context.qualifier) {
       const parts = splitQualifier(context.qualifier);
       const last = (parts[parts.length - 1] ?? '').toLowerCase();
@@ -1006,10 +1062,21 @@ export default function App() {
           table.parts.join('.').toLowerCase() === qualifier,
       );
 
-      // 别名. / 表名. -> 列
+      // 一段限定符：优先按 schema/数据库解析，最后才当成表名/别名补列。
+      // `FROM sys.` 里的 `sys` 也会被 parseTables 当成表名，若先走 reference
+      // 会去查 `sys` 表的列而失败，导致 sys./dbo. 完全没有候选。
       if (parts.length === 1) {
-        if (reference) {
+        const columnsForReference = () => {
+          if (!reference) return null;
           const tableName = resolveTable(reference);
+          return tableName ? loadColumns(tableName) : [];
+        };
+        // 显式别名优先：`WHERE u.` 即使恰好存在同名 schema/库，也应该补该表的列。
+        const aliasReference = context.tables.find(
+          (table) => table.alias?.toLowerCase() === last,
+        );
+        if (aliasReference) {
+          const tableName = resolveTable(aliasReference);
           return tableName ? loadColumns(tableName) : [];
         }
 
@@ -1019,9 +1086,9 @@ export default function App() {
             (item) => item.name.toLowerCase() === last,
           );
           if (databaseMatch || last === 'main' || last === 'temp') {
-            return pick(objectCandidates(await loadObjects(last)));
+            return pick(objectCandidates(await loadObjects(last, false)));
           }
-          return loadColumns(last);
+          return columnsForReference() ?? loadColumns(last);
         }
 
         if (dialect === 'mssql') {
@@ -1036,7 +1103,11 @@ export default function App() {
               (object) => (object.schema ?? '').toLowerCase() === last,
             );
           }
-          if (hasSchema) return pick(objectCandidates(objectsInSchema(objects, last)));
+          if (hasSchema) {
+            return pick(
+              objectCandidates(unqualifiedObjects(objectsInSchema(objects, last), last)),
+            );
+          }
 
           const databaseMatch = databases.find((item) => item.name.toLowerCase() === last);
           if (databaseMatch) {
@@ -1051,8 +1122,8 @@ export default function App() {
               ),
             );
           }
-          // 直接写 `表名.` 时按当前库解析列。
-          return loadColumns(last);
+          // 直接写 `表名.` / `别名.` 时按当前库解析列。
+          return columnsForReference() ?? loadColumns(last);
         }
 
         if (isMysqlFamily) {
@@ -1061,9 +1132,9 @@ export default function App() {
             const objects = await loadObjects(databaseMatch.name);
             return pick(objectCandidates(objects));
           }
-          return loadColumns(last);
+          return columnsForReference() ?? loadColumns(last);
         }
-        return [];
+        return columnsForReference() ?? [];
       }
 
       // 两段：MSSQL 可能是 `库.Schema.` 或 `Schema.表.`；MySQL/SQLite 是 `库.表.`
@@ -1074,7 +1145,11 @@ export default function App() {
           );
           if (databaseMatch) {
             const objects = await loadObjects(databaseMatch.name);
-            return pick(objectCandidates(objectsInSchema(objects, parts[1]!)));
+            return pick(
+              objectCandidates(
+                unqualifiedObjects(objectsInSchema(objects, parts[1]!), parts[1]!),
+              ),
+            );
           }
           return loadColumns(`${parts[0]}.${parts[1]}`);
         }
@@ -1111,7 +1186,7 @@ export default function App() {
             label: table.alias,
             kind: 'alias',
             insertText: quoteColumnName(table.alias),
-            priority: 20,
+            priority: completionKindPriority('alias'),
           });
         }
       }
@@ -1120,8 +1195,13 @@ export default function App() {
         context.clause,
       )
     ) {
-      const loaded = await loadObjects(database);
-      let objects = mergeObjects(activeSchema, loaded);
+      const isExecContext = context.clause === 'exec' || context.clause === 'execute';
+      // 普通 FROM/JOIN 只加载用户对象；EXEC 需要系统存储过程，保留系统对象。
+      const loaded = await loadObjects(database, isExecContext);
+      const userSchema = activeSchema.filter(
+        (object) => !isSystemSchemaObject(dialect, object),
+      );
+      let objects = mergeObjects(userSchema, loaded);
       // MSSQL 的 sp_* 未限定名会回退到 master，补全时把 master 的系统存储过程也带上。
       if (
         dialect === 'mssql' &&
@@ -1145,16 +1225,22 @@ export default function App() {
             priority: completionKindPriority('table'),
           })),
         );
-        items.push(
-          ...schemaCandidates(
-            Array.from(
-              new Set(
-                objects
-                  .map((object) => object.schema)
-                  .filter((name): name is string => Boolean(name)),
-              ),
-            ),
+        const schemaNames = Array.from(
+          new Set(
+            objects
+              .map((object) => object.schema)
+              .filter((name): name is string => Boolean(name)),
           ),
+        );
+        if (dialect === 'mssql') {
+          for (const schema of ['sys', 'INFORMATION_SCHEMA']) {
+            if (!schemaNames.some((name) => name.toLowerCase() === schema.toLowerCase())) {
+              schemaNames.push(schema);
+            }
+          }
+        }
+        items.push(
+          ...schemaCandidates(schemaNames),
           ...databaseCandidates(databases.map((item) => item.name)),
         );
       }
@@ -1910,7 +1996,6 @@ export default function App() {
           requestId,
           sessionId: tab.id,
           statements,
-          maxRows: settings.resultRowLimit,
           timeoutMs: settings.queryTimeoutMs,
           connectionId: connection.id,
           connectionName: connection.input.name,
@@ -1977,10 +2062,6 @@ export default function App() {
           })),
         );
 
-        const truncated = outcomes.find((outcome) => outcome.truncated);
-        if (truncated) {
-          showNotice('info', `仅显示前 ${truncated.rowCount} 行，其余结果未加载。`);
-        }
         if (response.result.canceled) {
           showNotice('info', '脚本已取消。');
         } else if (response.result.timedOut) {
@@ -2011,7 +2092,6 @@ export default function App() {
         sessionId: tab.id,
         sql: executableSql,
         params: overrideParams,
-        maxRows: settings.resultRowLimit,
         timeoutMs: settings.queryTimeoutMs,
         connectionId: connection.id,
         connectionName: connection.input.name,
@@ -2036,7 +2116,6 @@ export default function App() {
               | 'select'
               | 'change',
             changes: set.columns.length > 0 ? null : set.rowCount,
-            truncated: set.truncated,
             error: null,
             errorMeta: null,
             errorHint: null,
@@ -2058,9 +2137,6 @@ export default function App() {
             },
           }));
           clearEditHistory(tab.id);
-          if (outcomes.some((outcome) => outcome.truncated)) {
-            showNotice('info', '部分结果集超过行数上限，仅显示已加载行。');
-          }
           return;
         }
 
@@ -2077,9 +2153,6 @@ export default function App() {
             activeResult: undefined,
           },
         }));
-        if (response.result.truncated) {
-          showNotice('info', `仅显示前 ${response.result.rowCount} 行，其余结果未加载。`);
-        }
         if (isDdlSql(executableSql)) {
           showNotice('info', `DDL 执行成功 · ${response.result.elapsedMs} ms`);
         }
@@ -4367,13 +4440,12 @@ export default function App() {
     );
   };
 
-  /** 导出前重新执行查询，最多加载 10000 行；只允许只读语句。 */
+  /** 导出前重新执行查询，加载全部结果；只允许只读语句。 */
   const loadAllForExport = async (): Promise<{
     ok: boolean;
     message?: string;
     columns?: QueryColumn[];
     rows?: QueryCell[][];
-    truncated?: boolean;
   }> => {
     const api = window.dbcraft;
     if (!api) return { ok: false, message: '未检测到 Electron IPC 桥接。' };
@@ -4395,7 +4467,7 @@ export default function App() {
       const query = buildTablePageQuery(
         connection.input.type,
         tab.table.name,
-        10_000,
+        0,
         0,
         tableSorts(tab.table),
         tableFilters(tab.table),
@@ -4420,7 +4492,6 @@ export default function App() {
       sessionId: tab.id,
       sql,
       params,
-      maxRows: 10_000,
       timeoutMs: settings.queryTimeoutMs,
       connectionId: connection.id,
       connectionName: connection.input.name,
@@ -4437,7 +4508,6 @@ export default function App() {
       ok: true,
       columns: response.result.columns,
       rows: response.result.rows,
-      truncated: response.result.truncated,
     };
   };
 
@@ -4622,20 +4692,29 @@ export default function App() {
     };
   }, [openSqlFile]);
 
+  /** 纯文本格式化：全文与选区格式化共用同一套方言/大小写设置。 */
+  const formatSqlText = (sql: string) =>
+    formatSql(sql, {
+      keywordCase: settings.sqlKeywordCase,
+      dialect: activeConnection?.input.type,
+    });
+
   const formatActiveSql = () => {
     const tab = activeTab;
     if (!tab.sql.trim()) {
       showNotice('info', '当前 SQL 为空，无需格式化。');
       return;
     }
-    const formatted = formatSql(tab.sql, {
-      keywordCase: settings.sqlKeywordCase,
-    });
+    const formatted = formatSqlText(tab.sql);
     if (formatted === tab.sql) {
       showNotice('info', 'SQL 已是格式化状态。');
       return;
     }
     updateSql(formatted);
+    // 工具栏/右键菜单格式化后把焦点还给编辑器，Ctrl+Z 才能落到编辑器的撤销栈。
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('.cm-content')?.focus();
+    });
     showNotice('info', '已格式化当前 SQL。');
   };
 
@@ -4880,11 +4959,14 @@ export default function App() {
           recentSqlFiles={recentSqlFiles}
           onOpenRecentSqlFile={(path) => void openSqlFile(path)}
           onFormatSql={formatActiveSql}
+          formatSql={formatSqlText}
+          onFormatNotice={showNotice}
           onOpenHistory={() => setHistoryOpen(true)}
           completionGroups={completionGroups}
           completionEnabled={settings.completionEnabled}
           completionAutoTrigger={settings.completionAutoTrigger}
           completionDelayMs={settings.completionDelayMs}
+          editorTabSize={settings.editorTabSize}
           shortcuts={settings.shortcuts}
           onRequestCompletion={requestCompletion}
           onCancel={() => void cancelQuery()}

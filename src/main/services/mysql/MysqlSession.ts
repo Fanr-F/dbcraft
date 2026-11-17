@@ -23,11 +23,8 @@ import type {
 } from '../../../shared/ipc-contract';
 import { quoteIdent } from '../../../shared/dialect/identifiers.ts';
 import { parseTimeoutMs } from '../../../shared/timeouts.ts';
-import { resolveRowLimit } from '../../../shared/settings.ts';
 import type { DatabaseSession } from '../DatabaseSession';
 import { encodeCell } from '../query-values.ts';
-
-const MAX_ROWS = 2000;
 
 const MYSQL_TYPE_NAMES: Record<number, string> = {
   0: 'DECIMAL',
@@ -185,12 +182,11 @@ export class MysqlSession implements DatabaseSession {
   }
 
   /**
-   * 使用流式结果，最多保留 MAX_ROWS 行；其余行继续消费但不入内存，
-   * 避免 mysql2 的 query() 把整个结果集物化。
+   * 使用流式结果并保留全部行，避免 mysql2 的 query() 把整个结果集物化；
+   * 行数据最终仍会进入内存，大结果集需要调用方自行控制 SQL 范围。
    */
-  async query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult> {
+  async query(sql: string, params?: QueryCell[]): Promise<QueryResult> {
     const startedAt = Date.now();
-    const rowLimit = resolveRowLimit(maxRows, MAX_ROWS);
     // promise 包装器的 Connection 仍持有底层回调式连接，流式接口只在底层提供。
     const core = (this.connection as unknown as { connection: CoreConnection }).connection;
     const stream = core
@@ -202,7 +198,6 @@ export class MysqlSession implements DatabaseSession {
       let isSelect = false;
       let changeHeader: ResultSetHeader | null = null;
       const rows: QueryCell[][] = [];
-      let truncated = false;
       let settled = false;
 
       stream.on('fields', (fields: FieldPacket[] | undefined) => {
@@ -222,10 +217,6 @@ export class MysqlSession implements DatabaseSession {
         }
         if (!isSelect) return;
 
-        if (rows.length >= rowLimit) {
-          truncated = true;
-          return;
-        }
         rows.push(row.map(encodeCell));
       });
 
@@ -249,7 +240,6 @@ export class MysqlSession implements DatabaseSession {
             elapsedMs: Date.now() - startedAt,
             statementType: 'change',
             changes,
-            truncated: false,
             ...(messages.length > 0 ? { messages } : {}),
           });
           return;
@@ -262,7 +252,6 @@ export class MysqlSession implements DatabaseSession {
           elapsedMs: Date.now() - startedAt,
           statementType: 'select',
           changes: null,
-          truncated,
           ...(messages.length > 0 ? { messages } : {}),
         });
       });

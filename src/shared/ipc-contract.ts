@@ -129,7 +129,6 @@ export interface QueryResultSet {
   columns: QueryColumn[];
   rows: QueryCell[][];
   rowCount: number;
-  truncated: boolean;
 }
 
 export interface QueryResult {
@@ -139,7 +138,6 @@ export interface QueryResult {
   elapsedMs: number;
   statementType: 'select' | 'change';
   changes: number | null;
-  truncated: boolean;
   /** 驱动消息（MSSQL PRINT/RAISERROR、MySQL warning 等）。 */
   messages?: QueryMessage[];
   /** 单个请求返回多个结果集时按顺序列出；单结果集省略。 */
@@ -168,8 +166,6 @@ export interface QueryRequest {
   sql: string;
   /** 与 SQL 中 `?` 占位符一一对应的参数（表数据页过滤等内部路径使用）。 */
   params?: QueryCell[];
-  /** 本次查询最多保留的行数；0 表示不限制，省略时用驱动默认上限。 */
-  maxRows?: number;
   /** 本次查询超时（毫秒），覆盖默认值；0 表示不自动取消。 */
   timeoutMs?: number;
   /** 历史记录用的连接快照；旧调用可省略。 */
@@ -221,8 +217,6 @@ export interface QueryScriptRequest {
   sessionId: string;
   /** 渲染层已按方言分句；主进程按顺序逐条执行，遇错停止。 */
   statements: string[];
-  /** 每条语句最多保留的行数；0 表示不限制。 */
-  maxRows?: number;
   timeoutMs?: number;
   connectionId?: string;
   connectionName?: string;
@@ -664,8 +658,6 @@ export type ShortcutAction = 'run' | 'complete' | 'format' | 'save' | 'history';
 export type ShortcutMap = Record<ShortcutAction, string>;
 
 export interface AppSettings {
-  /** 单次查询最多保留的结果行数。 */
-  resultRowLimit: number;
   theme: 'dark' | 'light' | 'system';
   /** SQL 编辑器字号。 */
   editorFontSize: number;

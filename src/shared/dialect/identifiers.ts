@@ -180,6 +180,14 @@ export function buildTablePageQuery(
         .join(', ')}`
     : '';
 
+  // limit <= 0 表示不分页（导出全部）：不拼 LIMIT/OFFSET。
+  if (limit <= 0) {
+    return {
+      sql: `SELECT ${selectList} FROM ${target}${where}${order};`,
+      params,
+    };
+  }
+
   if (type === 'mssql') {
     const mssqlOrder = order || ' ORDER BY (SELECT NULL)';
     return {

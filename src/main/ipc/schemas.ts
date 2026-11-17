@@ -79,7 +79,6 @@ export const queryExecuteSchema = z.object({
     .array(z.union([z.string().max(100_000), z.number().finite(), z.boolean(), z.null()]))
     .max(10_000)
     .optional(),
-  maxRows: z.number().int().min(0).max(10_000).optional(),
   timeoutMs: z.number().int().min(0).max(600_000).optional(),
   connectionId: z.string().max(128).optional(),
   connectionName: z.string().max(120).optional(),
@@ -92,7 +91,6 @@ export const queryExecuteScriptSchema = z.object({
   requestId: z.string().min(1).max(128),
   sessionId: z.string().min(1).max(128),
   statements: z.array(z.string().trim().min(1).max(1_000_000)).min(1).max(50),
-  maxRows: z.number().int().min(0).max(10_000).optional(),
   timeoutMs: z.number().int().min(0).max(600_000).optional(),
   connectionId: z.string().max(128).optional(),
   connectionName: z.string().max(120).optional(),
@@ -271,7 +269,6 @@ export const exportStreamCancelSchema = z.object({
 });
 
 export const settingsSaveSchema = z.object({
-  resultRowLimit: z.union([z.literal(0), z.literal(100), z.literal(500), z.literal(1000), z.literal(2000), z.literal(5000)]),
   theme: z.enum(['dark', 'light', 'system']),
   editorFontSize: z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(16)]),
   editorFontFamily: z.enum(['default', 'consolas', 'cascadia', 'jetbrains']),

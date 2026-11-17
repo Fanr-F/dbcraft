@@ -23,8 +23,8 @@ export interface DatabaseSession {
   readonly cancelDisconnects: boolean;
   /** 会话是否仍可执行查询；Worker 退出/被终止后为 false。 */
   readonly alive: boolean;
-  /** `params` 使用驱动占位符（SQLite/MySQL 系均为 `?`）；`maxRows` 控制保留行数。 */
-  query(sql: string, params?: QueryCell[], maxRows?: number): Promise<QueryResult>;
+  /** `params` 使用驱动占位符（SQLite/MySQL 系均为 `?`）；结果集全部返回，不做行数截断。 */
+  query(sql: string, params?: QueryCell[]): Promise<QueryResult>;
   schema(options?: SchemaGetOptions): Promise<SchemaObject[]>;
   /** 当前账号可见的数据库列表（SQLite 返回单库）。 */
   databases(): Promise<DatabaseInfo[]>;

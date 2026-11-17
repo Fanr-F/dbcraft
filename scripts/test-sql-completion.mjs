@@ -20,6 +20,7 @@ import {
   shouldAutoTriggerCompletion,
   shouldOpenCompletionOnInput,
   splitQualifier,
+  stripSchemaPrefix,
 } from '../src/renderer/src/utils/sql-completion.ts';
 
 function assert(condition, message) {
@@ -133,7 +134,10 @@ assert(
   'applyCompletion upper table wrong',
 );
 
-// 空格自动触发：只有对象名关键字后才弹补全。
+// 空格自动触发：对象名/列上下文关键字后弹补全。
+assert(shouldAutoTriggerCompletion('SELECT ', 7), 'SELECT space should trigger');
+assert(shouldAutoTriggerCompletion('SELECT DISTINCT ', 16), 'SELECT DISTINCT space should trigger');
+assert(shouldOpenCompletionOnInput('SELECT ', 7), 'SELECT space should auto-open completion');
 assert(shouldAutoTriggerCompletion('SELECT * FROM ', 14), 'FROM space should trigger');
 assert(shouldAutoTriggerCompletion('SELECT * FROM demo ', 19) === false, 'table space should not trigger');
 assert(shouldAutoTriggerCompletion('SELECT * FRO ', 13) === false, 'partial keyword should not trigger');
@@ -202,6 +206,21 @@ assert(
   'column completion before FROM should see the table',
 );
 
+// MSSQL 系统 schema：`sys.` 的候选要去掉对象名里的 `sys.` 前缀。
+assert(stripSchemaPrefix('sys.tables', 'sys') === 'tables', 'sys prefix not stripped');
+assert(stripSchemaPrefix('users', 'dbo') === 'users', 'unprefixed name should stay as-is');
+assert(stripSchemaPrefix('dbo.users', 'dbo') === 'users', 'qualified name should be stripped');
+assert(stripSchemaPrefix('SYS.tables', 'sys') === 'tables', 'schema prefix should be case-insensitive');
+const execSys = extractCompletionContext('exec sys.', 'exec sys.'.length);
+assert(execSys.qualifier === 'sys' && execSys.clause === 'exec', 'exec sys. context wrong');
+const fromSys = extractCompletionContext('select * from sys.', 'select * from sys.'.length);
+assert(fromSys.qualifier === 'sys' && fromSys.clause === 'from', 'from sys. context wrong');
+assert(
+  completionCandidatesForContext(execSys, groups).length === 0 &&
+    completionCandidatesForContext(fromSys, groups).length === 0,
+  'qualified sys completion should rely on async schema objects',
+);
+
 // 引号/注释/字符串里的分号不切语句，也不弹补全。
 const stringSemicolon = extractCompletionContext("SELECT 'a;b' FROM users u WHERE u.", 34);
 assert(
@@ -254,9 +273,36 @@ assert(
 assert(JSON.stringify(ranked[0].matches) === JSON.stringify([0, 1]), 'match indices wrong');
 const fuzzy = rankCompletions([{ label: 'created_at', kind: 'column' }], 'ca');
 assert(fuzzy.length === 1 && JSON.stringify(fuzzy[0].matches) === JSON.stringify([0, 8]), 'fuzzy match wrong');
+// 常用关键字在同分关键字中优先：fr -> FROM 先于 FREE/FREETEXT。
+const frRank = rankCompletions(
+  [
+    { label: 'FREE', kind: 'keyword' },
+    { label: 'FREETEXT', kind: 'keyword' },
+    { label: 'FROM', kind: 'keyword' },
+  ],
+  'fr',
+);
+assert(frRank[0]?.label === 'FROM', `common keyword should rank first: ${frRank.map((i) => i.label)}`);
+// 但不越过函数优先级：co -> COUNT 仍在 COMMIT 前。
+const coRank = rankCompletions(
+  [
+    { label: 'COMMIT', kind: 'keyword' },
+    { label: 'COUNT', kind: 'function' },
+  ],
+  'co',
+);
+assert(coRank[0]?.label === 'COUNT', `function should stay above keyword: ${coRank.map((i) => i.label)}`);
 
 // 版本感知：方言关键字与特性开关。
 assert(keywordCompletions('mssql', '16.0').includes('TOP'), 'mssql should suggest TOP');
+assert(
+  keywordCompletions('mssql', '16.0').includes('WAITFOR'),
+  'mssql should suggest WAITFOR from CodeMirror dialect keywords',
+);
+assert(
+  keywordCompletions('mssql', '16.0').includes('DBCC'),
+  'mssql should suggest DBCC from CodeMirror dialect keywords',
+);
 assert(!keywordCompletions('sqlite', '3.45').includes('TOP'), 'sqlite should not suggest TOP');
 assert(keywordCompletions('sqlite', '3.35').includes('RETURNING'), 'sqlite 3.35 should suggest RETURNING');
 assert(!keywordCompletions('sqlite', '3.34').includes('RETURNING'), 'sqlite 3.34 should hide RETURNING');
@@ -375,5 +421,90 @@ assert(
     s: quotedQualifier.replaceStart,
   })}`,
 );
+
+// INSERT INTO <table> ( 列清单：识别所属表，只给列。
+const insertSql = 'INSERT INTO demo_users (';
+const insertContext = extractCompletionContext(insertSql, insertSql.length);
+assert(insertContext.insertColumnList, 'insert column list not detected');
+assert(
+  insertContext.insertTable?.table === 'demo_users',
+  `insert table wrong: ${JSON.stringify(insertContext.insertTable)}`,
+);
+assert(
+  completionCandidatesForContext(insertContext, groups).length === 0,
+  'insert column list should not use base candidates',
+);
+assert(
+  shouldOpenCompletionOnInput(insertSql, insertSql.length),
+  'typing ( in insert column list should open completion',
+);
+const insertComma = 'INSERT INTO demo_users (id,';
+assert(
+  shouldOpenCompletionOnInput(insertComma, insertComma.length),
+  'typing comma in insert column list should open completion',
+);
+const insertValues = 'INSERT INTO demo_users VALUES (';
+assert(
+  shouldOpenCompletionOnInput(insertValues, insertValues.length) === false,
+  'VALUES ( should not open insert column completion',
+);
+const insertQualifiedSql = 'INSERT INTO [demo].[dbo].[users] (';
+const insertQualified = extractCompletionContext(
+  insertQualifiedSql,
+  insertQualifiedSql.length,
+);
+assert(
+  JSON.stringify(insertQualified.insertTable?.parts) ===
+    JSON.stringify(['demo', 'dbo', 'users']),
+  `qualified insert table wrong: ${JSON.stringify(insertQualified.insertTable)}`,
+);
+const insertIgnoreSql = 'INSERT IGNORE INTO `db`.`users` (';
+const insertIgnore = extractCompletionContext(insertIgnoreSql, insertIgnoreSql.length);
+assert(insertIgnore.insertTable?.table === 'users', 'INSERT IGNORE table wrong');
+const fnSql = 'SELECT fn(';
+assert(
+  extractCompletionContext(fnSql, fnSql.length).insertColumnList === false,
+  'function paren is not insert column list',
+);
+
+// 列上下文关键字后空格自动触发补全。
+const trigger = (sql) => shouldAutoTriggerCompletion(sql, sql.length);
+assert(trigger('SELECT * FROM users WHERE '), 'WHERE space should trigger completion');
+assert(trigger('SELECT * FROM users ORDER BY '), 'ORDER BY space should trigger completion');
+assert(trigger('SELECT * FROM users GROUP BY '), 'GROUP BY space should trigger completion');
+assert(trigger('SELECT * FROM users HAVING '), 'HAVING space should trigger completion');
+assert(
+  trigger('SELECT * FROM users u JOIN orders o ON '),
+  'JOIN ON space should trigger completion',
+);
+assert(
+  trigger('CREATE INDEX idx ON users ') === false,
+  'CREATE INDEX ON should not auto-trigger column completion',
+);
+// 逗号后再列候选：SELECT 列表、FROM 多表、ORDER BY 多列。
+const commaAt = (sql) => shouldOpenCompletionOnInput(sql, sql.length);
+assert(commaAt('SELECT id, '), 'comma in select list should open completion');
+assert(commaAt('SELECT * FROM users, '), 'comma in FROM list should open completion');
+assert(commaAt('SELECT * FROM users ORDER BY id, '), 'comma in ORDER BY should open completion');
+assert(
+  commaAt('INSERT INTO users VALUES (1, ') === false,
+  'comma in VALUES should not open schema completion',
+);
+
+// 有前缀命中时丢弃纯子序列命中的关键字/函数噪音。
+const noiseRanked = rankCompletions(
+  [
+    { label: 'name', kind: 'column' },
+    { label: 'CURRENT_TIMESTAMP', kind: 'keyword' },
+    { label: 'JSON_EXTRACT', kind: 'function' },
+  ],
+  'na',
+);
+assert(
+  JSON.stringify(noiseRanked.map((item) => item.label)) === JSON.stringify(['name']),
+  `fuzzy keyword noise not filtered: ${noiseRanked.map((item) => item.label).join(',')}`,
+);
+const fuzzyOnly = rankCompletions([{ label: 'JSON_EXTRACT', kind: 'function' }], 'na');
+assert(fuzzyOnly.length === 1, 'fuzzy keyword should survive without strong matches');
 
 console.log('sql completion check passed');

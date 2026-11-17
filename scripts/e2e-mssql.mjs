@@ -113,7 +113,7 @@ try {
     { timeout: 20000 },
   );
 
-  await page.locator('.sql-editor').fill(
+  await page.locator('.cm-content').fill(
     `SELECT id, name FROM dbo.${tableName} ORDER BY id;`,
   );
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -125,7 +125,7 @@ try {
   assert((await statusText(page)).includes('2 行'), 'status bar should show 2 rows');
 
   // MSSQL GO：两条语句应生成两个结果页签，GO 不进入消息面板。
-  await page.locator('.sql-editor').fill('SELECT 1 AS a\nGO\nSELECT 2 AS b');
+  await page.locator('.cm-content').fill('SELECT 1 AS a\nGO\nSELECT 2 AS b');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForSelector('.result-tabs', { timeout: 15000 });
   await page.waitForFunction(

@@ -1,5 +1,6 @@
 import type { DatabaseType } from '../../../shared/ipc-contract';
 import { quoteIdent } from '../../../shared/dialect/identifiers.ts';
+import { MSSQL, MariaSQL, MySQL, SQLite, type SQLDialect } from '@codemirror/lang-sql';
 import { SQL_KEYWORD_LIST } from './sql-highlight.ts';
 
 /** 补全使用的当前单词前缀（允许 `schema.table` 形式）。 */
@@ -30,6 +31,10 @@ export interface CompletionContext {
   inLiteral: boolean;
   /** 光标处的括号深度。 */
   depth: number;
+  /** 光标位于 `INSERT INTO <table> (` 的列清单里。 */
+  insertColumnList: boolean;
+  /** 列清单所属的表；`insertColumnList` 为 true 时存在。 */
+  insertTable?: TableReference;
 }
 
 export interface TableReference {
@@ -128,6 +133,8 @@ export function completionCandidatesForContext(
   context: CompletionContext,
   groups: CompletionGroups,
 ): CompletionCandidate[] {
+  // INSERT 列清单里只应出现该表的列（由异步元数据补充），不要混入表名/关键字。
+  if (context.insertColumnList) return [];
   if (context.qualifier || context.wildcard) return [];
   const kinds = relationKindsForClause(context.clause);
   if (context.clause === 'use') {
@@ -375,6 +382,40 @@ const DIALECT_KEYWORDS: Record<DatabaseType, string[]> = {
   ],
 };
 
+function codeMirrorDialect(dialect: DatabaseType): SQLDialect | null {
+  switch (dialect) {
+    case 'mssql':
+      return MSSQL;
+    case 'mysql':
+    case 'percona':
+      return MySQL;
+    case 'mariadb':
+      return MariaSQL;
+    case 'sqlite':
+      return SQLite;
+    default:
+      return null;
+  }
+}
+
+const dialectKeywordCache = new Map<DatabaseType, string[]>();
+
+/**
+ * 从 CodeMirror 方言取关键字/类型，保证补全与高亮使用同一份 T-SQL/MySQL 词表
+ * （例如 `WAITFOR`、`DBCC`、`BACKUP` 等低频方言关键字）。
+ */
+function dialectKeywords(dialect: DatabaseType): string[] {
+  const cached = dialectKeywordCache.get(dialect);
+  if (cached) return cached;
+  const spec = codeMirrorDialect(dialect)?.spec;
+  const keywords = `${spec?.keywords ?? ''} ${spec?.types ?? ''}`
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((keyword) => keyword.toUpperCase());
+  dialectKeywordCache.set(dialect, keywords);
+  return keywords;
+}
+
 /**
  * 关键字候选：基础关键字 + 方言关键字，并按版本过滤 CTE/窗口函数/RETURNING/STRICT。
  * 版本未知时保持当前宽松行为。
@@ -383,20 +424,24 @@ export function keywordCompletions(
   dialect: DatabaseType | null | undefined,
   version?: string | null,
 ): string[] {
-  const base = SQL_KEYWORD_LIST.filter((keyword) => {
+  const candidates = new Set(SQL_KEYWORD_LIST);
+  if (dialect) {
+    for (const keyword of dialectKeywords(dialect)) candidates.add(keyword);
+    for (const keyword of DIALECT_KEYWORDS[dialect] ?? []) {
+      candidates.add(keyword.toUpperCase());
+    }
+  }
+
+  return [...candidates].filter((keyword) => {
     if (keyword === 'WITH') return supportsSqlFeature(dialect, version, 'cte');
     if (keyword === 'OVER' || keyword === 'PARTITION') {
       return supportsSqlFeature(dialect, version, 'window');
     }
     if (keyword === 'RETURNING') return supportsSqlFeature(dialect, version, 'returning');
+    if (keyword === 'STRICT') return supportsSqlFeature(dialect, version, 'strict');
     if (keyword === 'LIMIT' && dialect === 'mssql') return false;
     return true;
   });
-  if (dialect === 'mssql') {
-    return [...new Set([...base, ...DIALECT_KEYWORDS.mssql])];
-  }
-  if (!dialect) return base;
-  return [...new Set([...base, ...(DIALECT_KEYWORDS[dialect] ?? [])])];
 }
 
 const SIMPLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
@@ -769,6 +814,79 @@ export function extractSignatureHelp(
 }
 
 
+/** 常用 SQL 关键字：同分时排在低频方言关键字（FREE/FREETEXT 等）前面。 */
+const COMMON_KEYWORDS = new Set([
+  'SELECT',
+  'FROM',
+  'WHERE',
+  'GROUP',
+  'ORDER',
+  'BY',
+  'HAVING',
+  'JOIN',
+  'LEFT',
+  'RIGHT',
+  'INNER',
+  'OUTER',
+  'FULL',
+  'CROSS',
+  'ON',
+  'AS',
+  'AND',
+  'OR',
+  'NOT',
+  'NULL',
+  'IS',
+  'IN',
+  'LIKE',
+  'BETWEEN',
+  'EXISTS',
+  'CASE',
+  'WHEN',
+  'THEN',
+  'ELSE',
+  'END',
+  'DISTINCT',
+  'TOP',
+  'LIMIT',
+  'OFFSET',
+  'UNION',
+  'ALL',
+  'INSERT',
+  'INTO',
+  'VALUES',
+  'UPDATE',
+  'SET',
+  'DELETE',
+  'CREATE',
+  'TABLE',
+  'VIEW',
+  'INDEX',
+  'ALTER',
+  'DROP',
+  'ADD',
+  'COLUMN',
+  'PRIMARY',
+  'KEY',
+  'FOREIGN',
+  'REFERENCES',
+  'UNIQUE',
+  'DEFAULT',
+  'CHECK',
+  'CONSTRAINT',
+  'EXEC',
+  'EXECUTE',
+  'DECLARE',
+  'BEGIN',
+  'COMMIT',
+  'ROLLBACK',
+  'USE',
+  'WITH',
+  'RETURNING',
+  'OVER',
+  'PARTITION',
+]);
+
 const KEYWORDS = new Set([
   'select',
   'from',
@@ -824,6 +942,17 @@ const KEYWORDS = new Set([
 /** 去掉标识符两侧的引号/反引号/方括号。 */
 function unquoteIdentifier(value: string): string {
   return value.replace(/^[`"\[]+|[`"\]]+$/g, '');
+}
+
+/**
+ * 已经输入 `schema.` 时去掉对象名里的同名前缀（MSSQL 非 dbo 对象的 name 是
+ * `schema.table`）。避免把 `sys.` + `sys.tables` 插成 `sys.sys.tables`。
+ */
+export function stripSchemaPrefix(name: string, schema: string): string {
+  const prefix = `${schema}.`;
+  return name.toLowerCase().startsWith(prefix.toLowerCase())
+    ? name.slice(prefix.length)
+    : name;
 }
 
 /** 把 `db.schema.table` / `[schema].[table]` 拆成段。 */
@@ -1070,6 +1199,55 @@ function wildcardStarIndex(text: string, cursor: number, depth: number): number 
   return ['select', 'distinct', 'all', 'top'].includes(word) ? star : null;
 }
 
+/**
+ * 光标是否位于 `INSERT INTO <table> (` 的列清单里。
+ * 只检查光标前最近的未闭合左括号，并要求它前面紧邻 `INSERT [OR ...] INTO <表名>`，
+ * 避免把函数、子查询、`VALUES (` 里的括号误判成列清单。
+ */
+function insertColumnTable(
+  maskedBefore: string,
+  originalBefore: string,
+): TableReference | null {
+  let depth = 0;
+  let open = -1;
+  for (let index = maskedBefore.length - 1; index >= 0; index -= 1) {
+    const char = maskedBefore[index];
+    if (char === ')') {
+      depth += 1;
+    } else if (char === '(') {
+      if (depth === 0) {
+        open = index;
+        break;
+      }
+      depth -= 1;
+    }
+  }
+  if (open < 0) return null;
+
+  // 括号位置用掩码文本找（避免字符串/注释里的括号），表名用原文取
+  // （掩码会把 `[` 等引号吃掉，导致 `[dbo].[users]` 被拆成多段）。
+  const before = originalBefore.slice(0, open);
+  const match =
+    /(?:^|[;\n])\s*insert\s+(?:ignore\s+|or\s+(?:replace|ignore)\s+)?into\s+([`"\[\]\w$#.]+)\s*$/i.exec(
+      before,
+    );
+  if (!match) return null;
+
+  const raw = match[1]!.replace(/\s+/g, '');
+  const parts = splitIdentifier(raw);
+  if (parts.length === 0) return null;
+  const table = parts[parts.length - 1]!;
+  const schema = parts.length >= 3 ? parts[parts.length - 2] : undefined;
+  const database = parts.length >= 3 ? parts[0] : undefined;
+  return {
+    raw,
+    parts,
+    table,
+    ...(schema ? { schema } : {}),
+    ...(database ? { database } : {}),
+  };
+}
+
 export function extractCompletionContext(text: string, cursor: number): CompletionContext {
   const safeCursor = Math.max(0, Math.min(cursor, text.length));
   let start = safeCursor;
@@ -1109,6 +1287,10 @@ export function extractCompletionContext(text: string, cursor: number): Completi
     }
   }
 
+  const insertTable = inLiteral
+    ? null
+    : insertColumnTable(maskedBefore, text.slice(scan.statementStart, safeCursor));
+
   return {
     prefix,
     start,
@@ -1123,6 +1305,8 @@ export function extractCompletionContext(text: string, cursor: number): Completi
     wildcard: star !== null,
     inLiteral,
     depth: scan.depth,
+    insertColumnList: insertTable !== null,
+    ...(insertTable ? { insertTable } : {}),
   };
 }
 
@@ -1205,15 +1389,33 @@ export function rankCompletions(
 
   const priorityOf = (item: RankedCompletion) =>
     item.priority ?? completionKindPriority(item.kind);
-  ranked.sort((left, right) => {
-    const leftScore = scoreOf(left, query);
-    const rightScore = scoreOf(right, query);
-    if (leftScore !== rightScore) return leftScore - rightScore;
-    const priority = priorityOf(left) - priorityOf(right);
+  const scored = ranked.map((item) => ({ item, score: scoreOf(item, query) }));
+  // 已经有前缀/词首命中时，丢掉纯子序列命中的关键字/函数，避免 `na` 同时列出
+  // name 和 CURRENT_TIMESTAMP / JSON_EXTRACT 这类噪音；没有强命中时仍保留模糊搜索。
+  const hasStrongMatch = query.length > 0 && scored.some((entry) => entry.score <= 2);
+  const visible = hasStrongMatch
+    ? scored.filter(
+        (entry) =>
+          !(
+            entry.score === 3 &&
+            (entry.item.kind === 'keyword' || entry.item.kind === 'function')
+          ),
+      )
+    : scored;
+  const isCommonKeyword = (item: RankedCompletion) =>
+    item.kind === 'keyword' &&
+    COMMON_KEYWORDS.has(item.label.toUpperCase());
+  visible.sort((left, right) => {
+    if (left.score !== right.score) return left.score - right.score;
+    const priority = priorityOf(left.item) - priorityOf(right.item);
     if (priority !== 0) return priority;
-    return left.label.localeCompare(right.label, 'en');
+    // 关键字之间：SELECT/FROM/WHERE 等常用词优先于 FREE/FREETEXT 等低频词。
+    const common =
+      Number(isCommonKeyword(right.item)) - Number(isCommonKeyword(left.item));
+    if (common !== 0) return common;
+    return left.item.label.localeCompare(right.item.label, 'en');
   });
-  return ranked.slice(0, Math.max(1, limit));
+  return visible.slice(0, Math.max(1, limit)).map((entry) => entry.item);
 }
 
 function scoreOf(item: RankedCompletion, query: string): number {
@@ -1282,10 +1484,12 @@ export function extractAttachedDatabases(text: string): string[] {
   return aliases;
 }
 
-/** 输入空格后，若刚输入的是期望对象名的关键字，则自动打开补全。 */
+/** 输入空格后，若刚输入的是期望对象名/列名的关键字，则自动打开补全。 */
 export function shouldAutoTriggerCompletion(text: string, cursor: number): boolean {
   const before = text.slice(0, Math.max(0, Math.min(cursor, text.length)));
-  return /(?:^|[^\w])(FROM|JOIN|INTO|UPDATE|TABLE|VIEW|EXEC|EXECUTE|USE|SET)\s+$/i.test(
+  // JOIN ... ON 需要列补全；CREATE INDEX ... ON 需要表补全，所以 ON 只在 JOIN 语句里自动触发。
+  if (/\bON\s+$/i.test(before) && /\bJOIN\b/i.test(before)) return true;
+  return /(?:^|[^\w])(SELECT|DISTINCT|FROM|JOIN|INTO|UPDATE|TABLE|VIEW|EXEC|EXECUTE|USE|SET|WHERE|HAVING|ORDER\s+BY|GROUP\s+BY)\s+$/i.test(
     before,
   );
 }
@@ -1294,18 +1498,49 @@ export function shouldAutoTriggerCompletion(text: string, cursor: number): boole
 export function shouldOpenCompletionOnInput(
   text: string,
   cursor: number,
-  options: { inserted?: boolean } = {},
+  options: { inserted?: boolean; context?: CompletionContext } = {},
 ): boolean {
   const safeCursor = Math.max(0, Math.min(cursor, text.length));
   // PRD §4.2.4：超长 SQL 禁用补全，避免每次输入都做全量扫描。
   if (text.length > 1_000_000) return false;
   const typed = text[safeCursor - 1] ?? '';
-  const context = extractCompletionContext(text, safeCursor);
+  // 编辑器已经算过上下文时直接复用，避免每次输入重复扫描整条语句。
+  const context = options.context ?? extractCompletionContext(text, safeCursor);
   // 字符串/注释内不自动弹补全（手动 Ctrl+Space 也由编辑器按 inLiteral 拦掉）。
   if (context.inLiteral) return false;
   if (typed === '.') return true;
   if (shouldAutoTriggerCompletion(text, safeCursor)) return true;
   if (options.inserted === false) return false;
+  const beforeCursor = text.slice(0, safeCursor);
+  const afterSeparator = /,\s*$/.test(beforeCursor);
+  // INSERT \u5217\u6e05\u5355\uff1a\u8f93\u5165 `(`\u3001\u9017\u53f7\u6216\u9017\u53f7\u540e\u7684\u7a7a\u767d/\u6362\u884c\u540e\u90fd\u7ed9\u5217\u3002
+  if (
+    context.insertColumnList &&
+    (typed === '(' ||
+      typed === ',' ||
+      (/\s/.test(typed) && (afterSeparator || /\(\s*$/.test(beforeCursor))))
+  ) {
+    return true;
+  }
+  // \u9017\u53f7\u540e\u7eed\u5217\u8868\uff1aSELECT \u5217\u3001FROM \u591a\u8868\u3001WHERE/ORDER BY \u591a\u5217\u7b49\u3002
+  if (
+    afterSeparator &&
+    [
+      'select',
+      'from',
+      'join',
+      'update',
+      'into',
+      'where',
+      'on',
+      'set',
+      'order by',
+      'group by',
+      'having',
+    ].includes(context.clause)
+  ) {
+    return true;
+  }
   if (!/[A-Za-z0-9_$\u0080-\uffff]/.test(typed)) return false;
   return context.needle.length > 0;
 }

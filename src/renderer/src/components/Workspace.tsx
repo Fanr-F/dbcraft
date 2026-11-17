@@ -161,12 +161,18 @@ interface WorkspaceProps {
   recentSqlFiles: string[];
   onOpenRecentSqlFile: (path: string) => void;
   onFormatSql: () => void;
+  /** 纯文本格式化，用于只格式化编辑器选区。 */
+  formatSql: (sql: string) => string;
+  /** 选区格式化结果提示。 */
+  onFormatNotice: (kind: 'info' | 'error', message: string) => void;
   /** 编辑器右键「从历史插入」。 */
   onOpenHistory: () => void;
   completionGroups: CompletionGroups;
   completionEnabled: boolean;
   completionAutoTrigger: boolean;
   completionDelayMs: number;
+  /** 编辑器 Tab 宽度（设置面板）。 */
+  editorTabSize: number;
   shortcuts: ShortcutMap;
   onRequestCompletion: (context: CompletionContext) => Promise<CompletionCandidate[]>;
   onCancel: () => void;
@@ -270,11 +276,14 @@ export function Workspace({
   recentSqlFiles,
   onOpenRecentSqlFile,
   onFormatSql,
+  formatSql,
+  onFormatNotice,
   onOpenHistory,
   completionGroups,
   completionEnabled,
   completionAutoTrigger,
   completionDelayMs,
+  editorTabSize,
   shortcuts,
   onRequestCompletion,
   onCancel,
@@ -345,8 +354,10 @@ export function Workspace({
     operator: TableFilterOperator;
     value: string;
   }>({ column: '', operator: 'contains', value: '' });
-  /** 编辑器当前选区；执行按钮据此决定只跑选中内容。 */
+  /** 编辑器当前选区；执行/格式化按钮据此决定只处理选中内容。 */
   const [selectedSql, setSelectedSql] = useState('');
+  /** 工具栏「格式化」请求序号；由编辑器按当前选区/全文处理。 */
+  const [formatRequestToken, setFormatRequestToken] = useState(0);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(
     null,
   );
@@ -604,7 +615,13 @@ export function Workspace({
               running ? onCancel() : onRun(selectedSql.trim() ? selectedSql : undefined)
             }
             disabled={!running && !ready}
-            title={running ? '取消当前查询' : ready ? '执行 SQL（Ctrl+Enter）' : '先连接数据库'}
+            title={
+              running
+                ? '取消当前查询（F5）'
+                : ready
+                  ? '执行 SQL（F5 / Ctrl+Enter）'
+                  : '先连接数据库'
+            }
           >
             <Icon name={running ? 'stop' : 'play'} size={running ? 13 : 14} />
             {running ? '取消' : '执行'}
@@ -681,8 +698,8 @@ export function Workspace({
           <button
             type="button"
             className="btn"
-            onClick={onFormatSql}
-            title="格式化 SQL（Ctrl+Shift+F）"
+            onClick={() => setFormatRequestToken((token) => token + 1)}
+            title="格式化 SQL（有选区只格式化选区；Ctrl+Shift+F）"
           >
             格式化
           </button>
@@ -733,23 +750,32 @@ export function Workspace({
             </>
           )}
           <span className="chip">{connectionType ? DIALECT_LABELS[connectionType] : 'SQL'}</span>
-          <span className="pane-hint">Ctrl+Enter 执行；Ctrl+Space 补全；有选区时只执行选区</span>
+          <span className="pane-hint">
+            F5 执行/取消；Ctrl+Enter 当前语句；Ctrl+Space 补全；Tab 缩进/接受补全；有选区只处理选区
+          </span>
           <span className="spacer" />
           <span className={`badge ${badge.tone}`}>{badge.text}</span>
         </div>
 
         <SqlEditor
+          editorId={activeTab.id}
           value={activeTab.sql}
           onChange={onSqlChange}
           onRun={onRun}
           onSelectionChange={setSelectedSql}
+          running={running}
+          onCancel={onCancel}
           onSave={onSaveSqlFile}
           onFormat={onFormatSql}
+          formatSql={formatSql}
+          onFormatNotice={onFormatNotice}
+          formatRequest={formatRequestToken === 0 ? null : { token: formatRequestToken }}
           onOpenHistory={onOpenHistory}
           completionGroups={completionGroups}
           completionEnabled={completionEnabled}
           completionAutoTrigger={completionAutoTrigger}
           completionDelayMs={completionDelayMs}
+          editorTabSize={editorTabSize}
           shortcuts={shortcuts}
           onRequestCompletion={onRequestCompletion}
           dialect={connectionType}
@@ -778,9 +804,6 @@ export function Workspace({
             </span>
           ) : (
             <span className="pane-hint">尚未执行</span>
-          )}
-          {run.truncated && !messagesView && (
-            <span className="badge badge-warn">仅显示前 {run.rowCount} 行</span>
           )}
           <span className="spacer" />
           <button

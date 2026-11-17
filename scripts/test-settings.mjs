@@ -5,10 +5,7 @@
  */
 import {
   DEFAULT_APP_SETTINGS,
-  RESULT_ROW_LIMIT_OPTIONS,
   normalizeAppSettings,
-  normalizeRowLimit,
-  resolveRowLimit,
 } from '../src/shared/settings.ts';
 import { matchesShortcut, normalizeShortcut } from '../src/renderer/src/utils/shortcuts.ts';
 
@@ -17,56 +14,52 @@ function assert(condition, message) {
 }
 
 assert(
-  normalizeAppSettings({ resultRowLimit: 500 }).resultRowLimit === 500,
-  'valid setting rejected',
-);
-assert(
-  normalizeAppSettings({ resultRowLimit: 500, theme: 'light' }).theme === 'light',
+  normalizeAppSettings({ theme: 'light' }).theme === 'light',
   'light theme rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, editorFontSize: 14 }).editorFontSize === 14,
+  normalizeAppSettings({ editorFontSize: 14 }).editorFontSize === 14,
   'font size rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, editorFontSize: 99 }).editorFontSize === 13,
+  normalizeAppSettings({ editorFontSize: 99 }).editorFontSize === 13,
   'invalid font size should fall back',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, historyRetention: 5000 }).historyRetention ===
+  normalizeAppSettings({ historyRetention: 5000 }).historyRetention ===
     5000,
   'history retention rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, historyRetention: 123 }).historyRetention ===
+  normalizeAppSettings({ historyRetention: 123 }).historyRetention ===
     10000,
   'invalid retention should fall back',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, historyRetention: 0 }).historyRetention === 0,
+  normalizeAppSettings({ historyRetention: 0 }).historyRetention === 0,
   'unlimited retention rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, queryTimeoutMs: 0 }).queryTimeoutMs === 0,
+  normalizeAppSettings({ queryTimeoutMs: 0 }).queryTimeoutMs === 0,
   'zero timeout should be preserved',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, queryTimeoutMs: 30_000 }).queryTimeoutMs ===
+  normalizeAppSettings({ queryTimeoutMs: 30_000 }).queryTimeoutMs ===
     30_000,
   'timeout setting rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, queryTimeoutMs: 1234 }).queryTimeoutMs ===
+  normalizeAppSettings({ queryTimeoutMs: 1234 }).queryTimeoutMs ===
     30_000,
   'invalid timeout should fall back',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, connectTimeoutMs: 5000 }).connectTimeoutMs ===
+  normalizeAppSettings({ connectTimeoutMs: 5000 }).connectTimeoutMs ===
     5000,
   'connect timeout rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, connectTimeoutMs: 1234 }).connectTimeoutMs ===
+  normalizeAppSettings({ connectTimeoutMs: 1234 }).connectTimeoutMs ===
     8000,
   'invalid connect timeout should fall back',
 );
@@ -75,49 +68,48 @@ assert(
   'missing connect timeout should default',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, historyEnabled: false }).historyEnabled === false,
+  normalizeAppSettings({ historyEnabled: false }).historyEnabled === false,
   'history disable rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500 }).historyEnabled === true,
+  normalizeAppSettings({}).historyEnabled === true,
   'history should default to enabled',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, historyDedupe: false }).historyDedupe === false,
+  normalizeAppSettings({ historyDedupe: false }).historyDedupe === false,
   'history dedupe disable rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500 }).historyDedupe === true,
+  normalizeAppSettings({}).historyDedupe === true,
   'history dedupe should default to enabled',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, historyMask: false }).historyMask === false,
+  normalizeAppSettings({ historyMask: false }).historyMask === false,
   'history mask disable rejected',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500 }).historyMask === true,
+  normalizeAppSettings({}).historyMask === true,
   'history mask should default to enabled',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, gridAutoCommit: true }).gridAutoCommit === true,
+  normalizeAppSettings({ gridAutoCommit: true }).gridAutoCommit === true,
   'grid auto commit should be accepted',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500 }).gridAutoCommit === false,
+  normalizeAppSettings({}).gridAutoCommit === false,
   'grid auto commit should default to off',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, gridConfirmCommit: true }).gridConfirmCommit ===
+  normalizeAppSettings({ gridConfirmCommit: true }).gridConfirmCommit ===
     true,
   'grid commit confirm should be accepted',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500 }).gridConfirmCommit === false,
+  normalizeAppSettings({}).gridConfirmCommit === false,
   'grid commit confirm should default to off',
 );
 assert(
   normalizeAppSettings({
-    resultRowLimit: 500,
     editorFontFamily: 'consolas',
     editorTabSize: 4,
     sqlKeywordCase: 'lower',
@@ -126,94 +118,58 @@ assert(
     completionDelayMs: 300,
   }).editorFontFamily === 'consolas' &&
     normalizeAppSettings({
-      resultRowLimit: 500,
-      editorTabSize: 4,
+        editorTabSize: 4,
     }).editorTabSize === 4 &&
     normalizeAppSettings({
-      resultRowLimit: 500,
-      sqlKeywordCase: 'lower',
+        sqlKeywordCase: 'lower',
     }).sqlKeywordCase === 'lower' &&
     normalizeAppSettings({
-      resultRowLimit: 500,
-      completionEnabled: false,
+        completionEnabled: false,
     }).completionEnabled === false &&
     normalizeAppSettings({
-      resultRowLimit: 500,
-      completionAutoTrigger: false,
+        completionAutoTrigger: false,
     }).completionAutoTrigger === false &&
     normalizeAppSettings({
-      resultRowLimit: 500,
-      completionAutoTrigger: 'no',
+        completionAutoTrigger: 'no',
     }).completionAutoTrigger === true &&
     normalizeAppSettings({
-      resultRowLimit: 500,
-      completionDelayMs: 300,
+        completionDelayMs: 300,
     }).completionDelayMs === 300,
   'editor/completion settings should normalize',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, editorTabSize: 3 }).editorTabSize === 2 &&
-    normalizeAppSettings({ resultRowLimit: 500, editorFontFamily: 'x' }).editorFontFamily ===
+  normalizeAppSettings({ editorTabSize: 3 }).editorTabSize === 2 &&
+    normalizeAppSettings({ editorFontFamily: 'x' }).editorFontFamily ===
       'default' &&
-    normalizeAppSettings({ resultRowLimit: 500, completionDelayMs: 42 }).completionDelayMs === 0,
+    normalizeAppSettings({ completionDelayMs: 42 }).completionDelayMs === 0,
   'invalid editor/completion settings should fall back',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500, theme: 'neon' }).theme === 'dark',
+  normalizeAppSettings({ theme: 'neon' }).theme === 'dark',
   'unknown theme should fall back',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 500 }).theme === 'dark',
+  normalizeAppSettings({}).theme === 'dark',
   'missing theme should default to dark',
 );
 assert(
-  normalizeAppSettings({ resultRowLimit: 123 }).resultRowLimit ===
-    DEFAULT_APP_SETTINGS.resultRowLimit,
-  'unlisted option should fall back',
-);
-assert(
-  normalizeAppSettings(null).resultRowLimit === DEFAULT_APP_SETTINGS.resultRowLimit,
+  normalizeAppSettings(null).theme === DEFAULT_APP_SETTINGS.theme,
   'null settings should fall back',
 );
-assert(
-  normalizeAppSettings({ resultRowLimit: '1000' }).resultRowLimit === 1000,
-  'string setting should normalize',
-);
-assert(
-  normalizeAppSettings({ resultRowLimit: 0 }).resultRowLimit === 0,
-  'unlimited result rows should be preserved',
-);
-assert(
-  normalizeRowLimit(-1) === 2000,
-  'negative row limit should fall back',
-);
-
-for (const option of RESULT_ROW_LIMIT_OPTIONS) {
-  assert(normalizeRowLimit(option) === option, `row limit ${option} rejected`);
-}
-assert(normalizeRowLimit(0) === 0, 'zero should mean unlimited');
-assert(resolveRowLimit(0) === Number.POSITIVE_INFINITY, 'unlimited should resolve to Infinity');
-assert(resolveRowLimit(500) === 500, 'finite limit should pass through');
-assert(normalizeRowLimit(10_001) === 2000, 'oversized should fall back');
-assert(normalizeRowLimit(undefined) === 2000, 'undefined should fall back');
-assert(normalizeRowLimit('abc') === 2000, 'NaN should fall back');
-assert(normalizeRowLimit(42.9) === 42, 'fraction should floor');
 
 assert(
-  normalizeAppSettings({ resultRowLimit: 500 }).shortcuts.run ===
+  normalizeAppSettings({}).shortcuts.run ===
     DEFAULT_APP_SETTINGS.shortcuts.run,
   'shortcuts should default',
 );
 assert(
   normalizeAppSettings({
-    resultRowLimit: 500,
     shortcuts: { run: 'Ctrl+R' },
   }).shortcuts.run === 'Ctrl+R',
   'custom shortcut rejected',
 );
 assert(
   normalizeAppSettings({
-    resultRowLimit: 500,
     shortcuts: { run: 123 },
   }).shortcuts.run === DEFAULT_APP_SETTINGS.shortcuts.run,
   'invalid shortcut should fall back',

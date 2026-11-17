@@ -128,12 +128,12 @@
 [data-theme='light'] .badge.status-saved,
 [data-theme='light'] .toast-info,
 [data-theme='light'] .ddl-preview,
-[data-theme='light'] .sql-completion-item.is-active,
+[data-theme='light'] .cm-tooltip-autocomplete > ul > li[aria-selected],
 [data-theme='light'] .sql-signature strong {
   color: #0369a1;
 }
 
-[data-theme='light'] .sql-bracket-match {
+[data-theme='light'] .cm-matchingBracket {
   color: #075985;
 }
 
@@ -1068,69 +1068,33 @@ button:disabled {
     var(--bg);
 }
 
-.sql-editor,
-.sql-highlight {
-  margin: 0;
-  padding: 12px 14px 12px var(--sql-gutter-width, 44px);
-  border: none;
-  font-family: var(--sql-font-family, "Cascadia Code", "JetBrains Mono", Consolas, monospace);
-  font-size: var(--editor-font-size, 13px);
-  line-height: 1.7;
-  tab-size: var(--sql-tab-size, 2);
-  font-variant-ligatures: none;
+.sql-editor-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.sql-gutter {
+.sql-editor-host .cm-editor {
+  height: 100%;
+}
+
+.sql-completion-loading {
   position: absolute;
-  z-index: 3;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: var(--sql-gutter-width, 44px);
-  overflow: hidden;
-  border-right: 1px solid var(--border);
+  z-index: 6;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
   background: var(--bg-elevated);
   color: var(--faint);
-  pointer-events: none;
-  user-select: none;
-}
-
-.sql-gutter-inner {
-  padding-top: 12px;
-  text-align: right;
-  font-family:
-    "Cascadia Code",
-    "JetBrains Mono",
-    Consolas,
-    monospace;
-  font-size: var(--editor-font-size, 13px);
-  line-height: 1.7;
-  will-change: transform;
-}
-
-.sql-gutter-line {
-  padding-right: 8px;
-  height: 1.7em;
+  font-size: 11px;
   white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.28);
 }
 
-.sql-highlight {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  overflow: hidden;
-  white-space: pre;
-  color: var(--text);
-  pointer-events: none;
-}
-
-.sql-current-line {
-  position: absolute;
-  left: var(--sql-gutter-width, 44px);
-  right: 0;
-  z-index: 0;
-  background: rgba(56, 189, 248, 0.07);
-  pointer-events: none;
+[data-theme='light'] .sql-completion-loading {
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
 }
 
 .shortcut-settings .shortcut-row {
@@ -1186,159 +1150,76 @@ button:disabled {
   }
 }
 
-.sql-editor {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  width: 100%;
-  height: 100%;
-  resize: none;
-  overflow: auto;
-  outline: none;
-  white-space: pre;
-  background: transparent;
-  color: transparent;
-  caret-color: var(--text);
-}
-
-.sql-editor::selection {
-  background: rgba(56, 189, 248, 0.3);
-}
-
-.sql-editor-wrap.is-composing .sql-highlight {
-  visibility: hidden;
-}
-
-.sql-editor-wrap.is-composing .sql-editor {
-  color: var(--text);
-  background: var(--bg);
-}
-
-.sql-tok-keyword {
+.cm-sql-keyword {
   color: #7dd3fc;
 }
 
-.sql-tok-function {
+.cm-sql-type {
+  color: #f0abfc;
+}
+
+.cm-sql-function {
   color: #c4b5fd;
 }
 
-.sql-tok-string {
+.cm-sql-string {
   color: #86efac;
 }
 
-.sql-tok-number {
+.cm-sql-number {
   color: #fcd34d;
 }
 
-.sql-tok-comment {
+.cm-sql-comment {
   color: #64748b;
   font-style: italic;
 }
 
-.sql-tok-operator {
+.cm-sql-operator {
   color: var(--text-soft);
 }
 
-.sql-bracket-match {
-  border-radius: 2px;
-  background: rgba(56, 189, 248, 0.28);
-  color: #e0f2fe;
+.cm-sql-invalid {
+  color: var(--danger);
+  text-decoration: underline wavy;
 }
 
-[data-theme='light'] .sql-tok-keyword {
+[data-theme='light'] .cm-sql-keyword {
   color: #0369a1;
 }
 
-[data-theme='light'] .sql-tok-function {
+[data-theme='light'] .cm-sql-type {
+  color: #9d174d;
+}
+
+[data-theme='light'] .cm-sql-function {
   color: #6d28d9;
 }
 
-[data-theme='light'] .sql-tok-string {
+[data-theme='light'] .cm-sql-string {
   color: #047857;
 }
 
-[data-theme='light'] .sql-tok-number {
+[data-theme='light'] .cm-sql-number {
   color: #b45309;
 }
 
-[data-theme='light'] .sql-tok-comment {
+[data-theme='light'] .cm-sql-comment {
   color: #5b677b;
 }
 
-[data-theme='light'] .sql-tok-operator {
+[data-theme='light'] .cm-sql-operator {
   color: #475569;
 }
 
-.sql-completion {
-  position: absolute;
-  z-index: 5;
-  display: flex;
-  max-height: 190px;
-  min-width: 200px;
-  max-width: min(360px, calc(100% - 24px));
-  flex-direction: column;
-  overflow: auto;
-  padding: 4px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.35);
+[data-theme='light'] .cm-activeLine {
+  background: rgba(2, 132, 199, 0.07);
 }
 
-.sql-completion-item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 8px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-soft);
-  font-family:
-    "Cascadia Code",
-    "JetBrains Mono",
-    Consolas,
-    monospace;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
+[data-theme='light'] .cm-tooltip {
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 }
 
-.sql-completion-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sql-completion-match {
-  border-radius: 2px;
-  background: rgba(56, 189, 248, 0.24);
-  color: var(--text);
-  font-weight: 600;
-}
-
-.sql-completion-detail {
-  flex: none;
-  color: var(--faint);
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.sql-completion-loading {
-  padding: 6px 8px;
-  color: var(--faint);
-  font-size: 11px;
-}
-
-.sql-completion.is-loading {
-  min-width: 140px;
-}
-
-.sql-completion-item.is-active {
-  background: rgba(56, 189, 248, 0.16);
-  color: var(--accent);
-}
 
 .result-pane {
   display: flex;

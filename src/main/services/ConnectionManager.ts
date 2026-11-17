@@ -424,7 +424,7 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
   });
 
   try {
-    const result = await session.query(request.sql, request.params, request.maxRows);
+    const result = await session.query(request.sql, request.params);
     if (entry.canceled) {
       log.info('查询已取消', {
         requestId: request.requestId,
@@ -441,7 +441,6 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
       requestId: request.requestId,
       rows: result.rowCount,
       elapsedMs: result.elapsedMs,
-      truncated: result.truncated,
       statementType: result.statementType,
     });
     const historyRecord = historyBase(request, session);
@@ -594,7 +593,7 @@ export async function executeQueryScript(
           : null;
 
       try {
-        const result = await session.query(sql, undefined, request.maxRows);
+        const result = await session.query(sql);
         if (timer) clearTimeout(timer);
 
         if (entry.canceled) {
@@ -734,7 +733,6 @@ function scriptStatementRequest(request: QueryScriptRequest, sql: string): Query
     requestId: request.requestId,
     sessionId: request.sessionId,
     sql,
-    maxRows: request.maxRows,
     timeoutMs: request.timeoutMs,
     connectionId: request.connectionId,
     connectionName: request.connectionName,

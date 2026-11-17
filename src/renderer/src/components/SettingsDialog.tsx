@@ -15,7 +15,6 @@ import {
   EDITOR_TAB_SIZE_OPTIONS,
   HISTORY_RETENTION_OPTIONS,
   QUERY_TIMEOUT_OPTIONS,
-  RESULT_ROW_LIMIT_OPTIONS,
   SHORTCUT_ACTIONS,
   DEFAULT_APP_SETTINGS,
 } from '@shared/settings';
@@ -43,7 +42,6 @@ export function SettingsDialog({
   onClose,
   onSave,
 }: SettingsDialogProps) {
-  const [resultRowLimit, setResultRowLimit] = useState(settings.resultRowLimit);
   const [theme, setTheme] = useState(settings.theme);
   const [editorFontSize, setEditorFontSize] = useState(settings.editorFontSize);
   const [editorFontFamily, setEditorFontFamily] = useState(settings.editorFontFamily);
@@ -178,7 +176,6 @@ export function SettingsDialog({
   };
 
   const restoreDefaults = () => {
-    setResultRowLimit(DEFAULT_APP_SETTINGS.resultRowLimit);
     setTheme(DEFAULT_APP_SETTINGS.theme);
     setEditorFontSize(DEFAULT_APP_SETTINGS.editorFontSize);
     setEditorFontFamily(DEFAULT_APP_SETTINGS.editorFontFamily);
@@ -263,7 +260,6 @@ export function SettingsDialog({
         return;
       }
       const result = await onSave({
-        resultRowLimit,
         theme,
         editorFontSize,
         editorFontFamily,
@@ -439,30 +435,6 @@ export function SettingsDialog({
               格式如「Ctrl+Enter」「Ctrl+Shift+F」；保存时会自动规范化并检测重复。
             </p>
           </div>
-
-          <label className="field">
-            <span>单次查询结果上限</span>
-            <select
-              value={resultRowLimit}
-              onChange={(event) => setResultRowLimit(Number(event.target.value))}
-            >
-              {RESULT_ROW_LIMIT_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option === 0 ? '不限制' : `${option} 行`}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="form-note">
-            超出上限时结果区只保留前 N 行并显示截断提示；导出只包含已加载的行。
-            修改在下次执行查询时生效。
-          </p>
-          {resultRowLimit === 0 && (
-            <p className="form-error">
-              「不限制」会加载全部结果；大结果集可能占用大量内存并导致界面卡顿，
-              建议配合 WHERE / LIMIT 使用。
-            </p>
-          )}
 
           <label className="field">
             <span>查询历史保留条数</span>
@@ -698,8 +670,7 @@ export function SettingsDialog({
             className="btn btn-primary"
             disabled={
               busy ||
-              (resultRowLimit === settings.resultRowLimit &&
-                theme === settings.theme &&
+              (theme === settings.theme &&
                 editorFontSize === settings.editorFontSize &&
                 editorFontFamily === settings.editorFontFamily &&
                 editorTabSize === settings.editorTabSize &&

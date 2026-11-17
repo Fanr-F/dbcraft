@@ -311,25 +311,25 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 | 模块 | 状态 | 估算 | 已有能力摘要 | 主要缺口 |
 |---|---|---:|---|---|
 | MOD-01 连接管理 | 🟡 | 91% | 五类连接表单、测试连接、元数据库持久化（safeStorage）、编辑/复制/删除/断开、多级分组、搜索、最近使用、系统对象开关、生产危险语句拦截、SQLite 只读降级、库级 DDL、连接导入/导出、字符集、证书错误解释、超时、MSSQL 连接、多数据库对象树（库/schema/表/视图/存储过程/表子对象）、服务器实体与分组、独立 browse session | **v1.0 P0**：SQLite 文件拖入、认证插件字段、全量错误码、真实 Percona 与 MySQL 多库回归；H-02/H-03/H-04/H-08/H-09 |
-| MOD-02 SQL 编辑器 | 🟡 | 97% | 多标签、选区执行、取消、语法高亮、行号、括号匹配、格式化、关键字+函数+对象名补全、列/别名/限定名补全（W-20261109-19）、函数签名（W-20261109-20）、库/Schema/多段限定名/大小写跟随（W-20261109-21）、编辑器内多语句/多结果页签/消息面板与 `GO`/`DELIMITER` 分句（W-20261109-22）、草稿自动保存/恢复、关闭标签时写入查询历史（W-20261111-128）、SQL 文件打开/保存、多语句脚本窗口、整条语句表解析、`*` 展开、类型提示、版本感知、ATTACH/跨库列、排序/高亮、标识符引号、弹层定位/加载态/自动配对（W-20261113-02）、CTE/派生表列、引号标识符补全、`lower_case_table_names`（W-20261113-03） | **v1.0 P0**：人工真机逐项验收；**v1.x**：错误波浪线、参数化执行 |
+| MOD-02 SQL 编辑器 | 🟡 | 97% | 多标签、选区执行、取消、语法高亮、行号、括号匹配、格式化、关键字+函数+对象名补全、列/别名/限定名补全（W-20261109-19）、函数签名（W-20261109-20）、库/Schema/多段限定名/大小写跟随（W-20261109-21）、编辑器内多语句/多结果页签/消息面板与 `GO`/`DELIMITER` 分句（W-20261109-22）、草稿自动保存/恢复、关闭标签时写入查询历史（W-20261111-128）、SQL 文件打开/保存、多语句脚本窗口、整条语句表解析、`*` 展开、类型提示、版本感知、ATTACH/跨库列、排序/高亮、标识符引号、弹层定位/加载态/自动配对（W-20261113-02）、CTE/派生表列、引号标识符补全、`lower_case_table_names`（W-20261113-03）、编辑器内核 CodeMirror 6 + 第三方 `sql-formatter`（W-20261116-09）、INSERT 列清单/WHERE/ORDER BY 等列上下文补全与补全噪音过滤（W-20261116-11）、Tab 缩进/接受补全（W-20261116-12）、F5 执行/取消（W-20261116-13）、MSSQL `sys.`/`dbo.` 与 T-SQL 关键字补全（W-20261116-15）、补全候选去系统对象噪音与常用关键字优先（W-20261117-01）、WHERE/select list 列补全与 MSSQL 元数据串行（W-20261117-02） | **v1.0 P0**：人工真机逐项验收；**v1.x**：错误波浪线、参数化执行 |
 | MOD-03 查询历史 | 🟢 | 99% | history 表、成功/失败/取消记录、可关闭的 60s 去重、保留条数（含不限制）、FTS5 trigram 搜索（短查询回退 LIKE）、命中片段高亮、组合过滤（今天/自定义时间）、时间/耗时排序、详情、插入光标处、再次执行回到原连接/原库、复制/仅看此连接、连接已删除标记、JSON 导出、删除/清空、默认脱敏、写入队列与退出前 flush | 更完整的敏感内容识别、历史列表分页/加载更多 |
 | MOD-04 UI DDL | 🟢 | 97% | 查看/复制 DDL、新建表/编辑表结构页签（列差异生成 ALTER、SQLite 整表重建、删除列输入表名确认）、MSSQL schema + IDENTITY、新建视图、加/删/重命名/修改列、重命名/删除表、删除视图、索引管理、表结构（列/索引/外键/CHECK/注释）、表注释编辑、多语句脚本逐条结果、库级 DDL | CHECK 约束编辑、列序调整、编辑页签内唯一约束/索引变更、SQLite 重建保留外键/触发器、MSSQL 默认值/computed/rowversion 编辑 |
 | MOD-05 表数据编辑 | 🟢 | 96% | 数据页、50/200/500/1000 分页、多列排序、类型化多条件过滤、单元格编辑、多行粘贴、增删行/批量删行、单事务提交/回滚、乐观锁与 rowversion、本地撤销栈、主键修改确认、自增列写入、NULL/默认值、类型化编辑器、列布局记忆、必填标记、自动提交/确认、冲突预检/跳过、退出三选一、rowid 表、TSV 区域复制、网格右键菜单 | BLOB/大文本 hex 查看器仍只保留前 32 字节 |
-| MOD-06 结果与导出 | 🟡 | 96% | 结果网格、NULL 灰斜体、数字/日期右对齐、长文本悬停、列头本地排序、复制列名/单元格、单元格查看器、多结果页签/消息面板、CSV/JSON/SQL/Excel 导出、选中区域/多结果集导出、表数据流式 CSV（进度/取消/100MB 提示） | 任意 SQL 的流式分页仍先加载最多 1 万行；BLOB hex 查看；执行计划（v1.x） |
-| MOD-07 设置与偏好 | 🟢 | 94% | settings 表与面板、深浅/跟随系统主题、编辑器字号/字体/Tab 宽度、关键字大小写、补全开关/自动触发开关/延迟、结果行数上限、历史配置、查询/连接超时、数据目录迁移、本地统计、诊断日志、元数据库备份/恢复、快捷键自定义与冲突检测、网格自动提交/确认 | 逐版本 migration/升级备份（R-04）、浅色主题个别强调色、i18n（v1.x） |
+| MOD-06 结果与导出 | 🟡 | 96% | 结果网格、NULL 灰斜体、数字/日期右对齐、长文本悬停、列头本地排序、复制列名/单元格、单元格查看器、多结果页签/消息面板、CSV/JSON/SQL/Excel 导出、选中区域/多结果集导出、表数据流式 CSV（进度/取消/100MB 提示）、结果集全部加载（无行数上限，W-20261116-14） | 任意 SQL 的流式分页尚未实现（v1.x）；BLOB hex 查看；执行计划（v1.x） |
+| MOD-07 设置与偏好 | 🟢 | 94% | settings 表与面板、深浅/跟随系统主题、编辑器字号/字体/Tab 宽度、关键字大小写、补全开关/自动触发开关/延迟、历史配置、查询/连接超时、数据目录迁移、本地统计、诊断日志、元数据库备份/恢复、快捷键自定义与冲突检测、网格自动提交/确认 | 逐版本 migration/升级备份（R-04）、浅色主题个别强调色、i18n（v1.x）；结果行数上限设置已移除（W-20261116-14） |
 | MOD-08 MSSQL Agent | 🟡 | 80% | 对象树 `SQL Server Agent → 作业 → 作业项`、树内搜索/状态、详情页签（步骤/计划/最近 100/500 条历史）、启动/停止/启用/禁用、`sp_update_job*` 脚本生成、共享计划警告、多服务器只读、步骤命令在编辑器打开、`agent-control` 历史 | 30s 自动刷新、运行中/空闲状态、Agent XPs 禁用/权限失败真机回归、>1000 作业分页、右键菜单完整化 |
 
-> PRD v0.17 的 v1.0 P0 中，完整补全、编辑器内多语句/多结果页签、`GO`/`DELIMITER`、结果集「不限制」档位已落地；版本感知、补全类型提示仍是缺口。
+> PRD v0.17 的 v1.0 P0 中，完整补全、编辑器内多语句/多结果页签、`GO`/`DELIMITER` 已落地；PRD v0.21 起结果集改为全部加载、不设行数上限；版本感知、补全类型提示仍是缺口。
 
 ### 3.3 需要确认的决策
 
 | # | 问题 | 现状 | 建议 |
 |---|---|---|---|
-| D-1 | 技术栈是否迁到 PRD 附录 A.2 的 Monaco + Ant Design + Zustand + TanStack Query + SheetJS | 当前是原生 textarea 高亮、手写 CSS、useState、零依赖 XLSX | 二选一：按 PRD 迁移，或正式修订 PRD 承认轻量方案；不要长期两套说法 |
+| D-1 | 技术栈是否迁到 PRD 附录 A.2 的 Monaco + Ant Design + Zustand + TanStack Query + SheetJS | 编辑/格式化已迁到第三方：CodeMirror 6（`@codemirror/lang-sql`）+ `sql-formatter`（W-20261116-09）；UI 仍是手写 CSS/useState，XLSX 仍零依赖 | 剩余 Ant Design/Zustand/TanStack Query/SheetJS 二选一：按 PRD 迁移或正式修订 PRD；PRD 附录 A.2/Q20 的 Monaco 已被 CodeMirror 6 取代，属文档偏差，需在 PRD 修订时同步 |
 | D-2 | M1 是否必须包含 MSSQL 连接 | 已接入 `tedious`，SQL Server 2016 SP2 实测连接/查询/对象树/DDL/表编辑/取消通过 | 后续补 MOD-08 Agent，并按真机 dogfood 收口 |
 | D-3 | 切换连接时是否保留当前 SQL 标签 | 已按「标签 ↔ 会话一一对应」处理：选择另一个连接时激活该连接已有标签，没有则新建标签，绝不改绑当前标签 | 已解决，见 B-2 修复记录 |
 | D-4 | 编辑器是否支持多语句/多结果 | 已实现：编辑器多语句走 `query:execute-script`，逐条执行、遇错停止，结果区支持多结果页签与消息面板；`query:execute` 保留单语句内部路径（W-20261109-22） | 保留；后续补真正的驱动级多结果与 warning/PRINT 消息 |
-| D-5 | 结果集默认上限与「不限制」 | 已实现：默认 2000，档位 100/500/1000/2000/5000/不限制；`maxRows=0` 在驱动层转 `Infinity`，设置面板提示内存风险（W-20261109-24） | 保留；大结果集卡顿风险由用户确认提示承担，后续可补流式/分页 |
+| D-5 | 结果集行数上限 | 已取消（PRD v0.21 / W-20261116-14）：查询与导出加载全部行，移除 `maxRows`、设置档位与截断提示 | 大结果集内存随行数增长，需用户在 SQL 侧用 `WHERE`/`LIMIT` 控制；流式/分页是 v1.x 优化 |
 | D-6 | SQL 补全范围 | PRD v0.17：完整补全为 v1.0；已实现列/别名/限定名/函数/库/Schema/多段限定名/大小写跟随/自动触发（W-20261109-19/21）、整条语句表解析、`*` 展开、类型提示、版本感知、ATTACH/跨库列、排序高亮与标识符引号（W-20261113-02）、CTE/派生表列、引号标识符内补全、`lower_case_table_names`（W-20261113-03） | 仅剩人工真机验收 |
 | D-7 | MSSQL Agent 入口 | PRD v0.17 已改为左侧树 + 详情页签；当前实现一致 | 已解决，保留树形态 |
 | D-8 | 网格事务是否独立连接 | PRD §4.5.3 仍写独立连接/事务，当前实现使用同一会话 | 待 Q16 决策；建议 v1.0 保持同一会话并改写 PRD |
@@ -377,10 +377,11 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 
 已实现：
 
-- 多标签、每标签独立会话、Ctrl+Enter 执行（有选区只执行选区；无选区执行光标语句）、执行按钮（有选区只执行选区，无选区执行全文；执行中同一按钮变为红色「取消」，结束后回到「执行」，W-20261116-03/04）、编辑器右键菜单（执行 SQL / 格式化 SQL / 复制 / 剪切 / 粘贴 / 从历史插入；复制、剪切需有选区，粘贴需剪贴板有文本，W-20261116-05）、行数/耗时统计。
-- 语法高亮（高亮层 + 透明 textarea，IME 组合期间隐藏高亮层）、行号、括号匹配（跳过字符串/注释）。
-- 格式化（关键字大写、子句换行、缩进、字符串/注释原样保留），Ctrl+Shift+F。
-- 补全：关键字 + 当前连接表/视图名，Ctrl+Space，前缀优先、键盘选择、回车/Tab 插入、Esc 关闭；列/别名/`别名.`/`表名.`/函数/函数签名/库/Schema/多段限定名（W-20261109-19/20/21）、大小写跟随、普通单词输入、`.` 与关键字后空格自动触发；候选按子句分类（FROM/JOIN 只给表/视图，EXEC 只给存储过程，USE 只给数据库，W-20261111-131）；对象候选包含用户对象与系统对象（MSSQL 的 EXEC 会额外带入 master 系统存储过程，W-20261111-132）。
+- 多标签、每标签独立会话、Ctrl+Enter 执行（有选区只执行选区；无选区执行光标语句）、执行按钮（有选区只执行选区，无选区执行全文；执行中同一按钮变为红色「取消」，结束后回到「执行」，W-20261116-03/04）、F5 与执行按钮一致（空闲时执行选区/全文，执行中再按一次取消，W-20261116-13）、编辑器右键菜单（执行 SQL / 格式化 SQL / 复制 / 剪切 / 粘贴 / 从历史插入；复制、剪切需有选区，粘贴需剪贴板有文本，W-20261116-05）、行数/耗时统计。
+- 语法高亮（CodeMirror 6 + `@codemirror/lang-sql`，按连接区分 MSSQL / MySQL / MariaDB / SQLite 方言词法）、行号、括号匹配、当前行高亮、自动配对（W-20261116-09）。
+- 格式化（第三方 `sql-formatter`；无选区格式化全文，有选区只替换选中 SQL 并保留选区，工具栏 / Ctrl+Shift+F / 右键菜单行为一致；关键字/函数/类型大小写跟随设置；T-SQL `GO` 由第三方处理，MySQL `DELIMITER $$`/`//` 与 `BEGIN`…`END` 例程脚本走本地保守格式化；第三方解析失败时回退本地），Ctrl+Shift+F（W-20261116-09/10）。
+- 撤销/重做：CodeMirror `history`，Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y，覆盖普通输入、外部格式化/表格分页改值、剪切/粘贴、补全插入与历史插入；切换标签重建编辑器状态并清空历史（W-20261116-09，取代 W-20261116-07 的自研快照栈）。
+- 补全：CodeMirror autocompletion + 现有候选逻辑（关键字、表/视图、列/别名、函数、库/Schema 等），Ctrl+Space，前缀优先、键盘选择、回车/Tab 插入、Esc 关闭；列/别名/`别名.`/`表名.`/函数/函数签名/库/Schema/多段限定名（W-20261109-19/20/21）、大小写跟随、普通单词输入、`.` 与关键字后空格自动触发；候选按子句分类（FROM/JOIN 只给表/视图，EXEC 只给存储过程，USE 只给数据库，W-20261111-131）；对象候选包含用户对象与系统对象（MSSQL 的 EXEC 会额外带入 master 系统存储过程，W-20261111-132）；`INSERT INTO t (` 列清单直接给列，`WHERE`/`HAVING`/`ORDER BY`/`GROUP BY` 后空格与 `JOIN ... ON`、逗号后续列表自动触发；有前缀命中时过滤纯子序列关键字/函数噪音，别名优先级修正（W-20261116-11）。Tab 键：补全弹层打开时接受候选，否则在光标处插入「Tab 宽度」个空格、选区按行缩进，Shift+Tab 反缩进，不再把焦点移出编辑器；Ctrl+M 可切换 CodeMirror 的 Tab 焦点模式（W-20261116-12）。方言关键字直接合并 `@codemirror/lang-sql` 的 dialect 词表（含 `WAITFOR`、`DBCC` 等 T-SQL 关键字）；MSSQL `sys.`/`dbo.` 先按 schema 解析，系统对象从 `sys.all_objects` 加载，候选去掉重复 schema 前缀（W-20261116-15）。常规 FROM/JOIN 只给用户对象，系统对象通过 `sys.`/`INFORMATION_SCHEMA.` 或 EXEC 进入；常用关键字（FROM/WHERE/SELECT 等）在同分时排在 FREE/FREETEXT 等低频词前（W-20261117-01）。`SELECT`/`SELECT DISTINCT` 后空格自动弹列/函数候选；MSSQL 单连接上的元数据请求串行执行，列元数据失败不缓存，避免一次失败后 WHERE/select list 永久没有列（W-20261117-02）。
 - 30 秒草稿自动保存与启动恢复（最多 20 个标签）、关闭未保存标签确认。
 - SQL 文件打开/保存（Ctrl+S；首次保存弹对话框）。
 - 编辑器内多语句：`;` / MSSQL `GO` / MySQL `DELIMITER` 分句，逐条执行、遇错停止；每条查询一个结果页签，非查询/错误进入消息面板（W-20261109-22）。
@@ -460,19 +461,19 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 - 结果网格；NULL 灰色斜体；数字/日期右对齐；长文本悬停；列头显示类型 tooltip。
 - 普通查询结果列头本地排序；表数据页列头触发服务端排序。
 - 复制列名（制表符分隔）、复制选中单元格（NULL 复制为空）；单元格查看器（完整值、类型、行号、字符数、复制）。
-- 行数/耗时/截断提示；超过上限显示「仅显示前 N 行」。
+- 行数/耗时提示；结果集全部加载，不设行数上限（PRD v0.21 / W-20261116-14）。
 - CSV（UTF-8 BOM、CRLF、转义、NULL 空字段）、JSON、SQL Insert（三方言语义）、Excel `.xlsx`。
-- 导出前「加载全部（最多 10000 行）」：重新执行只读语句后导出；超过 1 万行仍截断提示。
-- 多结果页签 + 消息面板（W-20261109-22）；结果集「不限制」档位（W-20261109-24）。
+- 导出前「加载全部」：重新执行只读语句并导出全部结果，不再有 1 万行截断。
+- 多结果页签 + 消息面板（W-20261109-22）。
 
-剩余：H-01 MSSQL「加载全部并导出」仍受 1 万行上限；任意 SQL 的真流式分页；BLOB hex 查看；执行计划（v1.x）；真实大表导出验收。
+剩余：任意 SQL 的真流式分页（v1.x）；BLOB hex 查看；执行计划（v1.x）；真实大表导出验收；大结果集内存风险需用户用 `WHERE`/`LIMIT` 控制。
 
 #### 3.4.7 MOD-07 设置与偏好
 
 已实现：
 
 - 元数据库 `settings` 表；设置面板；非法值回退默认。
-- 深/浅主题；编辑器字号 12/13/14/16 px；结果行数上限 100/500/1000/2000/5000/不限制（不限制提示内存风险）。
+- 深/浅主题；编辑器字号 12/13/14/16 px；结果集不设行数上限（原设置项已移除，W-20261116-14）。
 - 查询历史开关与保留条数；查询超时 0/10/30/60/120 秒（0 为不自动取消）。
 - 连接/测试超时 3/5/8/10/30 秒（默认 8 秒，环境变量 `DBCRAFT_CONNECT_TIMEOUT_MS` 优先）。
 - 本地数据目录、本地统计（连接数/历史条数/设置项数/元数据库大小）。
@@ -606,7 +607,7 @@ npm run test:mssql
 | `test:settings` | 设置归一化（行数、主题、字号、历史、超时） |
 | `test:sql-highlight` | SQL 词法切分无损性与 token 分类 |
 | `test:sql-format` | 格式化：关键字/注释/字符串/多语句/幂等 |
-| `test:sql-completion` | 补全前缀/排序去重/插入位置、别名与多段限定符、MSSQL/MySQL 表引用、SQLite ATTACH 别名、大小写跟随、空格触发、函数签名 |
+| `test:sql-completion` | 补全前缀/排序去重/插入位置、别名与多段限定符、MSSQL/MySQL 表引用、SQLite ATTACH 别名、大小写跟随、空格/逗号/INSERT 列清单触发、模糊噪音过滤、函数签名 |
 | `test:sql-brackets` | 圆/方/花括号、嵌套、字符串/注释、未配对 |
 | `test:sql-mask` | 历史 SQL 赋值型脱敏边界 |
 | `test:sql-script` | 多语句分句（字符串/注释分号、50 条上限、MSSQL `GO`、MySQL `DELIMITER`） |
@@ -645,7 +646,7 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 1. 新建 SQLite 连接 + 测试连接（校验版本号）；保存后自动打开会话，状态栏显示版本。
 2. 对象树出现表与视图；系统对象默认隐藏，勾选后出现 `sqlite_sequence`，取消后隐藏。
 3. 点表填入 `SELECT * FROM "demo_users"`；执行后网格出现数据、状态栏行数正确。
-4. 超过 2000 行显示「仅显示前 2000 行」。
+4. 执行 2001 行查询，结果全部加载，状态栏显示 2001 行，不再出现截断提示。
 5. UPDATE 返回「1 行受影响」；错误表名同时显示 `no such table` 与 `SQLITE_ERROR`；多语句生成多结果页签，遇错停止并进入消息面板。
 6. 生产连接无 WHERE 的 DELETE 弹确认，取消后数据仍在。
 7. 取消查询 → 会话失败；提示条含原因，点「重连」后同标签继续查询。
@@ -704,10 +705,10 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 **结果与导出**：
 
 1. `SELECT * FROM demo_users LIMIT 5;` → 导出 CSV/JSON/SQL Insert/Excel；Excel 打开 CSV 检查中文不乱码、NULL 为空字段；打开 `.xlsx` 检查列名、数字/布尔/NULL 与中文。
-2. 「加载全部（最多 10000 行）」后行数增加；对 `UPDATE` 执行应提示仅支持查询语句；MSSQL 应能加载（修 H-01 后）。
+2. 「加载全部」加载全部结果（当前无 1 万行上限）；对 `UPDATE` 执行应提示仅支持查询语句；MSSQL 应能加载。
 3. 普通查询结果列头可本地排序；「复制列名」粘贴后为制表符分隔。
 4. 「查看单元格」显示完整值、类型、行号与字符数，可复制；「复制单元格」写入剪贴板（NULL 为空）。
-5. 超过结果上限时显示「仅显示前 N 行」。
+5. 结果集不再截断：超过原 2000 行也全部加载；导出「加载全部」同样包含全部行。
 
 **连接安全**：
 
@@ -752,9 +753,9 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 
 **设置、备份与恢复**：
 
-1. 结果上限设为 100，保存后 `SELECT * FROM demo_users` 最多 100 行并显示截断提示。
-2. 重开应用设置仍为 100；改回 2000 后新查询恢复。
-3. 手工改元数据库为非法值，启动回退默认 2000，不阻塞启动。
+1. 执行 2001 行查询，结果全部加载，状态栏显示 2001 行，无截断提示。
+2. 设置面板不再显示「单次查询结果上限」；旧元数据库中的 `resultRowLimit` 残留值被忽略，不阻塞启动。
+3. 导出「加载全部」包含全部结果，不再有 1 万行截断。
 4. 「导出诊断日志」得到包含启动日志的 `.log` 文件；「打开日志目录」打开对应目录。
 5. 「备份元数据库」选择路径，得到 `.db`；用 SQLite 客户端能打开并看到 connections/history/settings。
 6. 恢复：先备份，修改连接后恢复；确认后重新加载，连接/历史/设置回到备份时状态，并在 userData 留下 `dbcraft-meta.backup-<时间>.db`。选非 DBCraft 的 SQLite 文件应提示缺少 `connections` 表且不改动当前数据。
@@ -1009,7 +1010,7 @@ password / passwd / secret / token / authorization / apiKey / api_key / cookie
 #### 3.10.2 已稳定的 IPC（均同步契约、zod、router、preload）
 
 - 连接：`connection:list/save/delete/remove-all/open/import`
-- 查询：`QueryRequest.params / maxRows / timeoutMs`、`query:execute-script`
+- 查询：`QueryRequest.params / timeoutMs`、`query:execute-script`（结果集不分页，无 `maxRows`）
 - MSSQL Agent：`agent:list/detail/action/script`
 - 元数据：`schema:table`、`schema:describe`、`schema:databases`、`schema:use-database`、`schema:table-extras`
 - 表格编辑：`table:apply`
@@ -1095,8 +1096,8 @@ npm run dev   # 按 §3.6.4 与 §5 手工验收
 
 - **优先级/状态**：P1 / ✅（W-20261109-37）
 - **原问题**：`loadAllForExport()` 对 MSSQL 直接返回「MSSQL 驱动尚未接入」，但其他查询/导出路径已接入。
-- **修复**：删除 MSSQL 特判，统一走 `query.execute({ maxRows: 10000 })` 和现有截断提示。
-- **验收**：MSSQL 查询 200 行 → 导出 → 加载全部 → 200 行可导出；超过 1 万行显示截断提示。
+- **修复**：删除 MSSQL 特判，统一走导出查询与现有结果处理（W-20261116-14 起不再有 1 万行上限/截断提示）。
+- **验收**：MSSQL 查询 200 行 → 导出 → 加载全部 → 200 行可导出；超过原 1 万行也全部加载。
 
 #### H-02 新建连接会改绑当前标签并清空 SQL/结果/会话（已修复）
 
@@ -1347,6 +1348,17 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [ ] 未选中时执行“光标所在语句”
 - [~] 编辑器右键菜单：执行 SQL、格式化 SQL、复制、剪切、粘贴、从历史插入；复制/剪切需有选区，粘贴需剪贴板有文本（W-20261116-05；真实 Electron 自动化验证通过，待人工验收）
 - [~] 执行与取消合并为同一按钮：执行中显示红色「取消」（复用 `.btn-danger`），取消或查询结束后自动回到绿色「执行」，尺寸、图标与位置不变（W-20261116-03/04；typecheck/build、e2e:sqlite 通过，待人工验收）
+- [~] T-SQL 多语句格式化：`GO` 独占一行、语句级关键字换行不合并、`OVER(PARTITION BY ...)` 无多余空格（W-20261116-06；test:sql-format 与真实 Electron 验证通过，待人工验收）
+- [~] MySQL 存储过程格式化：`DELIMITER $$`/`//` 原样保留、自定义分隔符贴语句末尾、`DELIMITER ;` 独占一行、`BEGIN`…`END` 块内缩进（W-20261116-08；test:sql-format 通过，待真机验收）
+- [~] 编辑器撤销/重做：Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y，覆盖输入、格式化、剪切/粘贴/补全插入，切换标签重置（W-20261116-07；已被 W-20261116-09 的 CodeMirror `history` 取代，保留原记录）
+- [~] 编辑器内核迁移到 CodeMirror 6 + `sql-formatter`：方言高亮/括号匹配/自动配对、CodeMirror 撤销栈、补全弹层与右键菜单保持原功能；MySQL `DELIMITER` 例程仍走本地保守格式化（W-20261116-09；typecheck/build/test:sql-format/e2e:sqlite 通过，待人工验收）
+- [~] 选区格式化：有选区时工具栏「格式化」、Ctrl+Shift+F、右键「格式化 SQL」只替换选中 SQL，保留选区并可 Ctrl+Z 撤销；无选区仍格式化全文（W-20261116-10；e2e:sqlite 通过，待人工验收）
+- [~] 补全完善：`INSERT INTO t (` 列清单、`WHERE`/`HAVING`/`ORDER BY`/`GROUP BY` 后空格、`JOIN ... ON` 与逗号后自动触发；过滤模糊关键字/函数噪音、修正别名优先级、恢复异步加载提示（W-20261116-11；test:sql-completion/e2e:sqlite 通过，待人工验收）
+- [~] Tab 键：补全弹层打开时接受候选，否则缩进（光标处插入「Tab 宽度」个空格、选区按行缩进、Shift+Tab 反缩进），不再切换焦点；Ctrl+M 切换 Tab 焦点模式（W-20261116-12；e2e:sqlite 通过，待人工验收）
+- [~] F5 执行/取消：空闲时按 F5 执行选区或全文（与工具栏「执行」一致），执行中再按 F5 取消；Ctrl+Enter 仍执行光标语句（W-20261116-13；e2e:sqlite 覆盖执行，取消路径用临时脚本验证，待人工验收）
+- [~] MSSQL 补全：关键字词表合并 CodeMirror 方言（`WAITFOR`/`DBCC` 等）；`exec sys.` / `select * from sys.` / `dbo.` 能列出系统对象并正确插入，不再查 `sys` 表的列（W-20261116-15；真实 MSSQL + Electron 临时脚本验证，待人工验收）
+- [~] 补全可用性：FROM/JOIN 只列用户对象，`sys`/`INFORMATION_SCHEMA` 作为 schema 候选；输入 `fr` 时 FROM 排在 FREE/FREETEXT 前；系统对象在 EXEC 中排在用户对象后（W-20261117-01；真实 MSSQL + Electron 临时脚本验证，待人工验收）
+- [~] WHERE / select list 列补全：`SELECT`/`SELECT DISTINCT` 后空格自动弹层；MSSQL 元数据请求串行、列加载失败不缓存，JOIN/别名场景也能列出列（W-20261117-02；真实 MSSQL + Electron 临时脚本验证，待人工验收）
 - [~] 多语句执行：`;` / MSSQL `GO` / MySQL `DELIMITER` 分句、逐条执行、遇错停止（W-20261109-22；E2E 覆盖 SQLite 主路径，待人工验收）
 - [~] 多结果页签 + 消息面板（W-20261109-22；E2E 覆盖结果切换/失败停止，待人工验收）
 - [ ] 驱动级多结果集、MSSQL `PRINT`/`RAISERROR` 消息、MySQL warning 进入消息面板
@@ -1365,7 +1377,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 
 ### 5.6 结果网格与表数据（MOD-05/MOD-06）
 
-- [~] 结果行数「不限制」档位 + 内存风险提示（W-20261109-24；E2E 覆盖 SQLite，待人工验收）
+- [~] 结果集全部加载（无行数上限），移除设置项与截断提示；导出同样加载全部（W-20261116-14；E2E 覆盖 SQLite 2001 行，待人工验收）
 - [ ] 过滤 UI：文本/数字/日期/布尔操作符、多条件 AND
 - [ ] 多列排序（Shift+点击）与列头序号
 - [ ] 列宽拖拽、隐藏列、固定前 N 列、按表记忆
@@ -1374,7 +1386,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [ ] 显式 NULL vs 留空默认值；`IDENTITY_INSERT`
 - [ ] 冲突预检与“跳过冲突行”
 - [ ] 单元格/区域复制（TSV）、网格右键菜单
-- [ ] 空结果、截断、加载中的统一空态/骨架
+- [ ] 空结果、加载中的统一空态/骨架
 
 ### 5.7 DDL 与弹窗（MOD-04）
 
@@ -1611,7 +1623,29 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 
 - **W-20261116-05 编辑器右键菜单：执行/格式化/复制/剪切/粘贴**：诉求是在查询编辑器右击即可执行 SQL、格式化、复制、剪切、粘贴，且复制/剪切/粘贴按状态启用。变更：`SqlEditor` 右键菜单在原有「从历史插入」基础上增加「执行 SQL」（有选区执行选区，无选区执行光标所在语句，与 Ctrl+Enter 一致，执行逻辑抽成 `runSelectionOrStatement` 供两处共用）、「格式化 SQL」、「复制」「剪切」「粘贴」；打开菜单时读取选区并调用 `navigator.clipboard.readText()`，无选区时复制/剪切禁用、剪贴板为空时粘贴禁用（读取失败时保守保持可用，避免误禁用）；复制/剪切先写剪贴板成功再改文本，粘贴替换当前选区并恢复光标，三者均复用 `onChange` 并刷新括号匹配/签名/行号/选区上报；右键时关闭补全弹层，并用请求序号避免旧剪贴板读取覆盖新菜单。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`prd/PROJECT_MASTER.md`。验证：`npm run typecheck`、`npm run build` 通过；另用临时 Playwright 脚本在真实 Electron（构建产物、无连接标签）中验证：菜单项与顺序、无选区时复制/剪切禁用、空剪贴板时粘贴禁用、有文本时粘贴可用、复制/剪切/粘贴读写正确、格式化生效、执行 SQL 走执行路径并提示先连接，测试结束后恢复系统剪贴板；临时脚本已删除，未纳入仓库。遗留：程序化剪切/粘贴会重建文本，不保留浏览器原生撤销栈；菜单为自定义实现，未使用系统原生菜单。
 
----
+- **W-20261116-06 T-SQL 多语句格式化修复**：诉求是格式化多行 T-SQL 后 `GO` 被粘进语句（如 `exec sp_aaa go CREATE TABLE ...`），输出不符合 T-SQL 语法。根因：格式化器不识别批分隔符 `GO`，只按关键字换行，续行统一缩进还会把多语句并成一条。变更：`sql-format` 识别独占一行的 `GO` / `GO n`（可带行尾注释，字符串/注释内的 `go` 不误判），GO 独占一行并重置缩进；补充 `exec/execute/create/alter/drop/merge/truncate/use/declare/begin/commit/rollback/print/grant/revoke` 等语句级换行关键字；缩进只用于 FROM/WHERE/VALUES 等子句续行，语句起始不再缩进；左括号后不留空格（`OVER(PARTITION BY id)`），函数名跟随 keywordCase 大写；`sql-highlight` 补 `exec/execute/print/declare/merge` 等关键字。顺带修复 HEAD 上原本失败的 `COUNT` 大写断言（格式化器此前未处理函数名大小写）。涉及 `src/renderer/src/utils/sql-format.ts`、`src/renderer/src/utils/sql-highlight.ts`、`scripts/test-sql-format.mjs`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run test:sql-format`（新增 GO、`GO 5`、字符串内 `go`、幂等用例）、`test:sql-highlight`、`test:sql-completion`、`typecheck`、`build` 通过；真实 Electron 中 Ctrl+Shift+F 输出 `EXEC sp_aaa` / `GO` / `CREATE TABLE ...` / `GO` / ... 符合预期。遗留：格式化仍是轻量实现，不处理嵌套块缩进、参数列表对齐等更细排版。
+
+- **W-20261116-07 编辑器撤销/重做**：诉求是 SQL 编辑器无法撤销（尤其是格式化、剪切/粘贴之后）。原因：编辑器是自研 textarea + `<pre>` 高亮层（没有使用 CodeMirror / Monaco 等开源编辑器内核），文本由 React 受控；程序化改值后浏览器原生撤销栈不可靠，而格式化由父组件改值。变更：`SqlEditor` 增加自研撤销/重做快照栈（文本 + 光标/选区，最多 100 步、总字符上限 8MB，连续输入 600ms 内合并为一步）；拦截 Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y；普通输入、格式化（外部改值）、剪切/粘贴、补全插入、历史插入都入栈；切换标签时按 `editorId` 清空历史，避免把上一个标签的 SQL 撤回当前标签；恢复快照时如果用户已继续输入，不再抢光标；`App` 在工具栏/右键菜单格式化后把焦点还给编辑器，保证紧接着按 Ctrl+Z 能命中编辑器撤销栈。`Workspace` 传入 `editorId={activeTab.id}`。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`typecheck`、`build` 通过；真实 Electron 中验证格式化后 Ctrl+Z 还原、Ctrl+Shift+Z 重做、工具栏格式化后焦点回到编辑器且可直接 Ctrl+Z、连续输入一步撤销、右键剪切可撤销、切换标签后历史隔离。遗留：撤销栈为自研实现，不覆盖多光标/语法级操作，大 SQL 仍受内存上限约束；如后续需要撤销树、代码折叠、错误波浪线等完整编辑能力，可评估迁移 CodeMirror 6。
+
+- **W-20261116-08 格式化支持 MySQL DELIMITER 与方言隔离**：诉求是 T-SQL 多语句格式化后 `GO` 仍被粘进上一行（`EXEC sp_aaa go`），MySQL 存储过程格式化把 `DELIMITER $$` 拆成 `DELIMITER $ $`、把 `END$$` 与 `DELIMITER ;` 粘成 `END$$ DELIMITER;`，两种方言都不符合各自语法风格。根因：格式化器只按关键字换行，不识别 MySQL 客户端指令与自定义分隔符；`GO` 检测也不区分方言。变更：`formatSql` 新增 `dialect` 选项（`App` 用当前连接 `input.type` 传入）——T-SQL 才把行首 `GO`/`GO n` 当批分隔符，MySQL/Percona/MariaDB 才识别 `DELIMITER`；`DELIMITER` 指令整行原样保留（分隔符贴紧，如 `DELIMITER $$`），自定义分隔符（`$$`、`//`）贴在语句末尾并作为语句边界，`DELIMITER ;` 恢复分号并独占一行；`BEGIN`…`END` 块内统一缩进两格（`END IF`/`END LOOP`/`END TRY` 不参与 BEGIN 配对，SQLite 的 `BEGIN` 事务语句不参与块缩进），行首 `IF`/`ELSE`/`WHILE`/`LOOP`/`REPEAT`/`UNTIL` 换行但 `SELECT IF(...)` 不受影响；`sql-highlight` 补 `procedure/function/trigger/cursor/out/inout` 关键字。涉及 `src/renderer/src/utils/sql-format.ts`、`src/renderer/src/utils/sql-highlight.ts`、`src/renderer/src/App.tsx`、`scripts/test-sql-format.mjs`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run test:sql-format`（新增 MySQL `DELIMITER $$`/`//`、`END IF` 块、方言隔离、幂等用例）、`test:sql-highlight`、`test:sql-completion`、`test:sql-script`、`npm run typecheck`、`npm run build` 通过；用户样例输出为 `DELIMITER $$` / `DROP PROCEDURE ...$$` / `CREATE PROCEDURE ...` / `BEGIN` / 两空格缩进的 `DECLARE`、`SELECT` / `END$$` / `DELIMITER ;`，T-SQL 样例 `GO` 独占一行。遗留：格式化仍是轻量实现，不处理参数列表纵向对齐、嵌套 IF/LOOP 的独立缩进层级（只按 BEGIN/END 缩进），也未在真实 Electron 中手工验收。
+
+- **W-20261116-09 编辑器迁移 CodeMirror 6 与第三方 sql-formatter**：诉求是改用第三方编辑器与格式化器（PRD 附录 A.2 原写 Monaco + `sql-formatter`；用户选定 CodeMirror 6），降低自研 textarea 高亮层和自研格式化器的维护成本，并获得方言级词法。变更：新增依赖 `@codemirror/state`、`@codemirror/view`、`@codemirror/commands`、`@codemirror/autocomplete`、`@codemirror/language`、`@codemirror/lang-sql`、`@lezer/highlight`、`sql-formatter`；`SqlEditor` 重写为 CodeMirror 6：受控 `value` 同步、`@codemirror/lang-sql` 按连接映射 MSSQL/MySQL/MariaSQL/SQLite 方言、自定义 `HighlightStyle`（只挂 CSS class，颜色继续用应用 CSS 变量/主题）、行号/当前行/括号匹配/自动配对、`history` 取代自研撤销栈、`autocompletion` 复用现有 `sql-completion` 候选/排序/大小写/异步列，并用 `shouldOpenCompletionOnInput` 保留原自动触发规则（手动 Ctrl+Space 不受限）、签名提示浮层与右键菜单保留、历史插入与切标签重置状态保留、Tab 宽度通过 `Compartment` 跟随设置；`sql-format` 改为优先调用 `sql-formatter`（按方言选 grammar，`functionCase`/`dataTypeCase` 跟随 `keywordCase`，`expressionWidth: 120`），MySQL `DELIMITER` 例程脚本因第三方会把 `END$$`/`DELIMITER ;` 拆坏而继续走本地保守格式化，第三方抛错时也回退本地；`App` 格式化后焦点选择器改为 `.cm-content`；`Workspace` 增加 `editorTabSize` 透传；`styles.css` 删除透明 textarea/高亮层/自绘 gutter/补全弹层样式，新增 CodeMirror 主题与 `.cm-sql-*` 高亮色；`e2e-sqlite/mysql/mssql` 的编辑器选择器改为 `.cm-content`，`inputValue()` 改为 `innerText()`，并在 `e2e:sqlite` 增加自动补全、Ctrl+Shift+F、Ctrl+Z 撤销格式化断言。涉及 `package.json`、`package-lock.json`、`src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/utils/sql-format.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/styles.css`、`scripts/test-sql-format.mjs`、`scripts/e2e-sqlite.mjs`、`scripts/e2e-mysql.mjs`、`scripts/e2e-mssql.mjs`、`README.md`、`AGENTS.md`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run build`、`test:sql-format`、`test:sql-highlight`、`test:sql-completion`、`test:sql-script`、`test:sql-brackets`、`test:settings`、`test:sql-mask`、`test:sqlite-rebuild`、`npm run e2e:sqlite`、`npm run test:a11y` 通过（E2E 覆盖连接、查询、表数据、补全弹层、Ctrl+Enter 执行、Ctrl+Shift+F 格式化与 Ctrl+Z 撤销、超时/取消等主路径）。遗留/风险：`sql-formatter` 是纵向风格（`SELECT` 列表一列一行、`FROM` 子句另起一行），与旧自研紧凑风格不同，且上游没有紧凑模式；MySQL 例程脚本仍混用本地格式化，同一脚本内可能出现两种缩进风格；PRD 附录 A.2/Q20 仍写 Monaco，本次未改 PRD，偏差记录在 D-1；renderer 主 chunk 约 2.56MB（未压缩，含 CodeMirror 与 `sql-formatter`）；仅 SQLite E2E 实跑，MySQL/MSSQL E2E 未重跑，列异步补全、签名提示、IME、右键菜单与浅色主题未人工验收；`test:sql-format` 的精确输出与 `sql-formatter` 版本绑定，升级依赖时需同步更新。
+
+- **W-20261116-10 选区格式化**：诉求是选中部分 SQL 后格式化只处理选区，而不是整段 SQL。变更：`SqlEditor` 新增 `formatSql`（纯文本格式化回调）、`onFormatNotice` 与 `formatRequest`；`formatFromView` 在无选区时调用 App 的全文格式化（沿用原有空 SQL/通知处理），有选区时用第三方格式化选中文本，只 dispatch 替换 `[from, to)` 并把格式化后的文本重新选中，`userEvent: 'input.format'` 让 Ctrl+Z 可撤销；Ctrl+Shift+F 与右键「格式化 SQL」改走该入口；工具栏「格式化」通过 `formatRequest` 序号复用同一逻辑，避免按钮只格式化全文；`Workspace` 增加格式化请求序号并透传 `formatSql`/`onFormatNotice`，按钮 title 与工具栏提示改为「有选区只执行/格式化选区」；`App` 抽出 `formatSqlText` 供全文/选区共用，`onFormatNotice` 复用 `showNotice`。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`scripts/e2e-sqlite.mjs`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run build`、`npm run test:sql-format`、`npm run e2e:sqlite` 通过；E2E 用 `select a from t;\nselect b from u;` 选中第一行后分别按 Ctrl+Shift+F 和点击工具栏「格式化」，确认只重排选中语句、第二条保持原样，Ctrl+Z 可还原。遗留：选中的是表达式/片段而不是完整语句时，会按独立 SQL 排版，缩进可能与上下文不协调；未在真实 Electron 中人工验收。
+
+- **W-20261116-11 补全问题修正**：诉求是调整 CodeMirror 迁移后的补全体验。排查发现：`INSERT INTO t (` 列清单被当成表位置（无候选/给表名）、`WHERE`/`HAVING`/`ORDER BY`/`GROUP BY` 后空格不自动弹层、`JOIN ... ON` 与逗号后续列表不弹层、列前缀命中时混入大量纯子序列关键字/函数（如 `na` 同时出现 `CURRENT_TIMESTAMP`）、别名被 20 的优先级压到函数/关键字之后、CodeMirror 没有旧版「正在加载补全…」提示。变更：`sql-completion` 新增 `insertColumnList`/`insertTable` 上下文（只检查光标前最近的未闭合 `(`，并要求前面紧邻 `INSERT [IGNORE|OR ...] INTO <表名>`；括号位置用掩码文本、表名用原文，避免引号被掩码吃掉），`completionCandidatesForContext` 在列清单返回空基础候选，`App.requestCompletion` 按 `insertTable` 走 `loadColumns`；自动触发扩展到 `WHERE`/`HAVING`/`ORDER BY`/`GROUP BY`、`JOIN` 语句里的 `ON`、以及列/关系上下文的逗号后续（含逗号后的空格/换行，INSERT 列清单还支持 `(` 后空白）；`rankCompletions` 在有前缀/词首命中时过滤纯子序列的关键字/函数噪音；别名优先级从硬编码 20 改为 `completionKindPriority('alias')`；`shouldOpenCompletionOnInput` 支持复用已计算的上下文，避免每次输入重复扫描整条语句；`SqlEditor` 恢复 120ms 后的「正在加载补全…」浮层（只在本基础候选为空且需要异步元数据时显示，按光标坐标定位，失焦/结果返回时清除），并补 `.sql-completion-loading` 样式。涉及 `src/renderer/src/utils/sql-completion.ts`、`src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/App.tsx`、`src/renderer/src/styles.css`、`scripts/test-sql-completion.mjs`、`scripts/e2e-sqlite.mjs`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run test:sql-completion`、`npm run test:sql-format`、`npm run e2e:sqlite` 通过；另用临时 Playwright 脚本在真实 Electron（SQLite）确认：`INSERT INTO demo_users (` / `(id, ` 只给列、`JOIN ... ON` 给两张表的列、`WHERE`/`ORDER BY`/`GROUP BY`/`HAVING` 空格后给列、接受表/列/INSERT 列候选插入正确、`SELECT *` 展开为 7 列、`O'Brien` 不重复配对、`()` 自动配对。遗留/风险：补全语句边界仍只按 `;`，MSSQL `GO` / MySQL `DELIMITER` 多批次脚本可能把上一批的表带进列候选；INSERT 列清单中已使用的列仍会再次出现；系统对象仍按既有设计进入对象候选；加载提示未用真实慢元数据构造验证；MySQL/MariaDB/MSSQL 的真实实例补全未重跑。
+
+- **W-20261116-12 SQL 编辑器 Tab 键**：诉求是编辑器内 Tab 用于缩进/接受补全，而不是把焦点切到下一个控件。变更：`SqlEditor` 增加 `handleTab` 并绑定 `Tab` / `Shift-Tab`：补全弹层有候选时 Tab 调用 `acceptCompletion`（CodeMirror 默认只在 Enter 上接受），若弹层刚出现仍在 75ms `interactionDelay` 保护期内，则等过保护期再接受而不是插入空格；无补全时，光标处插入与「Tab 宽度」设置一致的空格（默认 2），有选区时用 `indentMore` 按行缩进，Shift+Tab 用 `indentLess` 反缩进；补全 pending 时先 `closeCompletion` 再缩进；Tab 绑定始终返回 true，不再让焦点离开编辑器。工具栏提示补充「Tab 缩进/接受补全」。需要把焦点移出编辑器时可用 CodeMirror 默认的 Ctrl+M 切换 Tab 焦点模式。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`scripts/e2e-sqlite.mjs`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；E2E 覆盖：光标处 Tab 插入 2 个空格且焦点仍在 `.cm-content`、选中整行 Tab 缩进/Shift+Tab 反缩进、`SELECT * FROM dem` 弹层打开时 Tab 接受候选并关闭弹层。遗留：Tab 会形成焦点陷阱，需键盘离开时按 Ctrl+M；插入的是空格而非 `\t`，若后续需要“插入真实 Tab”或“Tab 宽度=4/8 时按设置生效”的额外开关，需再加设置项；未人工验收。
+
+- **W-20261116-13 F5 执行/取消**：诉求是编辑器内按 F5 执行，查询未结束时再按 F5 取消，与工具栏执行/取消按钮一致。变更：`SqlEditor` 增加 `running`/`onCancel` 属性；`runAllOrSelection` 按按钮语义执行（有选区执行选区，无选区执行整段 SQL），`runOrCancelAll` 在执行中调用 `onCancel`、空闲时执行；`shortcutKeymap` 用 `Prec.highest` 绑定固定 `F5`（排在其他快捷键前）。`Workspace` 把 `running`/`onCancel` 透传给编辑器，执行按钮 title 改为「执行 SQL（F5 / Ctrl+Enter）」/「取消当前查询（F5）」，工具栏提示改为「F5 执行/取消；Ctrl+Enter 当前语句；…」。`Ctrl+Enter` 保持原有「选区或光标语句」语义，执行中不会取消。涉及 `src/renderer/src/features/editor/SqlEditor.tsx`、`src/renderer/src/components/Workspace.tsx`、`scripts/e2e-sqlite.mjs`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过（E2E 填 `SELECT 7 AS f5;` 按 F5，结果网格出现 7）；另用临时 Playwright 脚本在真实 Electron（SQLite）验证：长递归 CTE 按 F5 后按钮变「取消」，再按 F5 触发取消，toast 显示「查询已取消。」且按钮恢复「执行」，脚本已删除。遗留：F5 无选区时执行整段 SQL（与按钮一致），不是光标语句；Ctrl+Enter 执行中仍走原有空操作而不是取消；取消沿用既有路径，SQLite 会终止 Worker、会话可能需要重连；MySQL/MSSQL 的 F5 取消未在真实实例验证。
+
+- **W-20261116-14 取消结果集行数上限，全部加载**：诉求是去掉「仅显示前 2000 行」，查询和导出都加载全部结果；PRD 里的行数限制同步改掉。变更：`QueryRequest` / `QueryScriptRequest` 删除 `maxRows`，`QueryResult` / `QueryResultSet` 删除 `truncated`；`AppSettings` 删除 `resultRowLimit`，设置面板移除「单次查询结果上限」及内存提示，`shared/settings` 删除 `RESULT_ROW_LIMIT_*`、`normalizeRowLimit`、`resolveRowLimit`；SQLite Worker、MySQL、MariaDB、MSSQL 驱动删除 `MAX_ROWS`/`rowLimit`/`truncated`，读取全部行；`DatabaseSession.query` 与 `ConnectionManager` 去掉 `maxRows` 参数；渲染层删除「仅显示前 N 行」通知、结果区 badge、状态栏「已截断」；导出「加载全部」去掉 1 万行上限，`buildTablePageQuery` 在 `limit <= 0` 时不拼 `LIMIT/OFFSET`，表数据导出改为 0；`test-settings` 移除行数上限用例，`test-pagination` 增加 limit=0 用例，`e2e:sqlite` 由「2001 行截断到 2000」改为断言 2001 行全部加载；PRD 增加 v0.21 修订并更新 §0.2/§0.3/§4.2/§4.6/§4.7/§9/附录 A.3 与性能表；TECH_DESIGN、AGENTS、FEATURE_MATRIX 同步。涉及 `src/shared/ipc-contract.ts`、`src/shared/settings.ts`、`src/shared/dialect/identifiers.ts`、`src/main/ipc/schemas.ts`、`src/main/services/DatabaseSession.ts`、`src/main/services/ConnectionManager.ts`、`src/main/services/sqlite/SqliteSession.ts`、`src/main/workers/sqlite-worker.ts`、`src/main/services/mysql/MysqlSession.ts`、`src/main/services/mariadb/MariaSession.ts`、`src/main/services/mssql/MssqlSession.ts`、`src/main/storage/metadata.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/types.ts`、`src/renderer/src/components/SettingsDialog.tsx`、`src/renderer/src/components/ExportDialog.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/components/StatusBar.tsx`、`scripts/test-settings.mjs`、`scripts/test-pagination.mjs`、`scripts/e2e-sqlite.mjs`、`prd/PRD.md`、`prd/TECH_DESIGN.md`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`、`AGENTS.md`。验证：`npm run typecheck`、`test:settings`、`test:pagination`、`test:export`、`npm run e2e:sqlite` 通过（E2E 断言 2001 行全部加载、无截断提示）。遗留/风险：结果集内存随行数增长，超大结果集可能卡顿或 OOM，需用户在 SQL 侧用 `WHERE`/`LIMIT` 控制；IPC 仍是单次全量返回，流式/分页是 v1.x；MySQL/MariaDB/MSSQL 驱动已改但未跑真实实例 E2E；旧元数据库中的 `resultRowLimit` 字段会被忽略，不会自动清理。
+
+- **W-20261116-15 MSSQL 方言关键字与 `sys.` 补全**：诉求是 `WAITFOR` 等 T-SQL 关键字无法补全，且 `exec sys.` / `select * from sys.` 没有候选。根因：关键字补全用本地白名单，缺少 `WAITFOR`/`DBCC` 等低频 T-SQL 关键字；`SELECT * FROM sys.` 的 `sys` 被 `parseTables` 当成表名，限定符分支先走 `loadColumns('sys')` 导致空结果；MSSQL 对象列表用 `sys.objects`，不包含 `sys` schema 下的系统视图/存储过程；即使返回对象，非 dbo 对象的 `name` 带 `schema.` 前缀，直接插入会变成 `sys.sys.tables`；另外验证时发现 Enter 在弹层刚出现的 75ms 内会落到换行。变更：`sql-completion` 直接合并 `@codemirror/lang-sql` 的 MSSQL/MySQL/MariaSQL/SQLite dialect 关键字与类型（保留版本过滤），新增 `stripSchemaPrefix`；`MssqlSession.schema` 改用 `sys.all_objects`（`includeSystemObjects=false` 仍按 `is_ms_shipped` 过滤用户对象）；`App.requestCompletion` 的一段限定符改为「显式别名 > schema > 数据库 > 表名/别名」顺序，schema 分支候选去掉重复前缀；`SqlEditor` 抽出 `acceptCompletionWhenReady`，Tab/Enter 共用（弹层刚出现时等 75ms 保护期再接受，未打开补全时 Enter 仍换行）。涉及 `src/renderer/src/utils/sql-completion.ts`、`src/renderer/src/App.tsx`、`src/main/services/mssql/MssqlSession.ts`、`src/renderer/src/features/editor/SqlEditor.tsx`、`scripts/test-sql-completion.mjs`、`AGENTS.md`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`test:sql-completion`、`e2e:sqlite` 通过；真实 MSSQL 实例 + Electron 临时脚本确认 `SELECT * FROM sys.` 列出 `trace_xe_action_map`/`all_columns` 等系统视图、`EXEC sys.` 列出 `sp_add_agent_parameter` 等系统过程、`WAIT` 补全出 `WAITFOR`；接受后分别插入 `SELECT * FROM sys.trace_xe_action_map`、`EXEC sys.sp_add_agent_parameter`、`WAITFOR`，没有 `sys.sys.` 前缀；临时脚本已删除。遗留/风险：系统对象首次加载约 1,860 条（有缓存）；关键字词表随 CodeMirror 版本变化；MySQL/MariaDB 的同类 schema 补全未跑真实实例；MSSQL `sys.` 候选默认包含系统对象（与既有“补全包含系统对象”设计一致）。
+
+- **W-20261117-01 补全候选降噪与常用关键字优先**：诉求是系统对象已加载但补全用起来不方便，例如输入 `select * fr` 时出现大量表/视图候选，`FROM ` 被 `sys`/`INFORMATION_SCHEMA` 系统对象淹没。根因：W-20261116-15 让 `loadObjects` 默认带系统对象，`FROM/JOIN` 关系分支把 1,800+ 个系统对象与用户表合并；`completionGroups.objects` 也直接使用可能包含系统对象的 `activeSchema`；同时 CodeMirror 方言词表引入 FREE/FREETEXT 等低频关键字，`fr` 时 FROM 不排第一。变更：`loadObjects(database, includeSystemObjects)` 按 user/all 分别缓存；`FROM/JOIN/INTO/UPDATE` 只加载用户对象，`EXEC` 保留系统过程；`completionGroups.objects` 过滤 MSSQL `sys`/`INFORMATION_SCHEMA` 与 SQLite `sqlite_*`，MSSQL 额外把 `sys`/`INFORMATION_SCHEMA` 作为 schema 候选；schema/数据库限定符仍加载完整对象；系统对象候选优先级 +10，EXEC 时用户过程排在系统过程前；`rankCompletions` 在关键字同分时把 SELECT/FROM/WHERE 等常用词排在 FREE/FREETEXT 等低频词前（不越过函数优先级）。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/utils/sql-completion.ts`、`scripts/test-sql-completion.mjs`、`AGENTS.md`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`test:sql-completion`、`e2e:sqlite` 通过；真实 MSSQL `fanr` 库 + Electron 临时脚本确认 `SELECT * fr` 的候选顺序为 FROM > FREE > FREETEXT、`SELECT * FROM ` 只列用户表 `aaa/ccc/ddd` 与 `dbo`/`sys`/`INFORMATION_SCHEMA` schema/数据库、`FROM sys` 只给 sys schema、`FROM sys.` 仍能列出系统视图、`EXEC sys.` 仍能列出系统过程；临时脚本已删除。遗留/风险：schema/数据库仍可能有模糊匹配噪音；EXEC 仍会加载系统过程（按设计）；每个库可能分别缓存 user/all 两份对象；MySQL/MariaDB/SQLite 的同类降噪只做了逻辑走查与 SQLite E2E。
+
+- **W-20261117-02 WHERE / select list 列补全**：诉求是 `WHERE` 后和 select list 没有列补全。排查：`SELECT ` 后空格不自动触发，select list 需要先输入字母或 Ctrl+Space；MSSQL 单连接没有串行队列，补全对 JOIN 多表并发请求列元数据时可能撞上 `SentClientRequest` 状态失败；`loadColumns` 把失败结果缓存为空数组，导致该 tab/表后续一直显示不出列。变更：`MssqlSession.run` 增加 Promise 队列，所有查询/元数据请求串行执行；`loadColumns` 只在成功且列数 > 0 时写缓存，失败/空结果下次补全重试；`shouldAutoTriggerCompletion` 增加 `SELECT` / `SELECT DISTINCT`，空格后直接弹列/函数候选（有 FROM 时列优先）。涉及 `src/main/services/mssql/MssqlSession.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/utils/sql-completion.ts`、`scripts/test-sql-completion.mjs`、`AGENTS.md`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`test:sql-completion`、`e2e:sqlite`、`check:mssql`、`check:mssql-multidb` 通过；真实 MSSQL `fanr` 库 + Electron 临时脚本确认 `SELECT ` 自动弹层、`WHERE ` / JOIN WHERE / `SELECT  FROM dbo.aaa`（光标在 select list）/ `WHERE a.` 都能列出 `id`/`v`/`addtime` 等列；临时脚本已删除。遗留/风险：元数据请求串行后，多表 JOIN 的列候选要等前一张表加载完，首次可能稍慢；查询超时/取消仍按会话级 `currentRequest` 处理，排队中的请求没有独立取消目标；MySQL/MariaDB 列补全未跑真实实例。
 
 ## 7. 附录：旧文档合并映射
 

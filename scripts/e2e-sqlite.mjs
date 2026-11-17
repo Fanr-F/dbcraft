@@ -94,7 +94,7 @@ try {
   );
 
   await page.locator('.tree-item', { hasText: 'demo_users' }).click();
-  const editorValue = await page.locator('.sql-editor').inputValue();
+  const editorValue = await page.locator('.cm-content').innerText();
   assert(editorValue.includes('SELECT * FROM "demo_users"'), 'table click did not fill SQL');
 
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -110,35 +110,159 @@ try {
   );
   assert((await page.locator('revo-grid').innerText()).includes('User 1'), 'result grid missing User 1');
 
-  // 超过 2000 行时必须给出“仅显示前 N 行”，而不是笼统的“已截断”。
-  await page.locator('.sql-editor').fill(
-    'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 2001) SELECT x FROM cnt;',
+  // CodeMirror：输入时自动补全、Ctrl+Shift+F 格式化、Ctrl+Z 撤销格式化。
+  await page.locator('.cm-content').fill('sel');
+  await page.waitForSelector('.cm-tooltip-autocomplete', { timeout: 5000 });
+  assert(
+    (await page.locator('.cm-tooltip-autocomplete').innerText()).includes('SELECT'),
+    'completion popup did not offer SELECT',
   );
-  await page.getByRole('button', { name: '执行', exact: true }).click();
+  await page.keyboard.press('Escape');
+
+  // 列上下文自动补全：INSERT 列清单、WHERE、ORDER BY 都应直接给出列。
+  const expectColumnCompletion = async (sql) => {
+    await page.locator('.cm-content').fill(sql);
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('.cm-tooltip-autocomplete')
+          ?.textContent?.includes('name') ?? false,
+      null,
+      { timeout: 5000 },
+    );
+    await page.keyboard.press('Escape');
+  };
+  await expectColumnCompletion('INSERT INTO demo_users (');
+  await expectColumnCompletion('INSERT INTO demo_users (id, ');
+  // 没有 FROM 时 SELECT 列表没有列可给，但逗号后仍应弹出关键字/函数候选。
+  await page.locator('.cm-content').fill('SELECT id, ');
+  await page.waitForSelector('.cm-tooltip-autocomplete', { timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await expectColumnCompletion('SELECT * FROM demo_users WHERE ');
+  await expectColumnCompletion('SELECT * FROM demo_users ORDER BY id, ');
+
+  // Tab：光标处插入缩进、整行缩进/反缩进，且不把焦点移出编辑器。
+  await page.locator('.cm-content').fill('SELECT 1;');
+  const beforeTab = await page.evaluate(
+    () => document.querySelector('.cm-content')?.textContent?.length ?? 0,
+  );
+  await page.keyboard.press('End');
+  await page.keyboard.press('Tab');
+  const afterTab = await page.evaluate(
+    () => document.querySelector('.cm-content')?.textContent?.length ?? 0,
+  );
+  assert(afterTab === beforeTab + 2, `Tab did not insert 2 spaces: ${beforeTab} -> ${afterTab}`);
+  assert(
+    await page.evaluate(
+      () => document.activeElement?.classList.contains('cm-content') ?? false,
+    ),
+    'Tab moved focus out of the editor',
+  );
+
+  await page.locator('.cm-content').fill('SELECT 1;');
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('Shift+End');
+  await page.keyboard.press('Tab');
+  assert(
+    (await page.locator('.cm-content').innerText()).startsWith('  SELECT 1;'),
+    'Tab did not indent the selected line',
+  );
+  await page.keyboard.press('Shift+Tab');
+  assert(
+    (await page.locator('.cm-content').innerText()).startsWith('SELECT 1;'),
+    'Shift+Tab did not outdent the selected line',
+  );
+
+  // 补全弹层打开时 Tab 接受候选。
+  await page.locator('.cm-content').fill('SELECT * FROM dem');
+  await page.waitForSelector('.cm-tooltip-autocomplete', { timeout: 5000 });
+  await page.keyboard.press('Tab');
+  await page.waitForFunction(
+    () => !document.querySelector('.cm-tooltip-autocomplete'),
+    null,
+    { timeout: 2000 },
+  );
+  const tabCompletion = await page.locator('.cm-content').innerText();
+  assert(
+    tabCompletion.includes('demo_'),
+    `Tab did not accept completion: ${JSON.stringify(tabCompletion)}`,
+  );
+
+  await page.locator('.cm-content').fill('select id, name from users');
+  await page.waitForTimeout(600);
+  await page.keyboard.press('Control+Shift+F');
+  await page.waitForFunction(
+    () => document.querySelector('.cm-content')?.innerText?.includes('SELECT') ?? false,
+    null,
+    { timeout: 5000 },
+  );
+  const formattedEditorText = await page.locator('.cm-content').innerText();
+  assert(
+    formattedEditorText.split('\n').length > 1 && formattedEditorText.includes('FROM'),
+    `format did not produce multiline SQL:\n${formattedEditorText}`,
+  );
+  await page.keyboard.press('Control+Z');
   await page.waitForFunction(
     () =>
-      document
-        .querySelector('.result-pane .badge-warn')
-        ?.textContent?.includes('仅显示前 2000 行') ?? false,
+      document.querySelector('.cm-content')?.innerText?.includes('select id, name from users') ??
+      false,
+    null,
+    { timeout: 5000 },
+  );
+
+  // 快捷键要压过 CodeMirror 默认键位（Ctrl+Enter 默认是插入空行）。
+  await page.locator('.cm-content').fill('SELECT 42 AS ok;');
+  await page.keyboard.press('Control+Enter');
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('1 行') ?? false,
     null,
     { timeout: 15000 },
   );
-  assert((await statusText(page)).includes('2000 行'), 'truncated row count missing from status bar');
 
-  // 「不限制」档位：同样 2001 行不应再截断。
-  await page.locator('.toolbar .icon-btn[title="设置"]').click();
-  await page.waitForSelector('.modal', { timeout: 5000 });
-  await page
-    .locator('.modal .field', { hasText: '单次查询结果上限' })
-    .locator('select')
-    .selectOption('0');
-  assert(
-    (await page.locator('.modal .form-error').innerText()).includes('内存'),
-    'unlimited setting should warn about memory risk',
+  // F5 与工具栏「执行」一致：无选区执行整段 SQL。
+  await page.locator('.cm-content').fill('SELECT 7 AS f5;');
+  await page.keyboard.press('F5');
+  await page.waitForFunction(
+    () => document.querySelector('revo-grid')?.textContent?.includes('7') ?? false,
+    null,
+    { timeout: 15000 },
   );
-  await page.locator('.modal').getByRole('button', { name: '保存', exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 5000 });
-  await page.locator('.sql-editor').fill(
+
+  // 选区格式化：只重排选中语句，未选中的语句保持原样。
+  await page.locator('.cm-content').fill('select a from t;\nselect b from u;');
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('Shift+End');
+  await page.keyboard.press('Control+Shift+F');
+  await page.waitForFunction(
+    () => {
+      const text = document.querySelector('.cm-content')?.innerText ?? '';
+      return text.includes('SELECT') && text.includes('select b from u;');
+    },
+    null,
+    { timeout: 5000 },
+  );
+  await page.keyboard.press('Control+Z');
+  await page.waitForFunction(
+    () => (document.querySelector('.cm-content')?.innerText ?? '').includes('select a from t;'),
+    null,
+    { timeout: 5000 },
+  );
+
+  // 工具栏「格式化」按钮同样按选区处理。
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('Shift+End');
+  await page.getByRole('button', { name: '格式化', exact: true }).click();
+  await page.waitForFunction(
+    () => {
+      const text = document.querySelector('.cm-content')?.innerText ?? '';
+      return text.includes('SELECT') && text.includes('select b from u;');
+    },
+    null,
+    { timeout: 5000 },
+  );
+
+  // 结果集不再截断：2001 行全部加载，状态栏显示真实行数。
+  await page.locator('.cm-content').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 2001) SELECT x FROM cnt;',
   );
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -149,20 +273,10 @@ try {
   );
   assert(
     !((await page.locator('.result-pane .badge-warn').allInnerTexts()).join(' ').includes('仅显示前')),
-    'unlimited result should not show truncation badge',
+    'result should not be truncated',
   );
 
-  // 恢复默认上限，避免影响后续断言。
-  await page.locator('.toolbar .icon-btn[title="设置"]').click();
-  await page.waitForSelector('.modal', { timeout: 5000 });
-  await page
-    .locator('.modal .field', { hasText: '单次查询结果上限' })
-    .locator('select')
-    .selectOption('2000');
-  await page.locator('.modal').getByRole('button', { name: '保存', exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 5000 });
-
-  await page.locator('.sql-editor').fill("UPDATE demo_users SET status = 'blocked' WHERE id = 1;");
+  await page.locator('.cm-content').fill("UPDATE demo_users SET status = 'blocked' WHERE id = 1;");
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.result-pane')?.textContent?.includes('1 行受影响'),
@@ -170,7 +284,7 @@ try {
     { timeout: 15000 },
   );
 
-  await page.locator('.sql-editor').fill('SELECT * FROM missing_table;');
+  await page.locator('.cm-content').fill('SELECT * FROM missing_table;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForSelector('.result-error', { timeout: 15000 });
   assert(
@@ -183,7 +297,7 @@ try {
   );
   assert((await statusText(page)).includes('执行失败'), 'status bar did not show failure');
 
-  await page.locator('.sql-editor').fill('SELECT 1 AS a; SELECT 2 AS b;');
+  await page.locator('.cm-content').fill('SELECT 1 AS a; SELECT 2 AS b;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForSelector('.result-tabs', { timeout: 15000 });
   await page.waitForFunction(
@@ -215,7 +329,7 @@ try {
   );
 
   // 多语句遇错停止：第一条结果保留，失败原因进入消息面板，后续语句不执行。
-  await page.locator('.sql-editor').fill(
+  await page.locator('.cm-content').fill(
     'SELECT 10 AS ok; SELECT * FROM missing_multi; SELECT 20 AS never;',
   );
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -234,7 +348,7 @@ try {
   );
 
   // 生产连接：DELETE 无 WHERE 必须先弹确认；取消后不得执行。
-  await page.locator('.sql-editor').fill('DELETE FROM demo_orders;');
+  await page.locator('.cm-content').fill('DELETE FROM demo_orders;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForSelector('.danger-modal', { timeout: 5000 });
   assert(
@@ -248,7 +362,7 @@ try {
     { timeout: 5000 },
   );
 
-  await page.locator('.sql-editor').fill('SELECT COUNT(*) AS n FROM demo_orders;');
+  await page.locator('.cm-content').fill('SELECT COUNT(*) AS n FROM demo_orders;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('revo-grid')?.textContent?.includes('1500') ?? false,
@@ -256,7 +370,7 @@ try {
     { timeout: 15000 },
   );
 
-  await page.locator('.sql-editor').fill(
+  await page.locator('.cm-content').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
   );
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -293,7 +407,7 @@ try {
     { timeout: 15000 },
   );
 
-  await page.locator('.sql-editor').fill('SELECT 42 AS ok;');
+  await page.locator('.cm-content').fill('SELECT 42 AS ok;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
@@ -302,7 +416,7 @@ try {
   );
 
   // 超过 2^53 的整数必须原样返回，不能被 JS number 静默四舍五入。
-  await page.locator('.sql-editor').fill('SELECT 9007199254740993 AS big;');
+  await page.locator('.cm-content').fill('SELECT 9007199254740993 AS big;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('revo-grid')?.textContent?.includes('9007199254740993') ?? false,
@@ -331,7 +445,7 @@ try {
     throw error;
   }
 
-  await page.locator('.sql-editor').fill('SELECT 2 AS ok;');
+  await page.locator('.cm-content').fill('SELECT 2 AS ok;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
@@ -340,7 +454,7 @@ try {
   );
 
   await page.locator('.tab', { hasText: '查询 2' }).click();
-  await page.locator('.sql-editor').fill(
+  await page.locator('.cm-content').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
   );
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -348,7 +462,7 @@ try {
 
   await page.locator('.tab', { hasText: '查询 3' }).click();
   const secondStarted = Date.now();
-  await page.locator('.sql-editor').fill('SELECT 3 AS ok;');
+  await page.locator('.cm-content').fill('SELECT 3 AS ok;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('执行中'),
@@ -365,7 +479,7 @@ try {
   console.log('[e2e:sqlite] independent session query ms:', secondElapsed);
 
   await page.locator('.tab', { hasText: '查询 3' }).click();
-  await page.locator('.sql-editor').fill('SELECT 4 AS ok;');
+  await page.locator('.cm-content').fill('SELECT 4 AS ok;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('.statusbar')?.textContent?.includes('1 行'),
@@ -386,7 +500,7 @@ try {
     null,
     { timeout: 5000 },
   );
-  const ddlText = await page.locator('.sql-editor').inputValue();
+  const ddlText = await page.locator('.cm-content').innerText();
   assert(ddlText.includes('CREATE TABLE demo_users'), 'DDL tab missing CREATE TABLE');
   assert(ddlText.includes('demo_users'), 'DDL tab missing table name');
 
@@ -403,7 +517,7 @@ try {
     null,
     { timeout: 5000 },
   );
-  const databaseDdl = await page.locator('.sql-editor').inputValue();
+  const databaseDdl = await page.locator('.cm-content').innerText();
   assert(databaseDdl.includes('CREATE TABLE demo_users'), 'database DDL missing table');
   assert(databaseDdl.includes('CREATE VIEW active_users'), 'database DDL missing view');
 
@@ -480,7 +594,7 @@ try {
     null,
     { timeout: 10000 },
   );
-  await page.locator('.sql-editor').fill('SELECT * FROM "e2e_created" LIMIT 1;');
+  await page.locator('.cm-content').fill('SELECT * FROM "e2e_created" LIMIT 1;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('revo-grid')?.textContent?.includes('note') ?? false,
@@ -495,7 +609,7 @@ try {
   await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 10000 });
 
-  await page.locator('.sql-editor').fill(
+  await page.locator('.cm-content').fill(
     "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_e2e_created_note';",
   );
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -519,7 +633,7 @@ try {
   await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 10000 });
 
-  await page.locator('.sql-editor').fill('SELECT * FROM "e2e_created" LIMIT 1;');
+  await page.locator('.cm-content').fill('SELECT * FROM "e2e_created" LIMIT 1;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
     () => {
@@ -569,7 +683,7 @@ try {
     null,
     { timeout: 5000 },
   );
-  const insertedSql = await page.locator('.sql-editor').inputValue();
+  const insertedSql = await page.locator('.cm-content').innerText();
   assert(insertedSql.trim().length > 0, 'history insert left editor empty');
 
   // MOD-05 第一层：双击表打开数据页，分页浏览。
@@ -607,14 +721,14 @@ try {
   await page.locator('.table-pager select[aria-label="排序字段"]').selectOption('id');
   await page.waitForFunction(
     () =>
-      document.querySelector('.sql-editor')?.value?.includes('ORDER BY "id" ASC') ?? false,
+      document.querySelector('.cm-content')?.innerText?.includes('ORDER BY "id" ASC') ?? false,
     null,
     { timeout: 5000 },
   );
   await page.getByRole('button', { name: '升序' }).click();
   await page.waitForFunction(
     () =>
-      document.querySelector('.sql-editor')?.value?.includes('ORDER BY "id" DESC') ?? false,
+      document.querySelector('.cm-content')?.innerText?.includes('ORDER BY "id" DESC') ?? false,
     null,
     { timeout: 5000 },
   );
@@ -626,14 +740,14 @@ try {
   await page.getByRole('button', { name: '添加条件' }).click();
   await page.waitForFunction(
     () =>
-      document.querySelector('.sql-editor')?.value?.includes('WHERE "name" LIKE ? ESCAPE \'!\'') ??
+      document.querySelector('.cm-content')?.innerText?.includes('WHERE "name" LIKE ? ESCAPE \'!\'') ??
       false,
     null,
     { timeout: 5000 },
   );
   await page.getByRole('button', { name: '清除', exact: true }).click();
   await page.waitForFunction(
-    () => !(document.querySelector('.sql-editor')?.value?.includes('WHERE "name"') ?? false),
+    () => !(document.querySelector('.cm-content')?.innerText?.includes('WHERE "name"') ?? false),
     null,
     { timeout: 5000 },
   );
@@ -666,7 +780,7 @@ try {
   await page.locator('.grid-layout summary').click();
 
   // 查询超时：上面把设置面板的查询超时调成了 10 秒。
-  await page.locator('.sql-editor').fill(
+  await page.locator('.cm-content').fill(
     'WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200000000) SELECT sum(x) FROM cnt;',
   );
   await page.getByRole('button', { name: '执行', exact: true }).click();
