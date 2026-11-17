@@ -1515,8 +1515,22 @@ export interface CompletionRankOptions {
 }
 
 /**
+ * 补全结果条数上限。
+ *
+ * - 普通位置（关键字/列/表混排）保持 50 条，避免列表过长；
+ * - 限定符补全（`sys.`、`dbo.`、`u.`）必须给全量候选，否则按名称排序靠后
+ *   的对象会被截断（例如 `sys.databases` 在 `sys.` 列表里排第 60 位，
+ *   默认 50 条时完全看不到）。CodeMirror 只渲染可视窗口，条数多不会卡 UI。
+ */
+export function completionResultLimit(context: CompletionContext): number {
+  return context.qualifier ? 2000 : 50;
+}
+
+/**
  * 带排序的补全过滤：
  * - 有前缀命中（含完全相等）时只保留前缀命中，不再混入词首/子序列候选；
+ * - 例外：多段输入（含 `_`）按段命中时保留，例如 `dm_sql` → `dm_exec_sql_text`；
+ *   限定符补全下单段也按段命中，例如 `sys.sql` → `dm_exec_sql_text`；
  * - 没有前缀命中时才回退到「单词开头 > 模糊子序列」；
  * - 匹配质量 > 类型权重（列 > 别名 > 表 > 视图 > 存储过程 > Schema > 库 > 函数 > 关键字）；
  * - `boost` 参与加权（正数提前、负数降权），`priority` 只在同分时作为稳定次序；
@@ -1561,13 +1575,22 @@ export function rankCompletions(
 
   const priorityOf = (item: RankedCompletion) =>
     item.priority ?? completionKindPriority(item.kind);
+  // 限定符补全时允许单段命中文档中的某个词段：`sys.sql` → `dm_exec_sql_text`。
+  // 非限定符输入仍保持严格前缀，避免 `se` → `user_sessions` 的噪音。
+  const allowSegmentSingle = Boolean(options.context?.qualifier);
   const scored = ranked.map((item) => {
     const tier = matchTier(item, query);
+    // 多段前缀：`dm_sql` 命中 `dm_exec_sql_text` 的 `dm` + `sql` 两段。
+    const segment =
+      tier > 1 &&
+      matchSegmentPrefix(item.label.toLowerCase(), query, allowSegmentSingle);
     return {
       item,
       tier,
+      segment,
       score:
         matchScore(tier) +
+        (segment ? 900 : 0) +
         completionKindScore(item.kind) +
         (item.boost ?? 0) +
         contextScore(item, rankContext),
@@ -1577,9 +1600,11 @@ export function rankCompletions(
   if (query.length > 0) {
     // 严格前缀：只要存在完全相等/前缀命中，就丢掉词首与子序列命中。否则输入
     // `se` 时 `users`（u-s-e-r-s）会排在列表末尾，候选随每次按键跳动。
+    // 例外：多段输入（`dm_sql`）或限定符下单段（`sys.sql`）命中了对象
+    // 的后段（`dm_exec_sql_text`），保留候选并排在真正前缀之后。
     const hasPrefixMatch = scored.some((entry) => entry.tier <= 1);
     if (hasPrefixMatch) {
-      visible = scored.filter((entry) => entry.tier <= 1);
+      visible = scored.filter((entry) => entry.tier <= 1 || entry.segment);
     } else {
       // 一个前缀都没有时才启用模糊兜底；仍有词首命中时，过滤纯子序列的
       // 关键字/函数噪音（例如 `na` 不再列出 CURRENT_TIMESTAMP）。
@@ -1865,8 +1890,18 @@ export function excludeReferencedTables(
   if (!['from', 'into', 'update', 'table', 'view'].includes(context.clause)) {
     return candidates;
   }
+  // 光标正在编辑的标识符可能正是语句里已有的表名（例如把光标放到
+  // `sys.databases` 的 `sys.` 后面）。此时不能按“已引用”排除，否则当前
+  // 对象自己反而没有候选；只排除与正在输入的 token 无关的表。
+  const typing = context.prefix.trim().toLowerCase();
   const referenced = new Set(
     context.tables
+      .filter((table) => {
+        if (!typing) return true;
+        const raw = table.raw.toLowerCase();
+        const qualified = table.parts.join('.').toLowerCase();
+        return !(raw.startsWith(typing) || qualified.startsWith(typing));
+      })
       .map((table) => table.table.toLowerCase())
       .filter(Boolean),
   );
@@ -1876,6 +1911,47 @@ export function excludeReferencedTables(
     const last = candidate.label.split('.').pop()?.toLowerCase() ?? '';
     return !referenced.has(last);
   });
+}
+
+/**
+ * 词段前缀匹配：按 `_` 切分输入。
+ *
+ * - 多段输入（`dm_sql`）：首段必须命中候选名字第一段，后续段按顺序命中候选
+ *   的某个段前缀，例如 `dm_sql` 命中 `dm_exec_sql_text`；
+ * - 单段输入默认不启用（保持严格前缀）；只有限定符补全传入
+ *   `allowSingleSegment` 时才允许，例如 `sys.sql` 命中 `dm_exec_sql_text`。
+ */
+function matchSegmentPrefix(
+  value: string,
+  query: string,
+  allowSingleSegment = false,
+): boolean {
+  const querySegments = query.split('_').filter(Boolean);
+  if (querySegments.length === 0) return false;
+  // 单段输入默认不走段匹配（避免 `se` 命中 `user_sessions` 这类噪音）；
+  // 限定符补全（`sys.`/`别名.`）下允许，例如 `sys.sql` → `dm_exec_sql_text`。
+  if (querySegments.length === 1 && !allowSingleSegment) return false;
+  const valueSegments = value.split('_');
+  let cursor = 0;
+  for (let index = 0; index < querySegments.length; index += 1) {
+    const segment = querySegments[index]!;
+    let found = -1;
+    for (let position = cursor; position < valueSegments.length; position += 1) {
+      if (valueSegments[position]!.startsWith(segment)) {
+        found = position;
+        break;
+      }
+    }
+    // 多段输入的首段必须命中名字第一段，避免 `sql_text` 把任意中间段当成开头。
+    if (
+      found < 0 ||
+      (index === 0 && querySegments.length > 1 && found !== 0)
+    ) {
+      return false;
+    }
+    cursor = found + 1;
+  }
+  return true;
 }
 
 /** 贪心匹配子序列，优先命中单词开头，返回命中的字符下标；匹配失败返回 null。 */

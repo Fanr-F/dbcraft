@@ -55,6 +55,7 @@ import { warmUpSqlAnalysis } from '../../utils/sql-analysis';
 import { statementAtCursor } from '../../utils/sql-script';
 import {
   completionCandidatesForContext,
+  completionResultLimit,
   excludeReferencedTables,
   extractCompletionContext,
   extractSignatureHelp,
@@ -398,6 +399,7 @@ export function SqlEditor(props: SqlEditorProps) {
     const candidates = excludeReferencedTables([...extra, ...base], ourContext);
     const ranked = rankCompletions(candidates, ourContext.needle, {
       context: ourContext,
+      limit: completionResultLimit(ourContext),
     });
     if (ranked.length === 0) return null;
     return {

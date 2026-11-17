@@ -163,6 +163,7 @@ src/
 
 - `prd/PRD.md`：需求基线（只读；需求变更需单独评审）
 - `prd/FEATURE_MATRIX.md`：功能清单与实现状态（✅/🟡/❌/⏸ 总表）
+- `prd/COMPLETION_ROADMAP.md`：SQL 补全的竞品参考（SQL Prompt）与分阶段计划
 - `prd/TECH_DESIGN.md`：技术设计（进程、IPC、驱动、存储、安全）
 - `prd/PROJECT_MASTER.md`：项目主文档：文档定位、连接/服务器/标签/会话模型、实现现状与验收、未完成项、UI 真机验收、变更记录
 

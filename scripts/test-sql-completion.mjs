@@ -8,6 +8,7 @@ import {
   buildJoinCondition,
   completionCandidatesForContext,
   completionExpectation,
+  completionResultLimit,
   extractAttachedDatabases,
   extractCompletionContext,
   extractSignatureHelp,
@@ -409,6 +410,129 @@ const selfJoinText = 'SELECT * FROM users JOIN ';
 const joinCtx = extractCompletionContext(selfJoinText, selfJoinText.length);
 const joinCandidates = excludeReferencedTables([{ label: 'users', kind: 'table' }], joinCtx);
 assert(joinCandidates.length === 1, 'JOIN should keep referenced tables for self-join');
+
+// 光标正在补全语句里已有的表时（`sys.` 位于 `sys.databases` 中间），不能把
+// 当前表按“已引用”排除；补全到完整名字时同样要保留。
+const editingText = 'SELECT * FROM sys.databases';
+for (const [cursor, label] of [
+  ['SELECT * FROM sys.'.length, '中缀'],
+  [editingText.length, '完整'],
+]) {
+  const editingCtx = extractCompletionContext(editingText, cursor);
+  const editingCandidates = excludeReferencedTables(
+    [{ label: 'databases', kind: 'view' }],
+    editingCtx,
+  );
+  assert(
+    editingCandidates.length === 1,
+    `referenced table being edited should stay (${label}): ${editingCandidates.map((i) => i.label)}`,
+  );
+}
+
+// 限定符补全不截断：`sys.` 下按名称排在 60 位的 sys.databases 也要能看到。
+const qualifiedScopeCtx = extractCompletionContext('SELECT * FROM sys.', 18);
+assert(completionResultLimit(qualifiedScopeCtx) === 2000, 'qualified scope should not cap at 50');
+assert(
+  completionResultLimit(extractCompletionContext('SELECT * FROM ', 14)) === 50,
+  'unqualified scope should keep 50',
+);
+const manyViews = Array.from({ length: 59 }, (_, index) => ({
+  label: `a_${String(index).padStart(2, '0')}`,
+  kind: 'view',
+}));
+manyViews.push({ label: 'databases', kind: 'view' });
+const cappedViews = rankCompletions(manyViews, '', { limit: 50 });
+assert(
+  !cappedViews.some((item) => item.label === 'databases'),
+  'default 50 should demonstrate truncation for the regression case',
+);
+const fullViews = rankCompletions(manyViews, '', {
+  limit: completionResultLimit(qualifiedScopeCtx),
+});
+assert(
+  fullViews.some((item) => item.label === 'databases'),
+  'qualified scope should keep late-alphabet objects',
+);
+
+// 类型分组：表在视图（含 DMV/DMF）之前；同类型内按名称排序。
+const relationOrder = rankCompletions(
+  [
+    { label: 'dm_b', kind: 'view' },
+    { label: 'dm_a', kind: 'view' },
+    { label: 'dm_table', kind: 'table' },
+  ],
+  'dm',
+);
+assert(
+  JSON.stringify(relationOrder.map((item) => item.label)) ===
+    JSON.stringify(['dm_table', 'dm_a', 'dm_b']),
+  `relation order wrong: ${relationOrder.map((item) => item.label)}`,
+);
+const emptyRelationOrder = rankCompletions(
+  [
+    { label: 'v_all', kind: 'view' },
+    { label: 't_all', kind: 'table' },
+  ],
+  '',
+);
+assert(
+  emptyRelationOrder[0]?.label === 't_all',
+  `table should precede view without prefix: ${emptyRelationOrder.map((i) => i.label)}`,
+);
+
+// 多段输入：`dm_sql` 要命中 `dm_exec_sql_text`，即使列表里已有 `dm_sql_*`
+// 这样的真正前缀候选；仍按前缀优先、同类型字母序排列。
+const segmentRanked = rankCompletions(
+  [
+    { label: 'dm_sql_referenced_entities', kind: 'view' },
+    { label: 'dm_exec_sql_text', kind: 'view' },
+    { label: 'dm_exec_requests', kind: 'view' },
+  ],
+  'dm_sql',
+);
+assert(
+  JSON.stringify(segmentRanked.map((item) => item.label)) ===
+    JSON.stringify(['dm_sql_referenced_entities', 'dm_exec_sql_text']),
+  `segment match order wrong: ${segmentRanked.map((item) => item.label)}`,
+);
+const segmentOnly = rankCompletions(
+  [{ label: 'dm_exec_sql_text', kind: 'view' }],
+  'dm_sql',
+);
+assert(
+  segmentOnly.length === 1 && segmentOnly[0].label === 'dm_exec_sql_text',
+  `segment-only match missing: ${segmentOnly.map((item) => item.label)}`,
+);
+
+// 限定符下单段也按段命中：`sys.sql` 同时给出真正前缀 `sql_modules` 和后段
+// 命中 `dm_exec_sql_text`；没有限定符时不放宽，避免 `se` 式噪音。
+const sysSqlText = 'SELECT * FROM sys.sql';
+const sysSqlCtx = extractCompletionContext(sysSqlText, sysSqlText.length);
+const sysSqlRanked = rankCompletions(
+  [
+    { label: 'sql_modules', kind: 'view' },
+    { label: 'dm_exec_sql_text', kind: 'view' },
+  ],
+  'sql',
+  { context: sysSqlCtx },
+);
+assert(
+  JSON.stringify(sysSqlRanked.map((item) => item.label)) ===
+    JSON.stringify(['sql_modules', 'dm_exec_sql_text']),
+  `qualified single-segment order wrong: ${sysSqlRanked.map((item) => item.label)}`,
+);
+const plainSqlRanked = rankCompletions(
+  [
+    { label: 'sql_modules', kind: 'view' },
+    { label: 'dm_exec_sql_text', kind: 'view' },
+  ],
+  'sql',
+);
+assert(
+  JSON.stringify(plainSqlRanked.map((item) => item.label)) ===
+    JSON.stringify(['sql_modules']),
+  `unqualified single-segment should stay strict: ${plainSqlRanked.map((item) => item.label)}`,
+);
 
 // 期望模型：FROM 只要表，WHERE 要列，JOIN ... ON 要列且是 joinOn。
 const fromExp = completionExpectation(extractCompletionContext('SELECT * FROM ', 14));
