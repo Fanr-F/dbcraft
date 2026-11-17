@@ -275,6 +275,7 @@ export const settingsSaveSchema = z.object({
   editorTabSize: z.union([z.literal(2), z.literal(4), z.literal(8)]),
   sqlKeywordCase: z.enum(['upper', 'lower', 'preserve']),
   completionEnabled: z.boolean(),
+  completionTableAlias: z.boolean(),
   completionDelayMs: z.union([z.literal(0), z.literal(100), z.literal(300), z.literal(500)]),
   historyRetention: z.union([z.literal(0), z.literal(1000), z.literal(5000), z.literal(10000), z.literal(50000)]),
   queryTimeoutMs: z.union([z.literal(0), z.literal(10000), z.literal(30000), z.literal(60000), z.literal(120000)]),

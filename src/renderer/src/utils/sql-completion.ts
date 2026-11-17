@@ -2,6 +2,7 @@ import type { DatabaseType } from '../../../shared/ipc-contract';
 import { quoteIdent } from '../../../shared/dialect/identifiers.ts';
 import { MSSQL, MariaSQL, MySQL, SQLite, type SQLDialect } from '@codemirror/lang-sql';
 import { SQL_KEYWORD_LIST } from './sql-highlight.ts';
+import { analyzeStatement } from './sql-analysis.ts';
 
 /** 补全使用的当前单词前缀（允许 `schema.table` 形式）。 */
 export interface CompletionContext {
@@ -73,6 +74,14 @@ export interface CompletionCandidate {
   insertText?: string;
   /** 同分时的优先级，数字越小越靠前；缺省 0。 */
   priority?: number;
+  /** 上下文加权：正数提前、负数降权（例如系统对象）。与 `priority` 分开。 */
+  boost?: number;
+  /** 列所属的表（不含限定符），用于语句上下文加权。 */
+  table?: string;
+  /** 对象所属 schema（MSSQL）；用于 qualifier 匹配。 */
+  schema?: string;
+  /** 列是否主键；JOIN ... ON 时优先。 */
+  primaryKey?: boolean;
 }
 
 /** 排序后的补全项，`matches` 是用于高亮的前缀/子序列字符下标。 */
@@ -84,7 +93,7 @@ export interface RankedCompletion extends CompletionCandidate {
 export interface CompletionGroups {
   keywords: string[];
   functions: string[];
-  objects: Array<{ name: string; kind: 'table' | 'view' | 'procedure' }>;
+  objects: Array<{ name: string; kind: 'table' | 'view' | 'procedure'; schema?: string }>;
   databases: string[];
   schemas: string[];
 }
@@ -97,6 +106,51 @@ export function relationKindsForClause(clause: string): CompletionKind[] {
     return ['table', 'view'];
   }
   return [];
+}
+
+const COLUMN_CLAUSES = new Set([
+  'select',
+  'where',
+  'on',
+  'set',
+  'order by',
+  'group by',
+  'having',
+  'returning',
+  'values',
+]);
+const TABLE_CLAUSES = new Set(['from', 'join', 'into', 'update', 'table', 'view']);
+
+/** 光标位置「期望」哪类候选；用于评分加/减权，不负责生成候选。 */
+export interface CompletionExpectation {
+  /** 语句位置应该出现列。 */
+  columns: boolean;
+  /** 语句位置应该出现表/视图。 */
+  tables: boolean;
+  /** 语句位置应该出现存储过程。 */
+  procedures: boolean;
+  /** 语句位置应该出现 schema。 */
+  schemas: boolean;
+  /** 语句位置应该出现数据库。 */
+  databases: boolean;
+  /** 光标在 JOIN ... ON 条件里。 */
+  joinOn: boolean;
+  /** 光标在 INSERT 列清单里。 */
+  columnNames: boolean;
+}
+
+export function completionExpectation(context: CompletionContext): CompletionExpectation {
+  const clause = context.clause;
+  const tablePosition = TABLE_CLAUSES.has(clause);
+  return {
+    columns: context.insertColumnList || COLUMN_CLAUSES.has(clause),
+    tables: tablePosition,
+    procedures: clause === 'exec' || clause === 'execute',
+    schemas: tablePosition,
+    databases: tablePosition || clause === 'use',
+    joinOn: clause === 'on',
+    columnNames: context.insertColumnList,
+  };
 }
 
 /** 补全项类型的默认展示优先级（数字越小越靠前）。 */
@@ -151,6 +205,7 @@ export function completionCandidatesForContext(
         label: object.name,
         kind: object.kind as CompletionKind,
         priority: completionKindPriority(object.kind),
+        schema: object.schema,
       }));
     // FROM/JOIN 之后也允许先写库名/Schema 名，再点出对象；EXEC 只给存储过程。
     if (kinds.includes('table')) {
@@ -553,8 +608,14 @@ function selectListColumns(selectSql: string): string[] {
  * 提取语句里的 CTE 与派生表列清单，用于 `WITH x AS (...)`、`FROM (SELECT ...) x`
  * 之后的列补全。无法静态展开的 `*` 会跳过。
  */
-export function extractVirtualTables(statement: string): VirtualTable[] {
+export function extractVirtualTables(
+  statement: string,
+  dialect?: DatabaseType | null,
+): VirtualTable[] {
   if (statement.length > 50_000) return [];
+  // 完整语句优先用 AST 推导 CTE 输出列；解析失败时回退到正则/括号扫描。
+  const analyzed = dialect ? analyzeStatement(statement, dialect) : null;
+  if (analyzed && analyzed.ctes.length > 0) return analyzed.ctes;
   if (!/\bwith\b|\(\s*select\b/i.test(statement)) return [];
   const masked = scanSql(statement, statement.length).masked;
   const tables: VirtualTable[] = [];
@@ -1248,7 +1309,11 @@ function insertColumnTable(
   };
 }
 
-export function extractCompletionContext(text: string, cursor: number): CompletionContext {
+export function extractCompletionContext(
+  text: string,
+  cursor: number,
+  dialect?: DatabaseType | null,
+): CompletionContext {
   const safeCursor = Math.max(0, Math.min(cursor, text.length));
   let start = safeCursor;
   // 引号标识符（`[a]` / `` `a` ``）也算标识符片段，便于 `[dbo].[us` 这种限定名。
@@ -1290,6 +1355,10 @@ export function extractCompletionContext(text: string, cursor: number): Completi
   const insertTable = inLiteral
     ? null
     : insertColumnTable(maskedBefore, text.slice(scan.statementStart, safeCursor));
+  // 完整语句优先用 AST 取表/别名；解析失败（输入中的语句很常见）回退到扫描。
+  const analyzed = dialect ? analyzeStatement(statement, dialect) : null;
+  const tables =
+    analyzed && analyzed.tables.length > 0 ? analyzed.tables : parseTables(maskedStatement);
 
   return {
     prefix,
@@ -1300,7 +1369,7 @@ export function extractCompletionContext(text: string, cursor: number): Completi
     replaceEnd,
     statement,
     statementStart: scan.statementStart,
-    tables: parseTables(maskedStatement),
+    tables,
     clause: clauseAt(maskedBefore),
     wildcard: star !== null,
     inLiteral,
@@ -1344,32 +1413,41 @@ export function filterCompletions(
   return [...starts.sort(byName), ...contains.sort(byName)].slice(0, Math.max(1, limit));
 }
 
+export interface CompletionRankOptions {
+  /** 光标上下文；用于子句期望、qualifier 与所属表加减权。 */
+  context?: CompletionContext;
+  /** 最多返回的候选数；默认 50。 */
+  limit?: number;
+}
+
 /**
  * 带排序的补全过滤：
  * - 有前缀命中（含完全相等）时只保留前缀命中，不再混入词首/子序列候选；
  * - 没有前缀命中时才回退到「单词开头 > 模糊子序列」；
- * - 同分时按候选类型优先级（列 > 别名 > 表 > 库/Schema > 函数 > 关键字），再按字母序；
+ * - 匹配质量 > 类型权重（列 > 别名 > 表 > 视图 > 存储过程 > Schema > 库 > 函数 > 关键字）；
+ * - `boost` 参与加权（正数提前、负数降权），`priority` 只在同分时作为稳定次序；
+ * - 传入 `context` 时，再叠加子句期望、列所属表、qualifier/schema 匹配与 JOIN ON 主键权重；
+ * - 同一标签只保留分数最高的一项；
  * - 返回匹配字符下标，供弹层高亮。
  */
 export function rankCompletions(
   candidates: CompletionCandidate[],
   needle: string,
-  limit = 50,
+  options: CompletionRankOptions = {},
 ): RankedCompletion[] {
   const query = needle.trim().toLowerCase();
-  const seen = new Set<string>();
+  const limit = options.limit ?? 50;
+  const rankContext = describeRankContext(options.context);
   const ranked: RankedCompletion[] = [];
 
   for (const candidate of candidates) {
     const label = candidate.label.trim();
     if (!label) continue;
-    const key = label.toLowerCase();
-    if (seen.has(key)) continue;
 
-    const lower = key;
+    const lower = label.toLowerCase();
     let matches: number[] = [];
     if (!query) {
-      // 无前缀时全部保留，按类型优先级与字母序排列。
+      // 无前缀时全部保留，按类型权重与字母序排列。
     } else if (lower === query) {
       matches = Array.from({ length: Math.min(label.length, query.length) }, (_, index) => index);
     } else if (lower.startsWith(query)) {
@@ -1380,7 +1458,6 @@ export function rankCompletions(
       matches = subsequence;
     }
 
-    seen.add(key);
     ranked.push({
       ...candidate,
       label,
@@ -1390,23 +1467,34 @@ export function rankCompletions(
 
   const priorityOf = (item: RankedCompletion) =>
     item.priority ?? completionKindPriority(item.kind);
-  const scored = ranked.map((item) => ({ item, score: scoreOf(item, query) }));
+  const scored = ranked.map((item) => {
+    const tier = matchTier(item, query);
+    return {
+      item,
+      tier,
+      score:
+        matchScore(tier) +
+        completionKindScore(item.kind) +
+        (item.boost ?? 0) +
+        contextScore(item, rankContext),
+    };
+  });
   let visible = scored;
   if (query.length > 0) {
     // 严格前缀：只要存在完全相等/前缀命中，就丢掉词首与子序列命中。否则输入
     // `se` 时 `users`（u-s-e-r-s）会排在列表末尾，候选随每次按键跳动。
-    const hasPrefixMatch = scored.some((entry) => entry.score <= 1);
+    const hasPrefixMatch = scored.some((entry) => entry.tier <= 1);
     if (hasPrefixMatch) {
-      visible = scored.filter((entry) => entry.score <= 1);
+      visible = scored.filter((entry) => entry.tier <= 1);
     } else {
       // 一个前缀都没有时才启用模糊兜底；仍有词首命中时，过滤纯子序列的
       // 关键字/函数噪音（例如 `na` 不再列出 CURRENT_TIMESTAMP）。
-      const hasWordStart = scored.some((entry) => entry.score === 2);
+      const hasWordStart = scored.some((entry) => entry.tier === 2);
       if (hasWordStart) {
         visible = scored.filter(
           (entry) =>
             !(
-              entry.score === 3 &&
+              entry.tier === 3 &&
               (entry.item.kind === 'keyword' || entry.item.kind === 'function')
             ),
         );
@@ -1417,7 +1505,7 @@ export function rankCompletions(
     item.kind === 'keyword' &&
     COMMON_KEYWORDS.has(item.label.toUpperCase());
   visible.sort((left, right) => {
-    if (left.score !== right.score) return left.score - right.score;
+    if (left.score !== right.score) return right.score - left.score;
     const priority = priorityOf(left.item) - priorityOf(right.item);
     if (priority !== 0) return priority;
     // 关键字之间：SELECT/FROM/WHERE 等常用词优先于 FREE/FREETEXT 等低频词。
@@ -1426,11 +1514,24 @@ export function rankCompletions(
     if (common !== 0) return common;
     return left.item.label.localeCompare(right.item.label, 'en');
   });
-  return visible.slice(0, Math.max(1, limit)).map((entry) => entry.item);
+  // 同一标签只保留分数最高的一项（排序后先到先得），避免异步元数据与
+  // 基础候选重复时把低分项留在列表里。
+  const seen = new Set<string>();
+  const result: RankedCompletion[] = [];
+  const cap = Math.max(1, limit);
+  for (const entry of visible) {
+    const key = entry.item.label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(entry.item);
+    if (result.length >= cap) break;
+  }
+  return result;
 }
 
-function scoreOf(item: RankedCompletion, query: string): number {
-  if (!query) return 10;
+/** 匹配层级：0 完全相等，1 前缀，2 词首子序列，3 任意子序列，4 无输入。 */
+function matchTier(item: RankedCompletion, query: string): number {
+  if (!query) return 4;
   const lower = item.label.toLowerCase();
   if (lower === query) return 0;
   if (lower.startsWith(query)) return 1;
@@ -1438,6 +1539,249 @@ function scoreOf(item: RankedCompletion, query: string): number {
     (index) => index === 0 || !/[A-Za-z0-9]/.test(lower[index - 1] ?? ''),
   );
   return wordStarts ? 2 : 3;
+}
+
+/** 匹配质量权重：远大于类型与上下文权重，保证 exact > prefix > 模糊。 */
+function matchScore(tier: number): number {
+  switch (tier) {
+    case 0:
+      return 2000;
+    case 1:
+      return 1600;
+    case 2:
+      return 600;
+    case 3:
+      return 200;
+    default:
+      return 0;
+  }
+}
+
+/** 类型权重：列 > 别名 > 表 > 视图 > 存储过程 > Schema > 库 > 函数 > 关键字。 */
+function completionKindScore(kind: CompletionKind): number {
+  switch (kind) {
+    case 'column':
+      return 120;
+    case 'alias':
+      return 110;
+    case 'table':
+      return 100;
+    case 'view':
+      return 95;
+    case 'procedure':
+      return 85;
+    case 'schema':
+      return 60;
+    case 'database':
+      return 50;
+    case 'function':
+      return 30;
+    default:
+      return 10;
+  }
+}
+
+interface RankContextInfo {
+  expectation: CompletionExpectation;
+  mentionedTables: Set<string>;
+  qualifier: string;
+  qualifierTable?: string;
+  qualifierSchema?: string;
+}
+
+function describeRankContext(context: CompletionContext | undefined): RankContextInfo | null {
+  if (!context) return null;
+  const mentionedTables = new Set(
+    context.tables
+      .map((table) => table.table.toLowerCase())
+      .filter(Boolean),
+  );
+  const qualifier = context.qualifier.trim().toLowerCase();
+  let qualifierTable: string | undefined;
+  let qualifierSchema: string | undefined;
+  if (qualifier) {
+    for (const table of context.tables) {
+      const tableName = table.table.toLowerCase();
+      if (
+        table.alias?.toLowerCase() === qualifier ||
+        tableName === qualifier ||
+        table.parts.join('.').toLowerCase() === qualifier
+      ) {
+        qualifierTable = tableName;
+      }
+      if (table.schema?.toLowerCase() === qualifier) qualifierSchema = qualifier;
+      if (table.database?.toLowerCase() === qualifier) qualifierSchema = qualifier;
+    }
+  }
+  return {
+    expectation: completionExpectation(context),
+    mentionedTables,
+    qualifier,
+    qualifierTable,
+    qualifierSchema,
+  };
+}
+
+/** 上下文加权：子句期望、列所属表、qualifier/schema 匹配、JOIN ON 主键。 */
+function contextScore(candidate: CompletionCandidate, info: RankContextInfo | null): number {
+  if (!info) return 0;
+  let score = 0;
+  const { expectation } = info;
+  switch (candidate.kind) {
+    case 'column':
+      score += expectation.columns ? 40 : -20;
+      if (expectation.joinOn && candidate.primaryKey) score += 40;
+      break;
+    case 'alias':
+      score += expectation.columns ? 40 : -10;
+      break;
+    case 'table':
+    case 'view':
+      score += expectation.tables ? 40 : -30;
+      break;
+    case 'procedure':
+      score += expectation.procedures ? 40 : -30;
+      break;
+    case 'function':
+      score += expectation.columns ? 20 : -10;
+      break;
+    case 'schema':
+      score += expectation.schemas ? 20 : -10;
+      break;
+    case 'database':
+      score += expectation.databases ? 20 : -10;
+      break;
+    default:
+      break;
+  }
+  const table = candidate.table?.toLowerCase();
+  if (table) {
+    if (info.mentionedTables.has(table)) score += 60;
+    if (info.qualifierTable && table === info.qualifierTable) score += 120;
+    if (info.qualifier && table === info.qualifier) score += 80;
+  }
+  const schema = candidate.schema?.toLowerCase();
+  if (schema && info.qualifier) {
+    if (schema === info.qualifier) score += 80;
+    else if (info.qualifierSchema && schema === info.qualifierSchema) score += 60;
+  }
+  return score;
+}
+
+export interface ForeignKeyJoinReference {
+  /** 当前语句里已引用的源表。 */
+  table: string;
+  columns: string[];
+  /** 外键指向的表。 */
+  referencedTable: string;
+  referencedColumns: string[];
+}
+
+/**
+ * 从已引用表的外键里挑选可 JOIN 的目标表：跳过语句已引用的表，按目标表
+ * 去重（保留第一组外键用于展示）。
+ */
+export function foreignKeyJoinTargets(
+  references: ForeignKeyJoinReference[],
+  referencedTables: readonly string[],
+): ForeignKeyJoinReference[] {
+  const referenced = new Set(
+    referencedTables
+      .map((name) => name.split('.').pop()?.toLowerCase() ?? '')
+      .filter(Boolean),
+  );
+  const seen = new Set<string>();
+  const result: ForeignKeyJoinReference[] = [];
+  for (const reference of references) {
+    const target = reference.referencedTable.split('.').pop()?.toLowerCase() ?? '';
+    if (!target || referenced.has(target) || seen.has(target)) continue;
+    seen.add(target);
+    result.push(reference);
+  }
+  return result;
+}
+
+/**
+ * 从外键里挑选可写成 `ON` 等式的关系：目标表必须在当前语句中已引用，
+ * 跳过自引用，并按 源表 + 目标表 + 列对 去重。
+ */
+export function foreignKeyEqualities(
+  references: ForeignKeyJoinReference[],
+  referencedTables: readonly string[],
+): ForeignKeyJoinReference[] {
+  const lastOf = (name: string) => name.split('.').pop()?.toLowerCase() ?? '';
+  const referenced = new Set(referencedTables.map(lastOf).filter(Boolean));
+  const seen = new Set<string>();
+  const result: ForeignKeyJoinReference[] = [];
+  for (const reference of references) {
+    const source = lastOf(reference.table);
+    const target = lastOf(reference.referencedTable);
+    if (!source || !target || source === target || !referenced.has(target)) continue;
+    const key = `${source}:${target}:${reference.columns.join(',')}:${reference.referencedColumns.join(',')}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(reference);
+  }
+  return result;
+}
+
+/** 为 JOIN 目标表生成不冲突的短别名（首字符 + 序号，例如 orders → o1）。 */
+export function suggestJoinAlias(
+  tableName: string,
+  usedAliases: Iterable<string>,
+): string {
+  const bare =
+    tableName
+      .split('.')
+      .pop()
+      ?.replace(/^["`\[]|["`\]]$/g, '')
+      .toLowerCase() ?? tableName.toLowerCase();
+  const base = bare.match(/[a-z]/)?.[0] ?? 't';
+  const used = new Set(Array.from(usedAliases, (alias) => alias.toLowerCase()));
+  for (let index = 1; index < 1000; index += 1) {
+    const alias = `${base}${index}`;
+    if (!used.has(alias)) return alias;
+  }
+  return `${base}${Date.now()}`;
+}
+
+/** 拼 `a.col = b.col [AND ...]`；`referencedColumns` 缺失时回退同名列。 */
+export function buildJoinCondition(
+  sourceRef: string,
+  targetRef: string,
+  columns: readonly string[],
+  referencedColumns: readonly string[],
+): string {
+  return columns
+    .map((column, index) => {
+      const referenced = referencedColumns[index] || column;
+      return `${sourceRef}.${column} = ${targetRef}.${referenced}`;
+    })
+    .join(' AND ');
+}
+
+/**
+ * FROM/INTO/UPDATE 等位置不重复提示语句里已经引用的表；JOIN 允许自连接，
+ * 不排除。只过滤表/视图候选，列、别名、Schema、库等原样保留。
+ */
+export function excludeReferencedTables(
+  candidates: CompletionCandidate[],
+  context: CompletionContext,
+): CompletionCandidate[] {
+  if (!['from', 'into', 'update', 'table', 'view'].includes(context.clause)) {
+    return candidates;
+  }
+  const referenced = new Set(
+    context.tables
+      .map((table) => table.table.toLowerCase())
+      .filter(Boolean),
+  );
+  if (referenced.size === 0) return candidates;
+  return candidates.filter((candidate) => {
+    if (candidate.kind !== 'table' && candidate.kind !== 'view') return true;
+    const last = candidate.label.split('.').pop()?.toLowerCase() ?? '';
+    return !referenced.has(last);
+  });
 }
 
 /** 贪心匹配子序列，优先命中单词开头，返回命中的字符下标；匹配失败返回 null。 */

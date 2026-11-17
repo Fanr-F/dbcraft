@@ -145,6 +145,12 @@ assert(
   'invalid editor/completion settings should fall back',
 );
 assert(
+  normalizeAppSettings({}).completionTableAlias === false &&
+    normalizeAppSettings({ completionTableAlias: true }).completionTableAlias === true &&
+    normalizeAppSettings({ completionTableAlias: 'yes' }).completionTableAlias === false,
+  'completion table alias should normalize',
+);
+assert(
   normalizeAppSettings({ theme: 'neon' }).theme === 'dark',
   'unknown theme should fall back',
 );

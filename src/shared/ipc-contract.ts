@@ -689,6 +689,8 @@ export interface AppSettings {
   completionAutoTrigger: boolean;
   /** 自动补全延迟（毫秒）。 */
   completionDelayMs: number;
+  /** FROM/JOIN 选择表时自动插入 `表 AS 别名`。 */
+  completionTableAlias: boolean;
   /** 可自定义快捷键；与设置面板共用同一映射。 */
   shortcuts: ShortcutMap;
 }

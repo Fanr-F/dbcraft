@@ -51,9 +51,11 @@ import { tags } from '@lezer/highlight';
 import type { DatabaseType, ShortcutMap } from '@shared/ipc-contract';
 import { DEFAULT_SHORTCUTS } from '@shared/settings';
 import { normalizeShortcut } from '../../utils/shortcuts';
+import { warmUpSqlAnalysis } from '../../utils/sql-analysis';
 import { statementAtCursor } from '../../utils/sql-script';
 import {
   completionCandidatesForContext,
+  excludeReferencedTables,
   extractCompletionContext,
   extractSignatureHelp,
   matchCompletionCase,
@@ -338,7 +340,7 @@ export function SqlEditor(props: SqlEditorProps) {
     // 超长 SQL 不做补全（与执行前的 >1MB 提示保持一致）；先看长度避免无谓拷贝。
     if (context.state.doc.length > 1_000_000) return null;
     const doc = context.state.doc.toString();
-    const ourContext = extractCompletionContext(doc, context.pos);
+    const ourContext = extractCompletionContext(doc, context.pos, current.dialect);
     // 字符串/注释里不弹补全，避免把列名插进字面量。
     if (ourContext.inLiteral) return null;
     // CodeMirror 会在每次输入后查询候选；沿用旧的触发规则，避免在空格/标点后
@@ -393,7 +395,10 @@ export function SqlEditor(props: SqlEditorProps) {
     setCompletionLoading(null);
     if (context.aborted) return null;
 
-    const ranked = rankCompletions([...extra, ...base], ourContext.needle);
+    const candidates = excludeReferencedTables([...extra, ...base], ourContext);
+    const ranked = rankCompletions(candidates, ourContext.needle, {
+      context: ourContext,
+    });
     if (ranked.length === 0) return null;
     return {
       from: ourContext.replaceStart,
@@ -712,6 +717,8 @@ export function SqlEditor(props: SqlEditorProps) {
     viewRef.current?.dispatch({
       effects: languageCompartment.current.reconfigure(sqlLanguage(dialect)),
     });
+    // 提前加载当前方言的 AST 解析器；加载前补全仍走扫描实现。
+    void warmUpSqlAnalysis(dialect);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dialect]);
 

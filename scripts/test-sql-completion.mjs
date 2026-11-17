@@ -5,12 +5,17 @@
  */
 import {
   applyCompletion,
+  buildJoinCondition,
   completionCandidatesForContext,
+  completionExpectation,
   extractAttachedDatabases,
   extractCompletionContext,
   extractSignatureHelp,
+  excludeReferencedTables,
   extractVirtualTables,
   filterCompletions,
+  foreignKeyEqualities,
+  foreignKeyJoinTargets,
   functionCompletions,
   keywordCompletions,
   matchCompletionCase,
@@ -21,7 +26,9 @@ import {
   shouldOpenCompletionOnInput,
   splitQualifier,
   stripSchemaPrefix,
+  suggestJoinAlias,
 } from '../src/renderer/src/utils/sql-completion.ts';
+import { warmUpSqlAnalysis } from '../src/renderer/src/utils/sql-analysis.ts';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -318,6 +325,277 @@ const fallbackFuzzy = rankCompletions(
 assert(
   fallbackFuzzy.some((item) => item.label === 'releases'),
   `fuzzy fallback should apply without prefix matches: ${fallbackFuzzy.map((i) => i.label)}`,
+);
+
+// 加权排序：匹配质量 > 类型权重，列 > 表 > 关键字。
+const weighted = rankCompletions(
+  [
+    { label: 'UNION', kind: 'keyword' },
+    { label: 'users', kind: 'table' },
+    { label: 'user_id', kind: 'column' },
+  ],
+  'u',
+);
+assert(
+  JSON.stringify(weighted.map((item) => item.label)) ===
+    JSON.stringify(['user_id', 'users', 'UNION']),
+  `weighted order wrong: ${weighted.map((i) => i.label)}`,
+);
+// 精确匹配始终排在前缀匹配前。
+const exactRanked = rankCompletions(
+  [
+    { label: 'user_roles', kind: 'table' },
+    { label: 'user', kind: 'table' },
+  ],
+  'user',
+);
+assert(
+  exactRanked[0]?.label === 'user',
+  `exact match should rank first: ${exactRanked.map((i) => i.label)}`,
+);
+// boost 用于系统对象降权等情境，同类型内按 boost 重排。
+const boosted = rankCompletions(
+  [
+    { label: 'users', kind: 'table', boost: -20 },
+    { label: 'user_roles', kind: 'table' },
+  ],
+  'user',
+);
+assert(
+  boosted[0]?.label === 'user_roles',
+  `boost should reorder same-kind matches: ${boosted.map((i) => i.label)}`,
+);
+// priority 只在同分时作为先后顺序：第一个表的列优先。
+const priorityRanked = rankCompletions(
+  [
+    { label: 'id', kind: 'column', priority: 1 },
+    { label: 'name', kind: 'column', priority: 0 },
+  ],
+  '',
+);
+assert(
+  JSON.stringify(priorityRanked.map((i) => i.label)) === JSON.stringify(['name', 'id']),
+  `priority tie-break wrong: ${priorityRanked.map((i) => i.label)}`,
+);
+// 重复候选按最高分保留，而不是先到先得。
+const deduped = rankCompletions(
+  [
+    { label: 'users', kind: 'table', boost: -20, detail: 'system' },
+    { label: 'users', kind: 'table', detail: 'user' },
+  ],
+  'us',
+);
+assert(
+  deduped.length === 1 && deduped[0].detail === 'user',
+  `dedupe should keep best candidate: ${JSON.stringify(deduped)}`,
+);
+
+// FROM/INTO/UPDATE 后排除语句已引用的表；JOIN 允许自连接，不排除。
+const fromText = 'SELECT * FROM users, ';
+const fromCtx = extractCompletionContext(fromText, fromText.length);
+const fromCandidates = excludeReferencedTables(
+  [
+    { label: 'users', kind: 'table' },
+    { label: 'orders', kind: 'table' },
+    { label: 'user_id', kind: 'column' },
+  ],
+  fromCtx,
+);
+assert(
+  JSON.stringify(fromCandidates.map((i) => i.label)) === JSON.stringify(['orders', 'user_id']),
+  `referenced table not excluded: ${fromCandidates.map((i) => i.label)}`,
+);
+const selfJoinText = 'SELECT * FROM users JOIN ';
+const joinCtx = extractCompletionContext(selfJoinText, selfJoinText.length);
+const joinCandidates = excludeReferencedTables([{ label: 'users', kind: 'table' }], joinCtx);
+assert(joinCandidates.length === 1, 'JOIN should keep referenced tables for self-join');
+
+// 期望模型：FROM 只要表，WHERE 要列，JOIN ... ON 要列且是 joinOn。
+const fromExp = completionExpectation(extractCompletionContext('SELECT * FROM ', 14));
+assert(fromExp.tables && fromExp.schemas && !fromExp.columns, 'FROM expectation wrong');
+const whereExp = completionExpectation(
+  extractCompletionContext('SELECT * FROM users WHERE ', 26),
+);
+assert(whereExp.columns && !whereExp.tables, 'WHERE expectation wrong');
+const onSql = 'SELECT * FROM users u JOIN orders o ON ';
+const onExp = completionExpectation(extractCompletionContext(onSql, onSql.length));
+assert(onExp.columns && onExp.joinOn, 'JOIN ON expectation wrong');
+const insertListSql = 'INSERT INTO users (';
+const insertExp = completionExpectation(
+  extractCompletionContext(insertListSql, insertListSql.length),
+);
+assert(insertExp.columnNames && insertExp.columns, 'INSERT column-list expectation wrong');
+
+// qualifier/所属表加权：u. 时 users 的列排在 orders 的列前。
+const qualifiedSql = 'SELECT u. FROM users u';
+const qualifiedCtx = extractCompletionContext(qualifiedSql, qualifiedSql.indexOf('u.') + 2);
+const qualifiedRanked = rankCompletions(
+  [
+    { label: 'alpha', kind: 'column', table: 'orders' },
+    { label: 'zeta', kind: 'column', table: 'users' },
+  ],
+  '',
+  { context: qualifiedCtx },
+);
+assert(
+  qualifiedRanked[0]?.label === 'zeta',
+  `qualifier table should rank first: ${qualifiedRanked.map((i) => i.label)}`,
+);
+
+// schema qualifier 加权：dbo. 时 dbo 的表排在 sys 的表前。
+const schemaSql = 'SELECT * FROM dbo.';
+const schemaCtx = extractCompletionContext(schemaSql, schemaSql.length);
+const schemaRanked = rankCompletions(
+  [
+    { label: 'sys_objects', kind: 'table', schema: 'sys' },
+    { label: 'users', kind: 'table', schema: 'dbo' },
+  ],
+  '',
+  { context: schemaCtx },
+);
+assert(
+  schemaRanked[0]?.label === 'users',
+  `schema qualifier should rank first: ${schemaRanked.map((i) => i.label)}`,
+);
+
+// JOIN ... ON 时主键列优先。
+const pkRanked = rankCompletions(
+  [
+    { label: 'id', kind: 'column', table: 'users' },
+    { label: 'user_id', kind: 'column', table: 'orders', primaryKey: true },
+  ],
+  '',
+  { context: extractCompletionContext(onSql, onSql.length) },
+);
+assert(
+  pkRanked[0]?.label === 'user_id',
+  `primary key should rank first in JOIN ON: ${pkRanked.map((i) => i.label)}`,
+);
+
+// 子句期望加权：WHERE 里列排在函数前。
+const affinityRanked = rankCompletions(
+  [
+    { label: 'zzz', kind: 'function' },
+    { label: 'aaa', kind: 'column', table: 'users' },
+  ],
+  '',
+  { context: extractCompletionContext('SELECT * FROM users WHERE ', 26) },
+);
+assert(
+  affinityRanked[0]?.label === 'aaa',
+  `column should rank above function in WHERE: ${affinityRanked.map((i) => i.label)}`,
+);
+
+// FK JOIN 目标：跳过语句已引用的表，按目标表去重。
+const fkReferences = [
+  { table: 'orders', columns: ['user_id'], referencedTable: 'users', referencedColumns: ['id'] },
+  { table: 'orders', columns: ['user_id'], referencedTable: 'users', referencedColumns: ['id'] },
+  { table: 'orders', columns: ['role_id'], referencedTable: 'roles', referencedColumns: ['id'] },
+  { table: 'orders', columns: ['org_id'], referencedTable: 'dbo.orgs', referencedColumns: ['id'] },
+];
+const fkTargets = foreignKeyJoinTargets(fkReferences, ['orders', 'users']);
+assert(
+  JSON.stringify(fkTargets.map((item) => item.referencedTable)) ===
+    JSON.stringify(['roles', 'dbo.orgs']),
+  `FK join targets wrong: ${fkTargets.map((item) => item.referencedTable)}`,
+);
+assert(
+  foreignKeyJoinTargets(fkReferences, ['orders', 'users', 'roles', 'orgs']).length === 0,
+  'FK join targets should skip all referenced tables',
+);
+
+// ON 等式：只保留目标表已在语句中的外键，按列对去重，跳过自引用。
+assert(
+  foreignKeyEqualities(fkReferences, ['orders']).length === 0,
+  'ON equality should skip targets not referenced in the statement',
+);
+const fkEqualities = foreignKeyEqualities(fkReferences, ['orders', 'users', 'roles', 'orgs']);
+assert(
+  fkEqualities.length === 3 &&
+    fkEqualities[0]?.referencedTable === 'users' &&
+    fkEqualities[1]?.referencedTable === 'roles',
+  `ON equalities wrong: ${fkEqualities.map((item) => item.referencedTable)}`,
+);
+assert(
+  foreignKeyEqualities(
+    [
+      {
+        table: 'users',
+        columns: ['manager_id'],
+        referencedTable: 'users',
+        referencedColumns: ['id'],
+      },
+    ],
+    ['users'],
+  ).length === 0,
+  'ON equality should skip self references',
+);
+
+// JOIN 别名与条件片段。
+assert(suggestJoinAlias('orders', []) === 'o1', 'alias should start at 1');
+assert(suggestJoinAlias('dbo.users', ['u1']) === 'u2', 'alias should skip used aliases');
+assert(suggestJoinAlias('123_table', []) === 't1', 'non-alpha table should fall back to t');
+assert(
+  buildJoinCondition('o1', 'u1', ['user_id'], ['id']) === 'o1.user_id = u1.id',
+  'single-column join condition wrong',
+);
+assert(
+  buildJoinCondition('o1', 'u1', ['tenant_id', 'user_id'], ['tenant_id', 'id']) ===
+    'o1.tenant_id = u1.tenant_id AND o1.user_id = u1.id',
+  'multi-column join condition wrong',
+);
+assert(
+  buildJoinCondition('o1', 'u1', ['user_id'], []) === 'o1.user_id = u1.user_id',
+  'missing referenced column should fall back to same name',
+);
+
+// AST 分析：完整语句用 node-sql-parser 取表/别名，不完整语句回退扫描。
+await Promise.all([warmUpSqlAnalysis('mysql'), warmUpSqlAnalysis('mssql')]);
+const astJoinSql = 'SELECT u.id FROM users u JOIN orders o ON o.user_id = u.id';
+const astJoinCtx = extractCompletionContext(astJoinSql, astJoinSql.length, 'mysql');
+assert(
+  JSON.stringify(astJoinCtx.tables.map((table) => `${table.table}:${table.alias}`)) ===
+    JSON.stringify(['users:u', 'orders:o']),
+  `AST tables wrong: ${JSON.stringify(astJoinCtx.tables)}`,
+);
+const astMssql = 'SELECT * FROM [dbo].[users] u';
+const astMssqlCtx = extractCompletionContext(astMssql, astMssql.length, 'mssql');
+assert(
+  JSON.stringify(astMssqlCtx.tables[0]?.parts) === JSON.stringify(['dbo', 'users']) &&
+    astMssqlCtx.tables[0]?.schema === 'dbo' &&
+    astMssqlCtx.tables[0]?.alias === 'u',
+  `AST mssql qualified table wrong: ${JSON.stringify(astMssqlCtx.tables)}`,
+);
+const astMysql = 'SELECT * FROM db1.users u';
+const astMysqlCtx = extractCompletionContext(astMysql, astMysql.length, 'mysql');
+assert(
+  astMysqlCtx.tables[0]?.database === 'db1' &&
+    JSON.stringify(astMysqlCtx.tables[0]?.parts) === JSON.stringify(['db1', 'users']),
+  `AST mysql qualified table wrong: ${JSON.stringify(astMysqlCtx.tables)}`,
+);
+const incompleteSql = 'SELECT * FROM users WHERE ';
+const incompleteCtx = extractCompletionContext(incompleteSql, incompleteSql.length, 'mysql');
+assert(
+  JSON.stringify(incompleteCtx.tables.map((table) => table.table)) === JSON.stringify(['users']),
+  `incomplete SQL should fall back to scanner: ${JSON.stringify(incompleteCtx.tables)}`,
+);
+const astCte = extractVirtualTables(
+  'WITH x(id, name) AS (SELECT id, name FROM users) SELECT * FROM x',
+  'mysql',
+);
+assert(
+  astCte[0]?.name === 'x' &&
+    JSON.stringify(astCte[0]?.columns) === JSON.stringify(['id', 'name']),
+  `AST declared CTE columns wrong: ${JSON.stringify(astCte)}`,
+);
+const astInferredCte = extractVirtualTables(
+  'WITH x AS (SELECT id AS uid, name FROM users) SELECT * FROM x',
+  'mysql',
+);
+assert(
+  astInferredCte[0]?.name === 'x' &&
+    JSON.stringify(astInferredCte[0]?.columns) === JSON.stringify(['uid', 'name']),
+  `AST inferred CTE columns wrong: ${JSON.stringify(astInferredCte)}`,
 );
 
 // 版本感知：方言关键字与特性开关。

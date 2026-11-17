@@ -28,6 +28,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - SQL 高亮词法测试：`npm run test:sql-highlight`（纯 Node，不启动 Electron）
 - SQL 格式化测试：`npm run test:sql-format`（纯 Node，不启动 Electron）
 - SQL 补全测试：`npm run test:sql-completion`（纯 Node，不启动 Electron）
+- 补全元数据缓存测试：`npm run test:metadata`（纯 Node，不启动 Electron）
 - SQL 括号匹配测试：`npm run test:sql-brackets`（纯 Node，不启动 Electron）
 - SQL 脱敏测试：`npm run test:sql-mask`（纯 Node，不启动 Electron）
 - SQL 脚本分句测试：`npm run test:sql-script`（纯 Node，不启动 Electron）
@@ -66,6 +67,10 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   不要把 Node 或数据库驱动引入 renderer。
 - SQL 编辑器内核是 CodeMirror 6（`@codemirror/lang-sql`），不要换回 textarea + 高亮层；
   补全候选/排序仍由 `utils/sql-completion.ts` 提供，编辑器只负责弹层与插入。
+  语句上下文优先由 `utils/sql-analysis.ts`（`node-sql-parser`，按方言懒加载 chunk）提取表/别名/CTE；
+  解析失败或解析器尚未加载时回退 `extractCompletionContext` 的扫描实现，不要让补全依赖解析成功。
+  补全元数据缓存统一走 `utils/metadata-store.ts`：用户/系统分区、loading Promise 合并、错误退避、
+  generation 失效；不要在 `App.tsx` 里重新建列/对象/外键缓存。系统分区懒加载，DDL 只失效用户分区。
   方言关键字从 `@codemirror/lang-sql` 的 dialect spec 合并，不要再维护一份不完整的 T-SQL 关键字表；
   MSSQL `sys.`/`dbo.` 的候选来自 `sys.all_objects`（系统对象开关只影响对象树展示，补全需要完整词表）；
   常规 FROM/JOIN 只加载用户对象，系统对象通过 `sys.`/`INFORMATION_SCHEMA.` 或 EXEC 进入，避免数千个系统对象淹没用户表。
@@ -139,7 +144,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 
 ## 构建 / 测试细节
 
-- 没有 CI、lint；现有门槛是 `typecheck` + `test:safety` + `test:groups` + `test:ddl` + `test:dml` + `test:export` + `test:history` + `test:errors` + `test:connection-export` + `test:timeouts` + `test:pagination` + `test:settings` + `test:sql-highlight` + `test:sql-format` + `test:sql-completion` + `test:sql-brackets` + `test:sql-mask` + `test:sql-script` + `test:xlsx` + `test:sqlite-rebuild` + `test:checks` + `test:mssql` + `build` + `e2e:sqlite`。
+- 没有 CI、lint；现有门槛是 `typecheck` + `test:safety` + `test:groups` + `test:ddl` + `test:dml` + `test:export` + `test:history` + `test:errors` + `test:connection-export` + `test:timeouts` + `test:pagination` + `test:settings` + `test:sql-highlight` + `test:sql-format` + `test:sql-completion` + `test:metadata` + `test:sql-brackets` + `test:sql-mask` + `test:sql-script` + `test:xlsx` + `test:sqlite-rebuild` + `test:checks` + `test:mssql` + `build` + `e2e:sqlite`。
 - 纯逻辑模块（`shared/dialect/safety.ts`、`shared/dialect/ddl.ts`、`renderer/src/utils/groups.ts`）
   由 Node 类型剥离直接跑测试；这些模块内部 import 其他 `.ts` 文件时要写显式 `.ts` 后缀
   （`tsconfig.json` 已开启 `allowImportingTsExtensions`）。

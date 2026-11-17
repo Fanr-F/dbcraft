@@ -51,6 +51,9 @@ export function SettingsDialog({
   const [completionAutoTrigger, setCompletionAutoTrigger] = useState(
     settings.completionAutoTrigger,
   );
+  const [completionTableAlias, setCompletionTableAlias] = useState(
+    settings.completionTableAlias,
+  );
   const [completionDelayMs, setCompletionDelayMs] = useState(settings.completionDelayMs);
   const [historyRetention, setHistoryRetention] = useState(settings.historyRetention);
   const [queryTimeoutMs, setQueryTimeoutMs] = useState(settings.queryTimeoutMs);
@@ -183,6 +186,7 @@ export function SettingsDialog({
     setSqlKeywordCase(DEFAULT_APP_SETTINGS.sqlKeywordCase);
     setCompletionEnabled(DEFAULT_APP_SETTINGS.completionEnabled);
     setCompletionAutoTrigger(DEFAULT_APP_SETTINGS.completionAutoTrigger);
+    setCompletionTableAlias(DEFAULT_APP_SETTINGS.completionTableAlias);
     setCompletionDelayMs(DEFAULT_APP_SETTINGS.completionDelayMs);
     setHistoryRetention(DEFAULT_APP_SETTINGS.historyRetention);
     setQueryTimeoutMs(DEFAULT_APP_SETTINGS.queryTimeoutMs);
@@ -267,6 +271,7 @@ export function SettingsDialog({
         sqlKeywordCase,
         completionEnabled,
         completionAutoTrigger,
+        completionTableAlias,
         completionDelayMs,
         historyRetention,
         queryTimeoutMs,
@@ -400,6 +405,15 @@ export function SettingsDialog({
               checked={completionAutoTrigger}
               disabled={!completionEnabled}
               onChange={(event) => setCompletionAutoTrigger(event.target.checked)}
+            />
+          </label>
+          <label className="field field-check">
+            <span>FROM/JOIN 表名自动加别名</span>
+            <input
+              type="checkbox"
+              checked={completionTableAlias}
+              disabled={!completionEnabled}
+              onChange={(event) => setCompletionTableAlias(event.target.checked)}
             />
           </label>
           <label className="field">
@@ -677,6 +691,7 @@ export function SettingsDialog({
                 sqlKeywordCase === settings.sqlKeywordCase &&
                 completionEnabled === settings.completionEnabled &&
                 completionAutoTrigger === settings.completionAutoTrigger &&
+                completionTableAlias === settings.completionTableAlias &&
                 completionDelayMs === settings.completionDelayMs &&
                 historyRetention === settings.historyRetention &&
                 queryTimeoutMs === settings.queryTimeoutMs &&
