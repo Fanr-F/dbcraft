@@ -292,6 +292,33 @@ const coRank = rankCompletions(
   'co',
 );
 assert(coRank[0]?.label === 'COUNT', `function should stay above keyword: ${coRank.map((i) => i.label)}`);
+// 有前缀命中时，子序列命中的表/列也必须丢弃：se -> sessions/SELECT，不含 users。
+const strictPrefix = rankCompletions(
+  [
+    { label: 'sessions', kind: 'table' },
+    { label: 'users', kind: 'table' },
+    { label: 'user_settings', kind: 'table' },
+    { label: 'SELECT', kind: 'keyword' },
+  ],
+  'se',
+);
+assert(
+  JSON.stringify(strictPrefix.map((item) => item.label)) ===
+    JSON.stringify(['sessions', 'SELECT']),
+  `strict prefix order wrong: ${strictPrefix.map((item) => item.label).join(',')}`,
+);
+// 没有任何前缀命中时才回退模糊匹配。
+const fallbackFuzzy = rankCompletions(
+  [
+    { label: 'users', kind: 'table' },
+    { label: 'releases', kind: 'table' },
+  ],
+  'se',
+);
+assert(
+  fallbackFuzzy.some((item) => item.label === 'releases'),
+  `fuzzy fallback should apply without prefix matches: ${fallbackFuzzy.map((i) => i.label)}`,
+);
 
 // 版本感知：方言关键字与特性开关。
 assert(keywordCompletions('mssql', '16.0').includes('TOP'), 'mssql should suggest TOP');

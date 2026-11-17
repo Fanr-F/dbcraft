@@ -1647,6 +1647,8 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 
 - **W-20261117-02 WHERE / select list 列补全**：诉求是 `WHERE` 后和 select list 没有列补全。排查：`SELECT ` 后空格不自动触发，select list 需要先输入字母或 Ctrl+Space；MSSQL 单连接没有串行队列，补全对 JOIN 多表并发请求列元数据时可能撞上 `SentClientRequest` 状态失败；`loadColumns` 把失败结果缓存为空数组，导致该 tab/表后续一直显示不出列。变更：`MssqlSession.run` 增加 Promise 队列，所有查询/元数据请求串行执行；`loadColumns` 只在成功且列数 > 0 时写缓存，失败/空结果下次补全重试；`shouldAutoTriggerCompletion` 增加 `SELECT` / `SELECT DISTINCT`，空格后直接弹列/函数候选（有 FROM 时列优先）。涉及 `src/main/services/mssql/MssqlSession.ts`、`src/renderer/src/App.tsx`、`src/renderer/src/utils/sql-completion.ts`、`scripts/test-sql-completion.mjs`、`AGENTS.md`、`prd/PROJECT_MASTER.md`、`prd/FEATURE_MATRIX.md`。验证：`npm run typecheck`、`test:sql-completion`、`e2e:sqlite`、`check:mssql`、`check:mssql-multidb` 通过；真实 MSSQL `fanr` 库 + Electron 临时脚本确认 `SELECT ` 自动弹层、`WHERE ` / JOIN WHERE / `SELECT  FROM dbo.aaa`（光标在 select list）/ `WHERE a.` 都能列出 `id`/`v`/`addtime` 等列；临时脚本已删除。遗留/风险：元数据请求串行后，多表 JOIN 的列候选要等前一张表加载完，首次可能稍慢；查询超时/取消仍按会话级 `currentRequest` 处理，排队中的请求没有独立取消目标；MySQL/MariaDB 列补全未跑真实实例。
 
+- **W-20261117-03 补全严格前缀匹配**：诉求是开始输入时补全应按前缀匹配，实际列表会混入非前缀候选并随按键跳动。根因：`rankCompletions` 在无前缀命中时用子序列兜底，但 `hasStrongMatch` 只过滤子序列命中的关键字/函数，表/列的子序列候选仍会混入；编辑器返回 `filter: false`，CodeMirror 不做二次过滤，因此输入 `se` 会同时列出 `users` / `user_settings`。变更：存在完全相等/前缀命中时只保留前缀命中（完全相等 > 前缀）；没有前缀命中时才回退「词首 > 子序列」模糊匹配，并保留原有「词首命中时过滤子序列关键字/函数」逻辑。涉及 `src/renderer/src/utils/sql-completion.ts`、`scripts/test-sql-completion.mjs`、`prd/PROJECT_MASTER.md`。验证：`npm run test:sql-completion`、`npm run typecheck` 通过；手工构造候选确认 `s`/`se`/`ses`/`sel`/`use`/`na` 不再混入非前缀对象。遗留/风险：严格前缀后，若只记得对象中间片段（如输入 `at` 找 `created_at`）且存在其他前缀命中，该候选不会出现，需要输入完整前缀或先输入更多字符；后续如需可加「前缀优先、子序列置底」开关。
+
 ## 7. 附录：旧文档合并映射
 
 | 原文档 | 合并后位置 | 说明 |

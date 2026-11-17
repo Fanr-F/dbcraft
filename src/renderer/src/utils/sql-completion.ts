@@ -1346,7 +1346,8 @@ export function filterCompletions(
 
 /**
  * 带排序的补全过滤：
- * - 前缀匹配 > 单词开头匹配 > 模糊子序列匹配；
+ * - 有前缀命中（含完全相等）时只保留前缀命中，不再混入词首/子序列候选；
+ * - 没有前缀命中时才回退到「单词开头 > 模糊子序列」；
  * - 同分时按候选类型优先级（列 > 别名 > 表 > 库/Schema > 函数 > 关键字），再按字母序；
  * - 返回匹配字符下标，供弹层高亮。
  */
@@ -1390,18 +1391,28 @@ export function rankCompletions(
   const priorityOf = (item: RankedCompletion) =>
     item.priority ?? completionKindPriority(item.kind);
   const scored = ranked.map((item) => ({ item, score: scoreOf(item, query) }));
-  // 已经有前缀/词首命中时，丢掉纯子序列命中的关键字/函数，避免 `na` 同时列出
-  // name 和 CURRENT_TIMESTAMP / JSON_EXTRACT 这类噪音；没有强命中时仍保留模糊搜索。
-  const hasStrongMatch = query.length > 0 && scored.some((entry) => entry.score <= 2);
-  const visible = hasStrongMatch
-    ? scored.filter(
-        (entry) =>
-          !(
-            entry.score === 3 &&
-            (entry.item.kind === 'keyword' || entry.item.kind === 'function')
-          ),
-      )
-    : scored;
+  let visible = scored;
+  if (query.length > 0) {
+    // 严格前缀：只要存在完全相等/前缀命中，就丢掉词首与子序列命中。否则输入
+    // `se` 时 `users`（u-s-e-r-s）会排在列表末尾，候选随每次按键跳动。
+    const hasPrefixMatch = scored.some((entry) => entry.score <= 1);
+    if (hasPrefixMatch) {
+      visible = scored.filter((entry) => entry.score <= 1);
+    } else {
+      // 一个前缀都没有时才启用模糊兜底；仍有词首命中时，过滤纯子序列的
+      // 关键字/函数噪音（例如 `na` 不再列出 CURRENT_TIMESTAMP）。
+      const hasWordStart = scored.some((entry) => entry.score === 2);
+      if (hasWordStart) {
+        visible = scored.filter(
+          (entry) =>
+            !(
+              entry.score === 3 &&
+              (entry.item.kind === 'keyword' || entry.item.kind === 'function')
+            ),
+        );
+      }
+    }
+  }
   const isCommonKeyword = (item: RankedCompletion) =>
     item.kind === 'keyword' &&
     COMMON_KEYWORDS.has(item.label.toUpperCase());
