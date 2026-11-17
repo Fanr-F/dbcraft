@@ -148,10 +148,15 @@ export class CompletionService {
     this.prefetchTimer = setTimeout(() => {
       this.prefetchTimer = null;
       void (async () => {
-        for (const table of tables) {
-          if (this.virtualColumnsFor(table, virtualTables)) continue;
-          await this.loadColumnsFor(table, env, virtualTables);
-          if (wantForeignKeys) await this.loadForeignKeysFor(table, env);
+        // 预取失败不能冒泡成 unhandled rejection；真正的错误由 provider/缓存负责退避。
+        try {
+          for (const table of tables) {
+            if (this.virtualColumnsFor(table, virtualTables)) continue;
+            await this.loadColumnsFor(table, env, virtualTables);
+            if (wantForeignKeys) await this.loadForeignKeysFor(table, env);
+          }
+        } catch {
+          // 忽略预取失败。
         }
       })();
     }, 200);
@@ -454,7 +459,9 @@ export class CompletionService {
             (item) => item.toLowerCase() === last,
           );
           if (databaseMatch) {
-            const objects = await loadUserObjects(databaseMatch);
+            // MySQL 的 sys/information_schema/mysql 是系统库；显式限定到某个库时
+            // 用户与系统对象都要给，否则 `sys.` / `information_schema.` 会是空列表。
+            const objects = await loadAllObjects(databaseMatch);
             return pick(objectCandidates(objects));
           }
           return columnsForReference() ?? loadColumns(last);

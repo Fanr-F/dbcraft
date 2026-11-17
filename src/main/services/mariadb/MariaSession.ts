@@ -296,7 +296,8 @@ export class MariaSession implements DatabaseSession {
     )) as unknown[][];
     const objects: SchemaObject[] = rows.map((row) => ({
       name: String(row[0] ?? ''),
-      type: row[1] === 'VIEW' ? 'view' : 'table',
+      // information_schema 的 TABLE_TYPE 是 SYSTEM VIEW；按视图处理，避免排进表分组。
+      type: row[1] === 'VIEW' || row[1] === 'SYSTEM VIEW' ? 'view' : 'table',
     }));
 
     const procedures = (await this.connection.query(
@@ -397,13 +398,23 @@ export class MariaSession implements DatabaseSession {
     const dot = name.lastIndexOf('.');
     const schemaName = dot > 0 ? name.slice(0, dot) : null;
     const tableName = dot > 0 ? name.slice(dot + 1) : name;
+    // information_schema 的目录名是大写（TABLES/COLUMNS），用户通常写小写；
+    // 只在该库下做大小写不敏感匹配，避免影响普通表名。
+    const infoSchemaMatch = `TABLE_SCHEMA = COALESCE(?, DATABASE())
+              AND (
+                TABLE_NAME = ?
+                OR (
+                  LOWER(COALESCE(?, DATABASE())) = 'information_schema'
+                  AND UPPER(TABLE_NAME) = UPPER(?)
+                )
+              )`;
     const tableRows = (await this.connection.query(
       {
         sql: `SELECT TABLE_TYPE FROM information_schema.TABLES
-              WHERE TABLE_SCHEMA = COALESCE(?, DATABASE()) AND TABLE_NAME = ?`,
+              WHERE ${infoSchemaMatch}`,
         rowsAsArray: true,
       },
-      [schemaName, tableName],
+      [schemaName, tableName, schemaName, tableName],
     )) as unknown[][];
     const tableType = tableRows[0]?.[0];
     if (!tableType) {
@@ -414,11 +425,11 @@ export class MariaSession implements DatabaseSession {
       {
         sql: `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_KEY
               FROM information_schema.COLUMNS
-              WHERE TABLE_SCHEMA = COALESCE(?, DATABASE()) AND TABLE_NAME = ?
+              WHERE ${infoSchemaMatch}
               ORDER BY ORDINAL_POSITION`,
         rowsAsArray: true,
       },
-      [schemaName, tableName],
+      [schemaName, tableName, schemaName, tableName],
     )) as unknown[][];
 
     const columns: TableColumnMeta[] = rows.map((row) => {
@@ -437,7 +448,10 @@ export class MariaSession implements DatabaseSession {
     });
 
     const primaryKey = columns.filter((column) => column.primaryKey).map((column) => column.name);
-    const isView = String(tableType) === 'VIEW' || kind === 'view';
+    const isView =
+      String(tableType) === 'VIEW' ||
+      String(tableType) === 'SYSTEM VIEW' ||
+      kind === 'view';
     const editable = !isView && primaryKey.length > 0 && !this.isReadOnly;
 
     let reason: string | undefined;

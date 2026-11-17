@@ -85,6 +85,9 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   dialect spec 生成（`npm run sync:keywords`）；不要另维护一份不完整的 T-SQL 关键字表；
   MSSQL `sys.`/`dbo.` 的候选来自 `sys.all_objects`（系统对象开关只影响对象树展示，补全需要完整词表）；
   常规 FROM/JOIN 只加载用户对象，系统对象通过 `sys.`/`INFORMATION_SCHEMA.` 或 EXEC 进入，避免数千个系统对象淹没用户表。
+  MySQL 的 `sys`/`information_schema`/`mysql`/`performance_schema` 是系统**库**：显式写 `库.` 时
+  必须走 `loadAllObjects`（用户 + 系统），不能被用户对象过滤器清空；`information_schema` 的目录名
+  是大写（`TABLES`/`COLUMNS`），`getTableMeta` 在该库下做大小写不敏感匹配；`SYSTEM VIEW` 按 `view` 返回。
   格式化优先走 `sql-formatter`，MySQL `DELIMITER` 例程脚本因第三方会拆坏 `END$$`/`DELIMITER ;`
   而走 `utils/sql-format.ts` 的本地保守实现；改格式化后跑 `npm run test:sql-format`。
   PRD 附录 A.2 / Q20 仍写 Monaco，属未同步的文档偏差（见 PROJECT_MASTER D-1），不要据此回退。
@@ -115,7 +118,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   `schema({ database })` 跨库取表/视图/存储过程、`tableExtras(database, table)` 取约束/触发器/索引；
   `SchemaObject.type` 含 `procedure`。UI 入口是 `components/ObjectTree.tsx`，数据库/表子对象按需加载；
   表数据页把所属库写入 `QueryTab.table.database`，查询/元数据/DML 前用 `ensureDatabase` 切回该库。
-  MySQL / MariaDB 多库路径目前只有类型检查与 SQL 走查，需真实实例回归。
+  MySQL 补全的系统库/列路径已在 MySQL 8.4 真实实例回归；MySQL / MariaDB 多库对象树其余路径仍需真实实例回归。
 - 结果值保真：`dateStrings`、`bigNumberStrings`、`jsonStrings`；不要做时区转换，
   也不要把 DECIMAL 转成 number。
 - 结果集不设行数上限：查询与导出默认加载全部行，不要再引入 `maxRows`/`resolveRowLimit`/截断逻辑。

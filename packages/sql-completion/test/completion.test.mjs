@@ -1091,4 +1091,40 @@ assert(
 );
 mysqlService.dispose();
 
+// MySQL 系统库限定符：sys / information_schema 是系统库，但显式写 `库.` 时
+// 必须给出库内对象，不能被用户对象过滤器清空。
+const mysqlSystemProvider = {
+  async loadUserObjects(database) {
+    return database === 'app' ? [{ name: 'app_table', type: 'table' }] : [];
+  },
+  async loadSystemObjects(database) {
+    return database === 'information_schema'
+      ? [
+          { name: 'TABLES', type: 'view' },
+          { name: 'COLUMNS', type: 'view' },
+        ]
+      : [];
+  },
+  async loadColumns() {
+    return [{ name: 'TABLE_NAME', type: 'varchar(64)' }];
+  },
+  async loadForeignKeys() {
+    return [];
+  },
+};
+const mysqlSystemService = new CompletionService('mysql', mysqlSystemProvider);
+const infoText = 'SELECT * FROM information_schema.';
+const infoCtx = extractCompletionContext(infoText, infoText.length, 'mysql');
+const infoItems = await mysqlSystemService.complete(infoCtx, {
+  database: 'app',
+  databases: ['app', 'information_schema'],
+  activeSchema: [],
+  lowerCaseTableNames: 0,
+});
+assert(
+  infoItems.some((item) => item.label === 'TABLES'),
+  `mysql information_schema qualifier should list system objects: ${infoItems.map((i) => i.label)}`,
+);
+mysqlSystemService.dispose();
+
 console.log('sql completion check passed');
