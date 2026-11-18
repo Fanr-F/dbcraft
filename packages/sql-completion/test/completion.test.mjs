@@ -565,6 +565,41 @@ assert(
   `unqualified single-segment file should stay strict: ${plainFileRanked.map((item) => item.label)}`,
 );
 
+// 限定符下多段输入允许从任意词段开始：`sys.file_io` 命中
+// `host_summary_by_file_io`，同时真正以 `file_io` 开头的候选仍排在最前。
+const sysFileIoText = 'SELECT * FROM sys.file_io';
+const sysFileIoCtx = extractCompletionContext(
+  sysFileIoText,
+  sysFileIoText.length,
+  'mysql',
+);
+const sysFileIoRanked = rankCompletions(
+  [
+    { label: 'host_summary_by_file_io', kind: 'view' },
+    { label: 'latest_file_io', kind: 'view' },
+    { label: 'file_io', kind: 'view' },
+  ],
+  'file_io',
+  { context: sysFileIoCtx },
+);
+assert(
+  JSON.stringify(sysFileIoRanked.map((item) => item.label)) ===
+    JSON.stringify(['file_io', 'host_summary_by_file_io', 'latest_file_io']),
+  `qualified multi-segment should match inside names: ${sysFileIoRanked.map((item) => item.label)}`,
+);
+const plainFileIoRanked = rankCompletions(
+  [
+    { label: 'host_summary_by_file_io', kind: 'view' },
+    { label: 'file_io', kind: 'view' },
+  ],
+  'file_io',
+);
+assert(
+  JSON.stringify(plainFileIoRanked.map((item) => item.label)) ===
+    JSON.stringify(['file_io']),
+  `unqualified multi-segment should keep first-segment start: ${plainFileIoRanked.map((item) => item.label)}`,
+);
+
 // 期望模型：FROM 只要表，WHERE 要列，JOIN ... ON 要列且是 joinOn。
 const fromExp = completionExpectation(extractCompletionContext('SELECT * FROM ', 14));
 assert(fromExp.tables && fromExp.schemas && !fromExp.columns, 'FROM expectation wrong');

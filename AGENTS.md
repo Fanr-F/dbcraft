@@ -90,6 +90,8 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   是大写（`TABLES`/`COLUMNS`），`getTableMeta` 在该库下做大小写不敏感匹配；`SYSTEM VIEW` 按 `view` 返回。
   排序时词段匹配优先于贪心子序列：`sys.file` 必须保留 `host_summary_by_file_io`
   （贪心子序列会先命中 `io` 的 `i` 导致 `l` 失败，不能因此丢弃候选）。
+  限定符下多段输入的首段也可以从任意词段开始：`sys.file_io` 命中
+  `host_summary_by_file_io`；非限定符输入仍要求首段命中名字第一段。
   格式化优先走 `sql-formatter`，MySQL `DELIMITER` 例程脚本因第三方会拆坏 `END$$`/`DELIMITER ;`
   而走 `utils/sql-format.ts` 的本地保守实现；改格式化后跑 `npm run test:sql-format`。
   PRD 附录 A.2 / Q20 仍写 Monaco，属未同步的文档偏差（见 PROJECT_MASTER D-1），不要据此回退。
