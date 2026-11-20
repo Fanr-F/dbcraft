@@ -45,6 +45,32 @@ assert(go.ok && go.statements[1] === 'SELECT 2', 'GO should be stripped from sec
 const goInline = splitSqlStatements("SELECT 'GO' AS g;\nGO\nSELECT 2;", 50, 'mssql');
 assert(goInline.ok && goInline.statements.length === 2, 'GO in string split wrongly');
 
+// MSSQL：GO n 重复整个批次；GO 0 / 超限要报错。
+const goRepeat = splitSqlStatements('SELECT 1\nGO 3\nSELECT 2;', 50, 'mssql');
+assert(goRepeat.ok && goRepeat.statements.length === 4, 'GO 3 should repeat the batch');
+assert(
+  goRepeat.ok &&
+    goRepeat.statements[0] === 'SELECT 1' &&
+    goRepeat.statements[1] === 'SELECT 1' &&
+    goRepeat.statements[2] === 'SELECT 1' &&
+    goRepeat.statements[3] === 'SELECT 2;',
+  'GO 3 statement order wrong',
+);
+const goRepeatSemicolon = splitSqlStatements('SELECT 1;\nGO 3\n', 50, 'mssql');
+assert(
+  goRepeatSemicolon.ok && goRepeatSemicolon.statements.length === 3,
+  'GO 3 after semicolon should repeat the batch',
+);
+const goRepeatMulti = splitSqlStatements('SELECT 1; SELECT 2;\nGO 2\n', 50, 'mssql');
+assert(
+  goRepeatMulti.ok && goRepeatMulti.statements.length === 4,
+  'GO 2 should repeat all statements in the batch',
+);
+const goZero = splitSqlStatements('SELECT 1\nGO 0\n', 50, 'mssql');
+assert(!goZero.ok, 'GO 0 should be rejected');
+const goOverLimit = splitSqlStatements('SELECT 1\nGO 100\n', 50, 'mssql');
+assert(!goOverLimit.ok, 'GO n over the statement limit should be rejected');
+
 // MySQL：DELIMITER 内不按分号切分，DELIMITER 行本身不进入语句。
 const delimiter = splitSqlStatements(
   'DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END$$\nDELIMITER ;\nSELECT 3;',

@@ -16,6 +16,8 @@ const projectRoot = resolve(import.meta.dirname, '..');
 const workDirectory = mkdtempSync(join(tmpdir(), 'dbcraft-e2e-mssql-'));
 const screenshotPath = join(workDirectory, 'mssql-e2e.png');
 const tableName = 'dbcraft_e2e_mssql';
+const crossDbTableName = 'dbcraft_e2e_crossdb';
+const editTableName = 'dbcraft_e2e_edit';
 
 const config = {
   host: process.env.DBCRAFT_MSSQL_HOST,
@@ -65,6 +67,22 @@ await pool.request().batch(`
     name nvarchar(50) NOT NULL
   );
   INSERT INTO dbo.${tableName} (id, name) VALUES (1, N'alpha'), (2, N'beta');
+
+  IF OBJECT_ID(N'tempdb.dbo.${crossDbTableName}', N'U') IS NOT NULL
+    DROP TABLE tempdb.dbo.${crossDbTableName};
+  CREATE TABLE tempdb.dbo.${crossDbTableName} (
+    id int NOT NULL PRIMARY KEY,
+    name nvarchar(50) NOT NULL
+  );
+  INSERT INTO tempdb.dbo.${crossDbTableName} (id, name) VALUES (1, N'cross-alpha');
+
+  IF OBJECT_ID(N'tempdb.dbo.${editTableName}', N'U') IS NOT NULL
+    DROP TABLE tempdb.dbo.${editTableName};
+  CREATE TABLE tempdb.dbo.${editTableName} (
+    id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    name nvarchar(50) NOT NULL,
+    qty int NOT NULL
+  );
 `);
 
 let app = null;
@@ -105,6 +123,11 @@ try {
     null,
     { timeout: 20000 },
   );
+  // 系统库默认收起：master 是系统库，先展开数据库节点再找测试表。
+  const databaseRow = page.locator('.tree-row', { hasText: config.database }).first();
+  if ((await databaseRow.locator('.tree-label-btn').getAttribute('aria-expanded')) === 'false') {
+    await databaseRow.locator('.tree-chevron-btn').click();
+  }
   await page.waitForFunction(
     () =>
       document.querySelector('.object-tree-body')?.textContent?.includes('dbcraft_e2e_mssql') ??
@@ -146,6 +169,164 @@ try {
   assert(messages.includes('SELECT 2 AS b'), 'message panel missing second GO batch');
   assert(!/\bGO\b/.test(messages), 'GO should not be sent as SQL');
 
+  // MSSQL GO n：整个批次重复执行。
+  await page.locator('.cm-content').fill('SELECT 1 AS a\nGO 2\nSELECT 2 AS b');
+  await page.getByRole('button', { name: '执行', exact: true }).click();
+  await page.waitForSelector('.result-tabs', { timeout: 15000 });
+  await page.waitForFunction(
+    () => document.querySelectorAll('.result-tab').length >= 4,
+    null,
+    { timeout: 10000 },
+  );
+  await page.locator('.result-tab', { hasText: '结果 3' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('revo-grid')?.textContent?.includes('2') ?? false,
+    null,
+    { timeout: 15000 },
+  );
+  await page.locator('.result-tab', { hasText: '结果 1' }).click();
+  await page.waitForFunction(
+    () => document.querySelector('revo-grid')?.textContent?.includes('1') ?? false,
+    null,
+    { timeout: 15000 },
+  );
+
+  // 回归：双击非默认库（tempdb）里的表，表数据页必须自动切到该库。
+  // 之前 runQuery 因 sessions 快照过期重新 open 会话时丢掉了 table.database，
+  // 会话退回 master，报 Invalid object name（W-20261119-02）。
+  const tempdbRow = page.locator('.tree-row', { hasText: 'tempdb' }).first();
+  if ((await tempdbRow.locator('.tree-label-btn').getAttribute('aria-expanded')) === 'false') {
+    await tempdbRow.locator('.tree-chevron-btn').click();
+  }
+  await page.waitForFunction(
+    () =>
+      document.querySelector('.object-tree-body')?.textContent?.includes('dbcraft_e2e_crossdb') ??
+      false,
+    null,
+    { timeout: 20000 },
+  );
+  await page
+    .locator('.tree-label-btn')
+    .filter({ hasText: /^dbcraft_e2e_crossdb$/ })
+    .first()
+    .dblclick();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('.tab.is-active')?.textContent?.includes('tempdb.dbcraft_e2e_crossdb') ??
+      false,
+    null,
+    { timeout: 15000 },
+  );
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('库 tempdb') ?? false,
+    null,
+    { timeout: 20000 },
+  );
+  assert(
+    !(await page.locator('.result-error').count()),
+    'cross-database table data should not fail',
+  );
+  await page.waitForFunction(
+    () => document.querySelector('revo-grid')?.textContent?.includes('cross-alpha') ?? false,
+    null,
+    { timeout: 15000 },
+  );
+  await page.locator('.tab.is-active .tab-close').click();
+
+  // 回归：MSSQL 表数据页粘贴后提交。MSSQL 的 BEGIN TRANSACTION 不能走 execSql（错误 266），
+  // 必须使用驱动原生事务 API（W-20261120-02）。
+  await page
+    .locator('.tree-label-btn')
+    .filter({ hasText: /^dbcraft_e2e_edit$/ })
+    .first()
+    .dblclick();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('.tab.is-active')?.textContent?.includes('tempdb.dbcraft_e2e_edit') ??
+      false,
+    null,
+    { timeout: 15000 },
+  );
+  await page.waitForFunction(
+    () => document.querySelector('.statusbar')?.textContent?.includes('库 tempdb') ?? false,
+    null,
+    { timeout: 20000 },
+  );
+  // 打开表页后会自动聚焦网格宿主；等焦点到位再模拟 Ctrl+V。
+  await page.waitForFunction(
+    () => document.activeElement?.tagName === 'REVO-GRID',
+    null,
+    { timeout: 5000 },
+  );
+  await app.evaluate(({ clipboard }) => clipboard.writeText('e2e-row\t7'));
+  await page.keyboard.press('Control+V');
+  await page.waitForFunction(
+    () => document.querySelector('.badge.badge-warn')?.textContent?.includes('待提交 1 项') ?? false,
+    null,
+    { timeout: 10000 },
+  );
+  await page.getByRole('button', { name: '提交修改', exact: true }).click();
+  await page.waitForFunction(
+    () => !document.querySelector('.badge.badge-warn'),
+    null,
+    { timeout: 20000 },
+  );
+  const inserted = await pool
+    .request()
+    .query(`SELECT name, qty FROM tempdb.dbo.${editTableName}`);
+  assert(
+    inserted.recordset.length === 1 &&
+      inserted.recordset[0].name === 'e2e-row' &&
+      inserted.recordset[0].qty === 7,
+    `MSSQL table edit commit failed: ${JSON.stringify(inserted.recordset)}`,
+  );
+  await page.locator('.tab.is-active .tab-close').click();
+
+  // 回归：编辑表结构 grid 保存不能被误判为重命名（W-20261118-12）。
+  const designRow = page.locator('.tree-table-row', { hasText: tableName }).first();
+  await designRow.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '编辑表结构…', exact: true }).click();
+  await page.waitForSelector('.structure-grid', { timeout: 15000 });
+  const typeInput = page.getByLabel('第 2 列类型');
+  const originalType = await typeInput.inputValue();
+  await typeInput.fill(originalType.includes('60') ? 'NVARCHAR(70)' : 'NVARCHAR(60)');
+  await page.getByRole('button', { name: '保存并生成 DDL' }).click();
+  await page.waitForSelector('.ddl-preview', { timeout: 15000 });
+  const preview = await page.locator('.ddl-preview').inputValue();
+  assert(preview.includes('ALTER COLUMN'), 'design preview should alter the column');
+  assert(!preview.includes('sp_rename'), 'same-name design save must not rename the table');
+  assert(
+    !(await page.locator('.form-error').filter({ hasText: '新旧表名相同' }).count()),
+    'same-name design save must not report 新旧表名相同',
+  );
+  await page.locator('.table-design-tab').getByRole('button', { name: '执行 DDL' }).click();
+  await page.waitForFunction(() => !document.querySelector('.table-design-tab'), null, {
+    timeout: 20000,
+  });
+
+  // 改名时仍应生成 sp_rename，只预览不执行。
+  await page.waitForFunction(
+    () => document.querySelector('.object-tree-body')?.textContent?.includes('dbcraft_e2e_mssql') ?? false,
+    null,
+    { timeout: 20000 },
+  );
+  await page.locator('.tree-table-row', { hasText: tableName }).first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '编辑表结构…', exact: true }).click();
+  await page.waitForSelector('.structure-grid', { timeout: 15000 });
+  await page.getByLabel('表名').fill('dbcraft_e2e_mssql_renamed');
+  await page.getByRole('button', { name: '保存并生成 DDL' }).click();
+  await page.waitForSelector('.ddl-preview', { timeout: 15000 });
+  const renamePreview = await page.locator('.ddl-preview').inputValue();
+  assert(renamePreview.includes('sp_rename'), 'rename preview should include sp_rename');
+  assert(
+    renamePreview.includes('dbcraft_e2e_mssql_renamed'),
+    'rename preview should include the new table name',
+  );
+  await page.locator('.tab.is-active .tab-close').click();
+  await page.waitForFunction(() => !document.querySelector('.table-design-tab'), null, {
+    timeout: 10000,
+  });
+
   await page.screenshot({ path: screenshotPath });
   console.log('[e2e:mssql] passed');
   console.log('[e2e:mssql]', await statusText(page));
@@ -154,7 +335,11 @@ try {
   await pool
     .request()
     .batch(
-      `IF OBJECT_ID(N'dbo.${tableName}', N'U') IS NOT NULL DROP TABLE dbo.${tableName};`,
+      `IF OBJECT_ID(N'dbo.${tableName}', N'U') IS NOT NULL DROP TABLE dbo.${tableName};
+       IF OBJECT_ID(N'tempdb.dbo.${crossDbTableName}', N'U') IS NOT NULL
+         DROP TABLE tempdb.dbo.${crossDbTableName};
+       IF OBJECT_ID(N'tempdb.dbo.${editTableName}', N'U') IS NOT NULL
+         DROP TABLE tempdb.dbo.${editTableName};`,
     )
     .catch(() => undefined);
   await pool.close().catch(() => undefined);

@@ -231,17 +231,49 @@ export class MssqlSession implements DatabaseSession {
    */
   private queue: Promise<unknown> = Promise.resolve();
 
-  private run(sql: string, params: QueryCell[] = []): Promise<ExecResult> {
-    const execute = () =>
-      execOn(this.connection, sql, params, (request) => {
-        this.currentRequest = request;
-      });
-    const task = this.queue.then(execute, execute);
+  /** 所有 Connection 操作共用一条队列，保证事务与查询不会交错。 */
+  private enqueue<T>(action: () => Promise<T>): Promise<T> {
+    const task = this.queue.then(action, action);
     this.queue = task.then(
       () => undefined,
       () => undefined,
     );
     return task;
+  }
+
+  private run(sql: string, params: QueryCell[] = []): Promise<ExecResult> {
+    return this.enqueue(() =>
+      execOn(this.connection, sql, params, (request) => {
+        this.currentRequest = request;
+      }),
+    );
+  }
+
+  async beginTransaction(): Promise<void> {
+    await this.enqueue(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          this.connection.beginTransaction((error) => (error ? reject(error) : resolve()));
+        }),
+    );
+  }
+
+  async commitTransaction(): Promise<void> {
+    await this.enqueue(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          this.connection.commitTransaction((error) => (error ? reject(error) : resolve()));
+        }),
+    );
+  }
+
+  async rollbackTransaction(): Promise<void> {
+    await this.enqueue(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          this.connection.rollbackTransaction((error) => (error ? reject(error) : resolve()));
+        }),
+    );
   }
 
   async query(sql: string, params?: QueryCell[]): Promise<QueryResult> {

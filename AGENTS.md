@@ -39,6 +39,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - CHECK 提取测试：`npm run test:checks`（纯 Node，不启动 Electron）
 - 表格编辑 DML 测试：`npm run test:dml`（纯 Node + 内存 SQLite，覆盖参数化、乐观锁、主键保护）
 - MSSQL 值/分页 SQL 测试：`npm run test:mssql`（纯 Node，不连接数据库）
+- Excel/TSV 粘贴测试：`npm run test:table-paste`（纯 Node，不启动 Electron）
 - MSSQL 真实实例联调：`npm run check:mssql`（读取 `.env.local`，建删临时表，需 SQL Server）
 - MSSQL Agent 联调：`npm run check:mssql-agent`（读取 `.env.local`，创建/启动/停止/删除测试作业，需 Agent 服务）
 - MSSQL 多库联调：`npm run check:mssql-multidb`（列出数据库、跨库对象、切换库、约束/触发器/索引，需 SQL Server）
@@ -46,6 +47,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   （默认 127.0.0.1:3307/3308，root 空密码；建删临时库，可用 `DBCRAFT_MYSQL_*` / `DBCRAFT_MARIADB_*` 覆盖）
 - 构建：`npm run build`（先 typecheck，产物在 `out/`）
 - 冒烟：`npm run smoke`（构建后检查窗口与 preload 桥接）
+- 自测：`npm run self-test`（纯逻辑 + typecheck + build + e2e:sqlite；可加 `-- --with-mssql` / `-- --with-mysql` / `-- --with-mariadb`）
 - SQLite E2E：`npm run e2e:sqlite`（自动构建、建临时库、启动 Electron）
 - MySQL E2E：`npm run e2e:mysql`（需 `spikes/mysql-auth/scripts/setup.ps1` 启动的 127.0.0.1:3307 实例）
 - MSSQL E2E：`npm run e2e:mssql`（读取 `.env.local`，会建删临时表，需 SQL Server）
@@ -60,7 +62,8 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   在服务器实体完成前不要按服务器级 UI 验收；「一个标签一个物理连接」不变。
   PRD v0.20 的 Q27 规则：保存连接是配置（类），session 是运行时对象；编辑保存只改配置，不重连/不改写已打开 tab；
   关闭左侧树，双击连接重连；双击连接只打开左侧树，右击 →「查询」才创建 tab + session；删除连接不强制关闭已有 session。
-  当前实现会静默重连绑定标签，改代码时按目标规则处理。
+  启动恢复标签时不再静默建连（W-20261118-05）：标签保持「未连接」，由标签右键「连接 / 重连」或首次执行按需建立 session；
+  新增启动/恢复逻辑时不要重新引入自动批量建连。
 - `src/shared/ipc-contract.ts` 是 IPC 唯一契约；新增/修改通道时同步更新
   `src/main/ipc/schemas.ts`、`src/main/ipc/router.ts`、`src/preload/index.ts`。
 - `src/main/services/ConnectionManager.ts` 持有 sessions；`DatabaseSession` 是驱动接口；
@@ -100,6 +103,11 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   参数占位符是 `@p1`/`@p2`（`mssql` 包只保留给探活脚本）。
   单个 `Connection` 同一时刻只能有一个 Request，`MssqlSession.run` 已用 Promise 队列串行化；
   补全会并发请求多张表的列元数据，不要绕过这个队列直接 `execSql`。
+  MSSQL 事务控制必须走 `MssqlSession.beginTransaction/commitTransaction/rollbackTransaction`
+  （tedious 原生 API，已接入同一队列）；不要用 `session.query('BEGIN TRANSACTION')` /
+  `COMMIT` / `ROLLBACK`——execSql 把批处理包在 EXECUTE 里，结束时事务仍打开会报错误 266。
+  `executeQuery` / `executeQueryScript` 已由 `runStatement` 按语句文本路由；
+  渲染层 `transactionAction` 解析前要剥掉末尾分号，否则 `COMMIT;` / `ROLLBACK;` 不会更新事务面板。
   Percona 与 MySQL 共用代码路径，但还没有真实 Percona 实例验证。
 - MSSQL 值保真：连接固定 `useUTC: true`，datetime/date/time 按 UTC 分量拼回字符串，不做应用层时区转换；
   `datetimeoffset` 由驱动归一化为时间点（原始偏移丢失），`decimal` 超过 15 位有效数字会丢精度，
@@ -121,6 +129,7 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - 多数据库对象树：MSSQL / MySQL 系由 `DatabaseSession.databases()` 列出可见库、`useDatabase()` 切库、
   `schema({ database })` 跨库取表/视图/存储过程、`tableExtras(database, table)` 取约束/触发器/索引；
   `SchemaObject.type` 含 `procedure`。UI 入口是 `components/ObjectTree.tsx`，数据库/表子对象按需加载；
+  展开状态由 `Sidebar` 受控并按连接存 `localStorage`（表子对象展开键不跨重启），不要在 `ObjectTree` 内改回组件局部状态；
   表数据页把所属库写入 `QueryTab.table.database`，查询/元数据/DML 前用 `ensureDatabase` 切回该库。
   MySQL 补全的系统库/列路径已在 MySQL 8.4 真实实例回归；MySQL / MariaDB 多库对象树其余路径仍需真实实例回归。
 - 结果值保真：`dateStrings`、`bigNumberStrings`、`jsonStrings`；不要做时区转换，
@@ -144,12 +153,24 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - 表数据页只是带分页上下文的 SQL 标签：双击表生成 `SELECT * ... LIMIT/OFFSET`，每页 50/200/500，
   可下拉或点击列头排序（`ORDER BY`），过滤生成参数化 `LIKE ? ESCAPE '!'`；分页/排序/过滤 SQL 用
   `buildTablePageQuery`（`shared/dialect/identifiers.ts`），不要手写方言分支，也不要把过滤值拼进 SQL。
+  表数据标签不显示数据库下拉，而是绑定打开时的 `table.database`；`runQuery` 因 `sessions` 快照过期
+  重新 `openTabSession` 时必须带上 `tab.table.database`（或 `currentDatabaseByTab`），
+  否则 MSSQL 会退回连接默认库，跨库表数据页报 `Invalid object name`。
 - 表数据编辑走 `table:apply`：渲染层先改本地行，提交时由主进程 `applyTableEdits` 在一个事务内
   执行；DML 必须用 `shared/dialect/dml.ts` 生成参数化语句，列名先在 `schema:table` 元数据白名单里
   校验，不要在渲染层或主进程手拼字面量。UPDATE 必须带被修改列的原始值做乐观锁；UPDATE/DELETE
   影响 0 行按冲突整体回滚。主键与生成列只读；无主键表默认只读，只有显式开启
   `allowNoPrimaryKeyInsert` 时才允许 INSERT（主进程仍会校验 edit 全为 insert）。
   改动后跑 `npm run test:dml`。
+- Excel/TSV 粘贴由 `ResultGrid` 监听 RevoGrid 的 `beforepasteapply` 接管，再交给
+  `App.pasteTableCells`；超出当前行时由渲染层追加待提交新增行，不能依赖 RevoGrid 直接改内部
+  source（那部分不会进入待提交状态/撤销栈）。粘贴解析与类型校验在 `src/shared/table-paste.ts`，
+  改动后跑 `npm run test:table-paste`。在 SQL 编辑器里粘贴必须只取消 RevoGrid 写入，
+  不能吞掉浏览器默认粘贴。
+  表数据页打开后必须让网格宿主拿到 **DOM 焦点**（延迟聚焦 + 首次 pointerdown 取消）：
+  焦点停在对象树/标签按钮时浏览器不会向网格派发 paste，Ctrl+V 会静默失效。
+  未点选单元格时粘贴按行尾追加，用户点选/方向键移动后按当前单元格改写；工具栏「从 Excel 粘贴」
+  始终追加到行尾。粘贴拦截可覆盖同一 workspace 内的标签栏/工具栏焦点，但不能吞掉输入框/编辑器粘贴。
 - 生产连接（`env === 'prod'`）执行 `DROP` / `TRUNCATE` / 无顶层 `WHERE` 的 `UPDATE`、`DELETE` 前必须经过
   `src/shared/dialect/safety.ts` 的检查与确认弹窗；改动检查逻辑后跑 `npm run test:safety`。
   该检查在渲染层执行，属于防误操作，不是权限边界；不要把它描述成数据库级保护。
@@ -168,8 +189,8 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 
 ## 构建 / 测试细节
 
-- 没有 CI、lint；现有门槛是 `typecheck` + `test:safety` + `test:groups` + `test:ddl` + `test:dml` + `test:export` + `test:history` + `test:errors` + `test:connection-export` + `test:timeouts` + `test:pagination` + `test:settings` + `test:sql-highlight` + `test:sql-format` + `test:sql-completion` + `test:completion-core` + `typecheck:completion` + `test:metadata` + `test:sql-brackets` + `test:sql-mask` + `test:sql-script` + `test:xlsx` + `test:sqlite-rebuild` + `test:checks` + `test:mssql` + `build` + `e2e:sqlite`。
-- 纯逻辑模块（`shared/dialect/safety.ts`、`shared/dialect/ddl.ts`、`renderer/src/utils/groups.ts`）
+- 没有 CI、lint；现有门槛是 `typecheck` + `test:safety` + `test:groups` + `test:ddl` + `test:dml` + `test:export` + `test:history` + `test:errors` + `test:connection-export` + `test:timeouts` + `test:pagination` + `test:settings` + `test:sql-highlight` + `test:sql-format` + `test:sql-completion` + `test:completion-core` + `typecheck:completion` + `test:metadata` + `test:sql-brackets` + `test:sql-mask` + `test:sql-script` + `test:xlsx` + `test:sqlite-rebuild` + `test:checks` + `test:mssql` + `test:table-paste` + `build` + `e2e:sqlite`。
+- 纯逻辑模块（`shared/dialect/safety.ts`、`shared/dialect/ddl.ts`、`shared/table-paste.ts`、`renderer/src/utils/groups.ts`）
   由 Node 类型剥离直接跑测试；这些模块内部 import 其他 `.ts` 文件时要写显式 `.ts` 后缀
   （`tsconfig.json` 已开启 `allowImportingTsExtensions`）。
 - SQLite 查询在 `src/main/workers/sqlite-worker.ts`，它是 main 的第二个 Rollup input。

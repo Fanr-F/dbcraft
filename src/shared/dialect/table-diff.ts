@@ -341,7 +341,13 @@ export function buildTableDesign(input: TableDesignInput): TableDesignResult {
 
   const statements: string[] = [];
   let currentTable = targetName;
-  if (targetName !== detail.name) {
+  // MSSQL 的 detail.name 对 dbo 表不带 schema（`users`），而 targetName 是 `dbo.users`；
+  // 不能用 targetName 和 detail.name 比较，否则同表也会被当成重命名。
+  const originalTableName =
+    input.dialect === 'mssql' && detail.name.includes('.')
+      ? detail.name.slice(detail.name.indexOf('.') + 1)
+      : detail.name;
+  if (tableName !== originalTableName) {
     const renamedTable = buildRenameTable(input.dialect, detail.name, tableName);
     if (!renamedTable.ok) {
       return { ok: false, message: renamedTable.message, warnings: [...warnings, ...renamedTable.warnings] };

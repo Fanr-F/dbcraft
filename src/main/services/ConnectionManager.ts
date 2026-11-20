@@ -9,8 +9,10 @@ import type {
   DdlObjectKind,
   DdlStatementResult,
   QueryError,
+  QueryCell,
   QueryRequest,
   QueryResponse,
+  QueryResult,
   QueryScriptRequest,
   QueryScriptResponse,
   QueryScriptStatement,
@@ -47,6 +49,54 @@ interface RunningQuery {
 }
 
 const runningQueries = new Map<string, RunningQuery>();
+
+/**
+ * MSSQL 的 execSql 会把批处理包在 EXECUTE 里；如果批处理结束时事务还开着，
+ * 会报错误 266（Transaction count after EXECUTE ...）。事务控制必须走驱动原生 API。
+ */
+function mssqlTransactionAction(sql: string): 'begin' | 'commit' | 'rollback' | null {
+  const text = sql
+    .replace(/^\s*(?:--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|\s)+/g, '')
+    .trim()
+    .replace(/;+\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+  if (text === 'BEGIN TRANSACTION' || text === 'BEGIN TRAN') return 'begin';
+  if (text === 'COMMIT' || text === 'COMMIT TRANSACTION' || text === 'COMMIT WORK') {
+    return 'commit';
+  }
+  if (text === 'ROLLBACK' || text === 'ROLLBACK TRANSACTION' || text === 'ROLLBACK WORK') {
+    return 'rollback';
+  }
+  return null;
+}
+
+/** 单条执行入口：MSSQL 事务控制走原生 API，其余仍走驱动 query。 */
+async function runStatement(
+  session: DatabaseSession,
+  sql: string,
+  params?: QueryCell[],
+): Promise<QueryResult> {
+  const action =
+    session.dialect === 'mssql' && session.beginTransaction
+      ? mssqlTransactionAction(sql)
+      : null;
+  if (action) {
+    const startedAt = Date.now();
+    if (action === 'begin') await session.beginTransaction!();
+    else if (action === 'commit') await session.commitTransaction!();
+    else await session.rollbackTransaction!();
+    return {
+      columns: [],
+      rows: [],
+      rowCount: 0,
+      elapsedMs: Date.now() - startedAt,
+      statementType: 'change',
+      changes: 0,
+    };
+  }
+  return session.query(sql, params);
+}
 
 /** 默认 30 秒；`DBCRAFT_QUERY_TIMEOUT_MS=0` 可关闭，便于调试或长任务。 */
 function resolveQueryTimeoutMs(): number {
@@ -424,7 +474,7 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResponse
   });
 
   try {
-    const result = await session.query(request.sql, request.params);
+    const result = await runStatement(session, request.sql, request.params);
     if (entry.canceled) {
       log.info('查询已取消', {
         requestId: request.requestId,
@@ -593,7 +643,7 @@ export async function executeQueryScript(
           : null;
 
       try {
-        const result = await session.query(sql);
+        const result = await runStatement(session, sql);
         if (timer) clearTimeout(timer);
 
         if (entry.canceled) {
@@ -1276,10 +1326,24 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
       : session.dialect === 'mssql'
         ? 'BEGIN TRANSACTION'
         : 'START TRANSACTION';
+  const beginTransaction = async () => {
+    if (session.beginTransaction) return session.beginTransaction();
+    await session.query(beginSql);
+  };
+  const commitTransaction = async () => {
+    if (session.commitTransaction) return session.commitTransaction();
+    await session.query('COMMIT');
+  };
+  const rollbackTransaction = async () => {
+    if (session.rollbackTransaction) return session.rollbackTransaction();
+    await session.query('ROLLBACK');
+  };
 
   try {
-    await session.query(beginSql);
+    await beginTransaction();
   } catch (error) {
+    // MSSQL 用 execSql 发 BEGIN 失败时，服务器端的事务可能已经打开，尽量回滚掉。
+    await rollbackTransaction().catch(() => undefined);
     return failed(
       `无法开启事务：${error instanceof Error ? error.message : String(error)}`,
     );
@@ -1320,13 +1384,13 @@ export async function applyTableEdits(request: TableApplyRequest): Promise<Table
       await session.query(`SET IDENTITY_INSERT ${identityTable} OFF`);
       identityInsertOn = false;
     }
-    await session.query('COMMIT');
+    await commitTransaction();
   } catch (error) {
     // SET IDENTITY_INSERT 是会话级状态，回滚事务不会自动关闭，必须显式复位。
     if (identityInsertOn) {
       await session.query(`SET IDENTITY_INSERT ${identityTable} OFF`).catch(() => undefined);
     }
-    await session.query('ROLLBACK').catch(() => undefined);
+    await rollbackTransaction().catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
     log.warn('表格编辑回滚', {
       sessionId: request.sessionId,

@@ -185,10 +185,6 @@
   background: var(--danger);
 }
 
-[data-theme='light'] .tab-state.is-dirty {
-  background: var(--warn);
-}
-
 [data-theme='light'] .modal {
   border-color: var(--border);
 }
@@ -806,6 +802,28 @@ button:disabled {
 
 .object-tree-body {
   padding-top: 2px;
+  outline: none;
+}
+
+.object-tree-body:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tree-row:focus-visible,
+.tree-label-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tree-row.is-selected {
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+/* 系统库（master / mysql / sys 等）默认收起，用弱化颜色区分。 */
+.tree-system:not(.is-current) .tree-label-btn {
+  color: var(--faint);
 }
 
 .tree-branch {
@@ -973,11 +991,35 @@ button:disabled {
   border-radius: 4px;
   background: transparent;
   color: var(--faint);
+  position: relative;
 }
 
 .tab-close:hover {
   background: var(--border);
   color: var(--text);
+}
+
+/* 有未保存 SQL 时，关闭按钮位显示琥珀点；悬停或键盘聚焦时换回 ×，不改变点击关闭行为。 */
+.tab-close-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.tab-close.is-dirty .tab-close-icon {
+  visibility: hidden;
+}
+
+.tab:hover .tab-close.is-dirty .tab-close-icon,
+.tab-close.is-dirty:focus-visible .tab-close-icon {
+  visibility: visible;
+}
+
+.tab:hover .tab-close.is-dirty .tab-close-dot,
+.tab-close.is-dirty:focus-visible .tab-close-dot {
+  display: none;
 }
 
 .tab-add {
@@ -1329,6 +1371,17 @@ button:disabled {
 .grid-cell-date {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* 粘贴后按列类型校验失败：只做提示，不阻止用户继续修改或提交。 */
+.grid-cell-invalid {
+  background: rgba(248, 113, 113, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.75);
+}
+
+[data-theme='light'] .grid-cell-invalid {
+  background: rgba(220, 38, 38, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.6);
 }
 
 .grid-host revogr-edit textarea,
@@ -1770,6 +1823,13 @@ button:disabled {
   overflow: auto;
 }
 
+/* 索引弹窗：创建/删除合并后由顶部两个按钮切换。 */
+.index-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
 .modal-footer {
   display: flex;
   align-items: center;
@@ -2128,6 +2188,163 @@ button:disabled {
 
 .designer-column-row input:not([type='checkbox']):focus {
   border-color: rgba(56, 189, 248, 0.45);
+}
+
+/* 编辑表结构：列定义用表格 grid，而不是一列一行的表单。 */
+.structure-grid-wrap {
+  margin-top: 14px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.structure-grid {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.structure-grid th,
+.structure-grid td {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.structure-grid th:last-child,
+.structure-grid td:last-child {
+  border-right: none;
+}
+
+.structure-grid tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.structure-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 8px;
+  background: var(--bg-elevated);
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.structure-grid th:nth-child(2) {
+  width: 24%;
+}
+
+.structure-grid th:nth-child(3) {
+  width: 20%;
+}
+
+.structure-grid th:nth-child(8) {
+  width: 20%;
+}
+
+.structure-grid td {
+  padding: 3px 4px;
+  vertical-align: middle;
+}
+
+.structure-grid tbody tr:hover {
+  background: var(--panel-soft);
+}
+
+.structure-grid tbody tr.is-new {
+  background: rgba(56, 189, 248, 0.06);
+}
+
+.structure-grid-index {
+  width: 38px;
+  color: var(--faint);
+  font-size: 11px;
+  text-align: center;
+}
+
+.structure-grid-flag {
+  width: 56px;
+  text-align: center;
+}
+
+.structure-grid-check {
+  text-align: center;
+}
+
+.structure-grid-check input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.structure-grid-actions {
+  width: 92px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.structure-grid td input:not([type='checkbox']) {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  outline: none;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 12px;
+}
+
+.structure-grid td input:not([type='checkbox']):hover {
+  background: var(--bg-elevated);
+}
+
+.structure-grid td input:not([type='checkbox']):focus {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.structure-row-action {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.structure-row-action:hover:not(:disabled) {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.structure-row-action.is-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.structure-row-action:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.structure-grid-empty {
+  padding: 18px 12px;
+  color: var(--faint);
+  font-size: 12px;
+  text-align: center;
 }
 
 .add-column-row {
@@ -2763,8 +2980,14 @@ button:disabled {
   background: #f87171;
 }
 
-.tab-state.is-dirty {
-  background: #fbbf24;
+/* 连接点常驻：已连接=实心绿；未连接/连接中=空心琥珀。未保存改在关闭按钮上显示琥珀点。 */
+.tab-state.is-connected {
+  background: var(--ok);
+}
+
+.tab-state.is-disconnected {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--warn);
 }
 
 .db-select-inline {

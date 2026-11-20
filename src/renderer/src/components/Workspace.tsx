@@ -7,7 +7,13 @@ import type {
   ShortcutMap,
   TableMeta,
 } from '@shared/ipc-contract';
-import type { QueryTab, RunState, SessionRuntime, TransactionRuntime } from '../types';
+import type {
+  QueryTab,
+  RunState,
+  SessionRuntime,
+  SessionStatus,
+  TransactionRuntime,
+} from '../types';
 import { EMPTY_TAB } from '../types';
 import type {
   CompletionCandidate,
@@ -16,7 +22,7 @@ import type {
 } from '../utils/sql-completion';
 import type { TableFilter, TableFilterOperator } from '@shared/dialect/identifiers';
 import { SqlEditor } from '../features/editor/SqlEditor';
-import { ResultGrid } from '../features/grid/ResultGrid';
+import { ResultGrid, type GridPastePayload } from '../features/grid/ResultGrid';
 import { ContextMenu } from './ContextMenu';
 import { Icon } from './Icon';
 import { TableDesignTab } from './TableDesignTab';
@@ -105,7 +111,11 @@ interface WorkspaceProps {
   activeTabId: string;
   /** 自动标题：连接/库 + 标签标题。 */
   tabLabels: Record<string, string>;
-  tabStatuses: Record<string, { running: boolean; error: boolean; dirty: boolean }>;
+  /** `connection` 是该标签会话状态：连接点是常驻的绿（已连接）/ 琥珀（未连接）。 */
+  tabStatuses: Record<
+    string,
+    { running: boolean; error: boolean; dirty: boolean; connection: SessionStatus }
+  >;
   run: RunState;
   running: boolean;
   connectionType: DatabaseType | null;
@@ -196,6 +206,12 @@ interface WorkspaceProps {
   onCellsChange: (
     changes: Array<{ rowIndex: number; columnIndex: number; value: QueryCell }>,
   ) => void;
+  /** Excel / TSV 粘贴（Ctrl+V 或工具栏），可能追加待提交新增行。 */
+  onPasteCells: (paste: GridPastePayload) => void;
+  /** 工具栏「粘贴」：从系统剪贴板读取。 */
+  onPasteClipboard: () => void;
+  /** 粘贴后类型校验失败的单元格。 */
+  invalidCells: Record<string, string>;
   onRowFocus: (rowIndex: number) => void;
   onAddRow: () => void;
   onDeleteRow: () => void;
@@ -304,6 +320,9 @@ export function Workspace({
   onTableFilterChange,
   onCellChange,
   onCellsChange,
+  onPasteCells,
+  onPasteClipboard,
+  invalidCells,
   onRowFocus,
   onAddRow,
   onDeleteRow,
@@ -434,6 +453,8 @@ export function Workspace({
               onClick={() => onSelectTab(tab.id)}
               onContextMenu={(event) => {
                 event.preventDefault();
+                // 菜单挂载后会监听 window 的 contextmenu 做关闭；不拦住冒泡会被自己立即关掉。
+                event.stopPropagation();
                 setTabMenu({ x: event.clientX, y: event.clientY, tabId: tab.id });
               }}
               onKeyDown={(event) => {
@@ -443,24 +464,40 @@ export function Workspace({
                 }
               }}
             >
-              {status?.running && <span className="tab-state is-running" title="查询运行中" />}
-              {!status?.running && status?.error && (
+              {status?.running ? (
+                <span className="tab-state is-running" title="查询运行中" />
+              ) : status?.error ? (
                 <span className="tab-state is-error" title="标签会话或查询失败" />
-              )}
-              {!status?.running && !status?.error && status?.dirty && (
-                <span className="tab-state is-dirty" title="有未保存的 SQL 或未提交修改" />
+              ) : (
+                <span
+                  className={`tab-state ${
+                    status?.connection === 'ready' ? 'is-connected' : 'is-disconnected'
+                  }`}
+                  title={
+                    status?.connection === 'ready'
+                      ? '会话已连接'
+                      : status?.connection === 'opening'
+                        ? '正在打开会话…'
+                        : '未连接'
+                  }
+                />
               )}
               <span>{tabLabels[tab.id] ?? tab.title}</span>
               <button
                 type="button"
-                className="tab-close"
-                aria-label={`关闭 ${tabLabels[tab.id] ?? tab.title}`}
+                className={`tab-close ${status?.dirty ? 'is-dirty' : ''}`}
+                aria-label={`关闭 ${tabLabels[tab.id] ?? tab.title}${
+                  status?.dirty ? '（有未保存的 SQL）' : ''
+                }`}
                 onClick={(event) => {
                   event.stopPropagation();
                   onCloseTab(tab.id);
                 }}
               >
-                <Icon name="close" size={12} />
+                {status?.dirty && (
+                  <span className="tab-close-dot" title="有未保存的 SQL 或未提交修改" />
+                )}
+                <Icon name="close" size={12} className="tab-close-icon" />
               </button>
             </div>
           );
@@ -514,13 +551,31 @@ export function Workspace({
                   },
                 ]
               : []),
-            ...(menuStatus?.error
-              ? [
-                  {
-                    label: '重连',
-                    onSelect: () => onReconnectTab(menuTab.id),
-                  },
-                ]
+            // 标签不再随应用启动自动建连，这里提供显式「连接 / 重连」入口。
+            ...(!menuTab.kind && menuTab.connectionId
+              ? menuStatus?.connection === 'ready'
+                ? []
+                : menuStatus?.connection === 'error'
+                  ? [
+                      {
+                        label: '重连',
+                        onSelect: () => onReconnectTab(menuTab.id),
+                      },
+                    ]
+                  : menuStatus?.connection === 'opening'
+                    ? [
+                        {
+                          label: '连接中…',
+                          disabled: true,
+                          onSelect: () => undefined,
+                        },
+                      ]
+                    : [
+                        {
+                          label: '连接',
+                          onSelect: () => onReconnectTab(menuTab.id),
+                        },
+                      ]
               : []),
           ]}
         />
@@ -614,13 +669,15 @@ export function Workspace({
             onClick={() =>
               running ? onCancel() : onRun(selectedSql.trim() ? selectedSql : undefined)
             }
-            disabled={!running && !ready}
+            disabled={!running && !ready && !connectionType}
             title={
               running
                 ? '取消当前查询（F5）'
                 : ready
                   ? '执行 SQL（F5 / Ctrl+Enter）'
-                  : '先连接数据库'
+                  : connectionType
+                    ? '连接并执行 SQL（F5 / Ctrl+Enter）'
+                    : '先连接数据库'
             }
           >
             <Icon name={running ? 'stop' : 'play'} size={running ? 13 : 14} />
@@ -1115,6 +1172,15 @@ export function Workspace({
                 <button
                   type="button"
                   className="btn"
+                  disabled={running}
+                  title="从 Excel / 剪贴板批量追加多行多列；在行尾新增待提交行，类型不匹配的单元格标红。按位置粘贴请用网格内 Ctrl+V"
+                  onClick={onPasteClipboard}
+                >
+                  从 Excel 粘贴
+                </button>
+                <button
+                  type="button"
+                  className="btn"
                   disabled={running || !canUndo}
                   title="撤销最近一步本地编辑"
                   onClick={onUndo}
@@ -1351,6 +1417,8 @@ export function Workspace({
             theme={theme}
             onCellChange={onCellChange}
             onCellsChange={onCellsChange}
+            onPasteCells={onPasteCells}
+            invalidCells={invalidCells}
             onRowFocus={(rowIndex) => {
               onRowFocus(rowIndex);
               onRowRangeChange(rowIndex, rowIndex);
@@ -1362,6 +1430,7 @@ export function Workspace({
             onSetCellDefault={onSetCellDefault}
             onExportRange={onExportRange}
             onRowRangeChange={onRowRangeChange}
+            onDeleteRow={onDeleteRow}
             onHeaderClick={(column, additive) => {
               if (!activeTab.table || lockedByEdits) return;
               const current = activeSorts.find((item) => item.column === column);

@@ -16,6 +16,8 @@ export type SavedConnection = ConnectionRecord;
 /** 单个连接的对象树视图数据（来自它的 browse-<connectionId> 会话）。 */
 export interface BrowseConnectionView {
   status: SessionStatus;
+  /** 会话失败原因；用于连接状态点与树内错误提示。 */
+  message?: string;
   schemaObjects: SchemaObject[];
   databases: DatabaseInfo[];
   objectsByDatabase: Record<string, SchemaObject[]>;

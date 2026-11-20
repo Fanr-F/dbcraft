@@ -101,7 +101,7 @@
 | 删除连接 | 保留 tab session/SQL/结果，写 `connectionSnapshot`；标签标记「连接已删除」 | `deleteSavedConnection` |
 | 编辑连接 | 只更新配置，不重连绑定标签；收起该连接左侧树 | `saveConnection` |
 | 关闭最后标签 | 允许关闭到零标签，主区域显示「没有打开的标签」空状态；重启后保持零标签（W-20261111-127） | `closeTab`、`closeTabsByIds` |
-| 草稿恢复 | 恢复上次的标签集合（含零标签）与 id/title/customTitle/sql/connectionId/filePath/connectionSnapshot/table 上下文；重启后自动重开最多 5 个标签会话并重跑 SQL；表设计与 Agent 标签不恢复 | `DRAFT_STORAGE_KEY` |
+| 草稿恢复 | 恢复上次的标签集合（含零标签）与 id/title/customTitle/sql/connectionId/filePath/connectionSnapshot/table 上下文；重启后**不自动建连**，标签显示「未连接」，由标签右键「连接」或首次执行/操作按需建立会话（W-20261118-05）；表设计与 Agent 标签不恢复 | `DRAFT_STORAGE_KEY` |
 
 关系图（当前）：
 
@@ -150,7 +150,7 @@ Server（servers 表）
 |---|---|---|---|
 | 标签标题显示连接/库 | ✅ 连接 + 当前库 + 查询序号 | — | 保留 |
 | 标签颜色/图标区分环境 | ❌ | 生产/测试标签容易混 | v1.0 可用环境色条 |
-| 未保存/未提交/运行中标记 | ✅ 标签状态点 | 后台失败不被其他 ready 遮蔽 | 保留 |
+| 未保存/未提交/运行中/已连接标记 | ✅ 标签状态点 | 后台失败不被其他 ready 遮蔽 | 保留 |
 | 标签右键菜单 | ✅ 关闭系列/复制/重命名/取消/重连 | — | 保留 |
 | 标签拖拽排序 | ❌ | 标签多时难管理 | v1.x |
 | 中键关闭、双击重命名 | ❌ | 常用交互缺失 | v1.x |
@@ -174,7 +174,7 @@ Server（servers 表）
 | 关闭标签时有未提交事务提示 | ✅ | — | 保留 |
 | 后台标签失败提示 | ✅ 标签状态点 | — | 保留 |
 | 会话只读/版本 | 🟡 状态栏 | 多标签时只显示当前 | v1.0 标签 tooltip |
-| 会话持久化/恢复 | ❌ 只恢复 SQL 草稿 | 重启后要重新连 | v1.x |
+| 会话持久化/恢复 | 🟡 恢复 SQL 草稿；重启不自动建连，标签右键「连接」或执行时按需连接（W-20261118-05） | 结果不缓存，需手动执行 | v1.x |
 
 #### 2.4.4 对象树 / 服务器浏览器
 
@@ -193,9 +193,9 @@ Server（servers 表）
 
 | 隐藏需求 | 现状 | 风险/说明 | 建议 |
 |---|---|---|---|
-| 恢复上次打开的标签/会话 | 🟡 恢复上次的标签集合（含零标签）与 SQL；最多 5 个标签自动重开会话并重跑 SQL | 结果不缓存，会话按需重建 | v1.x 全量会话/结果恢复 |
+| 恢复上次打开的标签/会话 | 🟡 恢复上次的标签集合（含零标签）与 SQL；重启后不自动建连，标签右键菜单提供「连接 / 重连」，首次执行也会按需连接（W-20261118-05） | 结果不缓存，需用户自己点执行 | v1.x 全量会话/结果恢复 |
 | 恢复标签当前库 | ❌ 草稿不存 database | 多库体验差 | v1.0 可先存 `database` 字段 |
-| 恢复表数据/表设计/Agent 标签 | 🟡 | SQL/表数据标签恢复并重跑；表设计/Agent 仍不恢复 | v1.x |
+| 恢复表数据/表设计/Agent 标签 | 🟡 | SQL/表数据标签恢复，连接后回到表所属库；表设计/Agent 仍不恢复 | v1.x |
 | 工作区/项目（连接+标签集合） | ❌ | 多项目切换靠分组 | v1.x |
 | 多窗口/标签拖出 | ❌ 单窗口 | 无法并排看两个库 | v1.x |
 | 标签布局/分屏 | ❌ | 只能上下看结果 | v1.x |
@@ -236,8 +236,8 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 - 服务器实体（Q21 A）：服务器 → 连接配置 → 会话；连接管理器按服务器分组（左侧树已不渲染服务器行，W-20261111-122）。
 - 标签标题（Q22 A）：连接名 + 当前库 + 查询序号；表数据/DDL/Agent 标签统一格式。
 - 数据库下拉（Q22 A）：非 SQLite 标签切换即 `USE`；失败保持原库。
-- 标签右键菜单（Q23 A）：关闭/关闭其他/关闭右侧/全部关闭/复制/重命名；运行中/失败可取消/重连。
-- 标签状态标记：未保存、运行中、失败、事务中。
+- 标签右键菜单（Q23 A）：关闭/关闭其他/关闭右侧/全部关闭/复制/重命名；运行中可取消，未连接可「连接」、失败可「重连」（W-20261118-05）。
+- 标签状态标记：左侧圆点常驻表示连接状态（绿色=已连接，空心琥珀=未连接/连接中），运行中/会话或查询失败时分别被蓝色/红色圆点覆盖；未保存或未提交改在关闭按钮位置显示琥珀点（悬停或键盘聚焦时变回 ×，W-20261118-04）。
 - 状态栏（Q24 B + Q25 B）：服务器/连接名、当前库、活动会话数、事务状态；连接级重连/断开。
 - 事务面板（Q25 B）：开始/提交/回滚；关闭有事务标签提示；与网格未提交修改分开。
 - 重连恢复当前库。
@@ -315,7 +315,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 | MOD-02 SQL 编辑器 | 🟡 | 97% | 多标签、选区执行、取消、语法高亮、行号、括号匹配、格式化、关键字+函数+对象名补全、列/别名/限定名补全（W-20261109-19）、函数签名（W-20261109-20）、库/Schema/多段限定名/大小写跟随（W-20261109-21）、编辑器内多语句/多结果页签/消息面板与 `GO`/`DELIMITER` 分句（W-20261109-22）、草稿自动保存/恢复、关闭标签时写入查询历史（W-20261111-128）、SQL 文件打开/保存、多语句脚本窗口、整条语句表解析、`*` 展开、类型提示、版本感知、ATTACH/跨库列、排序/高亮、标识符引号、弹层定位/加载态/自动配对（W-20261113-02）、CTE/派生表列、引号标识符补全、`lower_case_table_names`（W-20261113-03）、编辑器内核 CodeMirror 6 + 第三方 `sql-formatter`（W-20261116-09）、INSERT 列清单/WHERE/ORDER BY 等列上下文补全与补全噪音过滤（W-20261116-11）、Tab 缩进/接受补全（W-20261116-12）、F5 执行/取消（W-20261116-13）、MSSQL `sys.`/`dbo.` 与 T-SQL 关键字补全（W-20261116-15）、补全候选去系统对象噪音与常用关键字优先（W-20261117-01）、WHERE/select list 列补全与 MSSQL 元数据串行（W-20261117-02） | **v1.0 P0**：人工真机逐项验收；**v1.x**：错误波浪线、参数化执行 |
 | MOD-03 查询历史 | 🟢 | 99% | history 表、成功/失败/取消记录、可关闭的 60s 去重、保留条数（含不限制）、FTS5 trigram 搜索（短查询回退 LIKE）、命中片段高亮、组合过滤（今天/自定义时间）、时间/耗时排序、详情、插入光标处、再次执行回到原连接/原库、复制/仅看此连接、连接已删除标记、JSON 导出、删除/清空、默认脱敏、写入队列与退出前 flush | 更完整的敏感内容识别、历史列表分页/加载更多 |
 | MOD-04 UI DDL | 🟢 | 97% | 查看/复制 DDL、新建表/编辑表结构页签（列差异生成 ALTER、SQLite 整表重建、删除列输入表名确认）、MSSQL schema + IDENTITY、新建视图、加/删/重命名/修改列、重命名/删除表、删除视图、索引管理、表结构（列/索引/外键/CHECK/注释）、表注释编辑、多语句脚本逐条结果、库级 DDL | CHECK 约束编辑、列序调整、编辑页签内唯一约束/索引变更、SQLite 重建保留外键/触发器、MSSQL 默认值/computed/rowversion 编辑 |
-| MOD-05 表数据编辑 | 🟢 | 96% | 数据页、50/200/500/1000 分页、多列排序、类型化多条件过滤、单元格编辑、多行粘贴、增删行/批量删行、单事务提交/回滚、乐观锁与 rowversion、本地撤销栈、主键修改确认、自增列写入、NULL/默认值、类型化编辑器、列布局记忆、必填标记、自动提交/确认、冲突预检/跳过、退出三选一、rowid 表、TSV 区域复制、网格右键菜单 | BLOB/大文本 hex 查看器仍只保留前 32 字节 |
+| MOD-05 表数据编辑 | 🟢 | 97% | 数据页、50/200/500/1000 分页、多列排序、类型化多条件过滤、单元格编辑、Excel/TSV 多行多列粘贴（超出末行自动生成待提交新增行、类型校验标红）、增删行/批量删行、单事务提交/回滚、乐观锁与 rowversion、本地撤销栈、主键修改确认、自增列写入、NULL/默认值、类型化编辑器、列布局记忆、必填标记、自动提交/确认、冲突预检/跳过、退出三选一、rowid 表、TSV 区域复制、网格右键菜单 | BLOB/大文本 hex 查看器仍只保留前 32 字节；粘贴校验只做明显类型错误，不做数据库级校验 |
 | MOD-06 结果与导出 | 🟡 | 96% | 结果网格、NULL 灰斜体、数字/日期右对齐、长文本悬停、列头本地排序、复制列名/单元格、单元格查看器、多结果页签/消息面板、CSV/JSON/SQL/Excel 导出、选中区域/多结果集导出、表数据流式 CSV（进度/取消/100MB 提示）、结果集全部加载（无行数上限，W-20261116-14） | 任意 SQL 的流式分页尚未实现（v1.x）；BLOB hex 查看；执行计划（v1.x） |
 | MOD-07 设置与偏好 | 🟢 | 94% | settings 表与面板、深浅/跟随系统主题、编辑器字号/字体/Tab 宽度、关键字大小写、补全开关/自动触发开关/延迟、历史配置、查询/连接超时、数据目录迁移、本地统计、诊断日志、元数据库备份/恢复、快捷键自定义与冲突检测、网格自动提交/确认 | 逐版本 migration/升级备份（R-04）、浅色主题个别强调色、i18n（v1.x）；结果行数上限设置已移除（W-20261116-14） |
 | MOD-08 MSSQL Agent | 🟡 | 80% | 对象树 `SQL Server Agent → 作业 → 作业项`、树内搜索/状态、详情页签（步骤/计划/最近 100/500 条历史）、启动/停止/启用/禁用、`sp_update_job*` 脚本生成、共享计划警告、多服务器只读、步骤命令在编辑器打开、`agent-control` 历史 | 30s 自动刷新、运行中/空闲状态、Agent XPs 禁用/权限失败真机回归、>1000 作业分页、右键菜单完整化 |
@@ -359,6 +359,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 - 字符集配置；自签名/过期/主机名不匹配/证书链不完整四类中文提示。
 - 会话打开/关闭、对象树、失败原因与重连入口；TLS 回退明文警告条；未就绪时只显示“未连接/正在连接”提示。
 - 多数据库对象树（MSSQL / MySQL 系）：列出有权限的数据库、切换当前库、库下表/视图/存储过程、表下约束/触发器/索引（懒加载）；SQLite 单库树。
+- 对象树交互：数据库/文件夹/schema/表子对象右键菜单（新建查询、新建表/视图、设为当前库、刷新此库、复制名称）；键盘上下移动、左右展开/收起、Home/End、Enter；按连接保存展开状态并跨重启保留；系统库默认收起并标记；连接失败时状态点与树内显示失败原因；单击表/视图/存储过程显示选中态（W-20261118-06）。表/视图/存储过程右键可复制 DDL，存储过程还可生成调用 SQL、编辑定义、删除；约束/触发器/索引文件夹可刷新、打开表结构详情；索引项可预填删除，触发器项可删除并在 MSSQL 上启用/禁用（W-20261118-09/10）。
 
 主要缺口：
 
@@ -445,15 +446,17 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 - 双击表/视图打开 `表 · <name>` 标签，生成 `SELECT * ... LIMIT/OFFSET`；每页 50/200/500。
 - 下拉排序 + 列头点击排序（服务端 `ORDER BY`，回到第 1 页）。
 - 服务端过滤：`WHERE <col> LIKE ? ESCAPE '!'`，`%`/`_`/`!` 按字面量转义，值走参数。
-- 单元格编辑、多行粘贴、新增行、删除选中行；主键与生成列只读。
-- 提交时单事务执行全部 UPDATE/INSERT/DELETE，任一行失败整体回滚。
+- 单元格编辑、新增行、删除选中行；主键与生成列只读。
+- Excel / TSV 粘贴（`Ctrl+V` 或工具栏「从 Excel 粘贴」）：打开表数据页后自动聚焦网格和第一个可写单元格，双击表后可立即 `Ctrl+V`；用户还没点选单元格时按行尾追加，点选后按当前单元格位置改写；超出当前行自动追加待提交新增行；空白单元格对新增行表示使用默认值、对已有行表示 NULL；整数/小数/布尔/日期/时间/枚举/长度按列类型校验，失败单元格标红并可继续修改或提交；整次粘贴一个撤销步（W-20261119-01/02）。
+- 工具栏「从 Excel 粘贴」始终在行尾追加，不依赖当前焦点，适合批量导入；粘贴拦截覆盖同一 workspace 内的标签栏/工具栏焦点，但在 SQL 编辑器、单元格编辑器或输入框里仍保留原生粘贴，不会被 RevoGrid 写入网格。
+- 提交时单事务执行全部 UPDATE/INSERT/DELETE，任一行失败整体回滚；MSSQL 使用 tedious 原生事务 API（`execSql` 单独发 `BEGIN TRANSACTION` 会报错误 266），SQL 标签的事务面板与脚本事务控制同样走原生路径（W-20261120-02）。
 - 乐观锁：UPDATE 带被修改列原值；UPDATE/DELETE 命中 0 行判定冲突并整体回滚。
 - 本地撤销栈（最多 30 步）；提交/回滚/重新查询/切连接/关标签后清空。
 - 无主键表、视图、只读会话禁用编辑并显示原因；无主键表可显式开启「允许新增行（高风险）」，主进程仍校验 insert-only。
 - 有待提交修改时锁定分页、排序、切连接、关闭标签。
 - 表数据页记录所属库，翻页/查询/元数据/DML 前自动切回该库（W-20261106-10）。
 
-剩余：BLOB/大文本 hex 查看器（当前二进制只保留前 32 字节）；真实实例回归与人工验收。
+剩余：BLOB/大文本 hex 查看器（当前二进制只保留前 32 字节）；粘贴类型校验是渲染层防误操作，不替代数据库约束；MySQL / MariaDB / MSSQL 的 Excel 粘贴尚未在真实实例人工验收。
 
 #### 3.4.6 MOD-06 结果与导出
 
@@ -553,6 +556,9 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 | FTS 索引损坏不自愈 | MATCH 异常时先重建索引并重试一次，仍失败才回退 LIKE |
 | E2E 取消断言过弱 | 增加同标签重连、失败提示等断言 |
 | RevoGrid 开发模式结果空白 | Vite 预打包会拆坏 RevoGrid/Stencil 懒加载入口，`optimizeDeps.exclude` 排除两包后，`npm run dev` 下 SQLite/MSSQL 结果正常渲染 |
+| MSSQL 跨库表双击退回默认库 | `runQuery` 在 `sessions` 快照过期重新 `openTabSession` 时必须带上 `tab.table.database`，否则会话被重开到连接默认库，跨库表数据页报 `Invalid object name`；`e2e:mssql` 在 tempdb 建临时表回归 |
+| 表数据页 Ctrl+V 静默失效 | 双击表后 DOM 焦点仍在对象树上，浏览器不会向网格派发 paste；打开后延迟聚焦网格宿主，未点选单元格按行尾追加，点选后按单元格改写；workspace 内非编辑器焦点也接管粘贴 |
+| MSSQL 表格提交「无法开启事务」 | `applyTableEdits` 曾用 execSql 单独发 `BEGIN TRANSACTION`，批处理结束时事务仍打开，SQL Server 报错误 266；改为 tedious 原生 `beginTransaction/commitTransaction/rollbackTransaction`，查询/脚本路径的事务控制语句也统一路由 |
 
 #### 3.5.3 风险说明
 
@@ -564,7 +570,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 
 ### 3.6 测试与验收
 
-#### 3.6.1 自动化检查（21 组纯逻辑测试）
+#### 3.6.1 自动化检查（22 组纯逻辑测试）
 
 ```powershell
 npm run typecheck
@@ -589,9 +595,10 @@ npm run test:xlsx
 npm run test:sqlite-rebuild
 npm run test:checks
 npm run test:mssql
+npm run test:table-paste
 ```
 
-最近一次整理时：`typecheck` 通过；21 组纯逻辑测试全部通过；`check:mssql` 在 SQL Server 2016 SP2 上通过；`build` / `smoke` / `e2e:sqlite` 当时未执行。
+最近一次整理时：`typecheck` 通过；22 组纯逻辑测试全部通过；`build` + `e2e:sqlite` 通过（含 Excel 粘贴用新增行断言）；`check:mssql` 在 SQL Server 2016 SP2 上通过。
 
 | 命令 | 覆盖 |
 |---|---|
@@ -616,6 +623,7 @@ npm run test:mssql
 | `test:sqlite-rebuild` | 重建表语句生成 + 真实 SQLite 回放（数据/索引/类型/复合主键） |
 | `test:checks` | 从 CREATE TABLE 提取 CHECK（嵌套括号/字符串/注释） |
 | `test:mssql` | MSSQL 值格式化（datetime/date/time/decimal/binary）、限定名/命名实例解析、分页过滤 `@p1`、Agent 时间/频率/脚本生成 |
+| `test:table-paste` | Excel/TSV 解析（引号、单元格内 Tab/换行、CRLF、末尾空行）与按列类型校验（整数/小数/布尔/日期/时间/枚举/varchar 长度） |
 
 真实实例联调脚本（不是纯逻辑测试）：
 
@@ -653,7 +661,8 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 7. 取消查询 → 会话失败；提示条含原因，点「重连」后同标签继续查询。
 8. BIGINT `9007199254740993` 不丢精度；两个标签互不阻塞。
 9. 查看 DDL、新建表、生成库级 DDL、查询历史插入、超时、表数据页翻页/排序、重命名/删除表、添加/删除列、创建/删除索引。
-10. 应用退出时先关闭会话，Playwright `app.close()` 可正常完成。
+10. Excel/TSV 粘贴：工具栏追加 2 行 → 待提交 2 项、类型不匹配提示、自动滚动到新增行；回滚后恢复。
+11. 应用退出时先关闭会话，Playwright `app.close()` 可正常完成。
 
 **MySQL（`npm run e2e:mysql`）**：
 
@@ -667,7 +676,9 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 1. 读取 `.env.local`，预建 `dbo.dbcraft_e2e_mssql`；通过连接表单新建 MSSQL 连接（加密 + 信任证书），测试并保存。
 2. 状态栏显示 T-SQL / SQL Server 版本，对象树出现测试表。
 3. 查询返回 2 行；`SELECT 1 AS a` + `GO` + `SELECT 2 AS b` 生成两个结果页签，`GO` 不进入消息面板。
-4. 退出后自动删除测试表。
+4. 跨库表数据页：展开 tempdb，双击 `dbcraft_e2e_crossdb` → 状态栏「库 tempdb」、无 `Invalid object name`、结果正常。
+5. 表数据编辑：空表 `dbcraft_e2e_edit` 打开后直接 `Ctrl+V` → 待提交 1 项 → 「提交修改」成功，连接池查到 `e2e-row`/`7`（走原生事务，不报错误 266）。
+6. 退出后自动删除测试表。
 
 #### 3.6.4 手工验收（`npm run dev`）
 
@@ -699,7 +710,7 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 9. 设置里的「快捷键」列出当前可用组合；底部「本地统计」与侧边栏连接数、历史条数一致。
 10. 关闭「记录查询历史」后执行查询，历史不再新增；重新开启后恢复。
 11. 选中一段 SQL 后 Ctrl+Enter 只执行选区，未选中时执行光标语句；点击「执行」按钮有选区时只执行选区，无选区时执行全文（W-20261112-02）。
-12. 草稿：修改 SQL 后等待 30 秒（或正常退出），重开恢复标签与 SQL；关闭标签不再弹出草稿确认，关闭前把该标签 SQL 写入查询历史（`saved` / `closed-tab`）。
+12. 草稿：修改 SQL 后等待 30 秒（或正常退出），重开恢复标签与 SQL，但**不自动连接**（标签显示「未连接」，右击「连接」或执行时按需建连，W-20261118-05）；关闭标签不再弹出草稿确认，关闭前把该标签 SQL 写入查询历史（`saved` / `closed-tab`）。
 13. SQL 文件：打开 `.sql` 生成新标签；Ctrl+S 覆盖；无路径时弹保存对话框。
 14. 长查询超过 30 秒提示「查询超时」；SQLite 会话失败，点「重连」恢复；`DBCRAFT_QUERY_TIMEOUT_MS=0` 重启后不再自动取消。
 
@@ -723,18 +734,20 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 
 **UI DDL**：
 
-1. 表右键 → 查看 DDL：新标签出现 `CREATE TABLE ...`；复制 DDL 可用。
+1. 表/视图/存储过程右键 → 复制 DDL：剪贴板得到对应 `CREATE TABLE` / `CREATE VIEW` / `CREATE PROCEDURE`；存储过程不再有单独“查看 DDL”。
 2. 新建表：填写表名与列 → 预览 → 执行 → 对象树出现新表。
-3. 添加列/删除列/创建索引/删除索引：均需预览；删除列需要输入列名两次。
-4. 重命名表、删除表、删除视图：删除类需要输入对象名确认。
+3. 添加列/删除列：表右键「编辑表结构…」页签内操作；创建/删除索引走「管理索引…」；均需预览；删除列需要输入表名确认。
+4. 重命名表、删除表、删除视图、删除存储过程、删除触发器：删除类需要输入对象名确认。
 5. 表结构：列类型/可空/默认值/主键正确；索引、外键、CHECK、表注释可见；MySQL 系可编辑注释；SQLite 不显示该按钮。
-6. 重命名列：选列 + 新列名 → 预览 `RENAME COLUMN` → 执行后查询新列。
+6. 重命名列/修改列：在「编辑表结构…」页签内改列名/类型 → 预览 → 执行后查询新列。
 7. 新建视图：名称与 SELECT → 预览 → 执行；对象树出现视图，双击可查数据。
 8. 修改列（MySQL 系）：类型/非空/默认值自动回填，改类型 → 预览 `MODIFY COLUMN` → 执行；SQLite 生成多语句重建预览，执行后数据/索引保留、列类型更新；复合主键表也能重建，外键悬空时整体回滚。
 9. 连接右键 → 生成库级 DDL：新标签包含该库所有表/视图的建表 SQL。
 10. 执行后对象树刷新。
 11. 多语句脚本：粘贴两条 `ALTER TABLE ...` 或 `CREATE INDEX` → 显示「识别到 N 条」→ 逐条结果与对象树刷新；字符串中的 `';'` 仍只识别为对应语句。
 12. 表结构弹窗能看到 CHECK 表达式；SQLite 表注释为空。
+13. 存储过程右键 → 编辑定义…：新标签出现定义文本，不自动执行；复制 DDL 进入剪贴板；删除存储过程…需输入过程名确认。
+14. 触发器右键（MSSQL）：禁用/启用触发器会展示 `DISABLE/ENABLE TRIGGER ... ON ...` 并执行；树内触发器出现/去掉「禁用」标记；删除触发器…需输入触发器名确认。MySQL/MariaDB/SQLite 只提供删除，不显示启用/禁用。
 
 **表数据页**：
 
@@ -1290,10 +1303,15 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] 新查询/DDL 页签继承当前选中的数据库
 - [~] MSSQL「显示系统对象」可浏览 `master` / `msdb` 的 `is_ms_shipped` 表/视图
 - [~] MSSQL 的「表 / 视图 / 存储过程」下按 schema 分组（待人工真机验收）
-- [ ] 真实 MySQL / MariaDB 实例回归（当前只通过类型检查与 MSSQL 真机）
+- [~] 数据库 / 表 / 视图 / 存储过程 / schema / 约束-触发器-索引节点右键菜单：设为当前库、新建查询、新建表、新建视图、刷新、复制名称、表结构详情、管理索引、生成调用 SQL、复制 DDL、删除索引等（W-20261118-06/09；SQLite + 真实 MSSQL 存储过程验证，MySQL/MariaDB 待真机）
+- [~] 存储过程右键：生成调用 SQL / 编辑定义…（打开到编辑器，不自动执行）/ 复制 DDL / 复制名称 / 删除存储过程…；扩展存储过程禁用定义/DDL/删除（W-20261118-10；真实 MSSQL `sp_aaa` 验证）
+- [~] 触发器右键：复制名称 / 删除触发器… / 启用/禁用触发器（仅 MSSQL）/ 表结构详情…；删除/启停前显示生成 SQL，删除需输入触发器名确认（W-20261118-10；真实 MSSQL 临时触发器验证）
+- [~] MySQL 8.0.44 / MariaDB 11.4.13 便携实例验证存储过程 `SHOW CREATE PROCEDURE` 复制 DDL（W-20261118-10；后端 `getDdl`，UI 复用同一路径）
+- [~] 真实 MySQL 实例回归（8.0.44 / 8.4 已跑会话、对象树、补全、存储过程 DDL）；MariaDB 便携实例仅部分验证，当前环境未安装；Percona 仍缺真机
 - [~] 跨库搜索（搜索时按需加载所有数据库对象；待真机验收）
-- [ ] 系统数据库过滤/分组（master、mysql、sys 等是否默认收起）
-- [ ] 表子对象缓存失效（DDL 后重新展开应刷新）
+- [~] 系统数据库默认收起并标记：MSSQL `master`/`model`/`msdb`/`tempdb`，MySQL 系 `information_schema`/`mysql`/`performance_schema`/`sys`（W-20261118-06/07；多库实例待真机）
+- [~] 只默认展开当前库；展开数据库（含默认展开、从上次会话恢复为展开）时自动按需加载对象，避免展开后显示「表 0」（W-20261118-07；Playwright 真实 Electron + 真实 MSSQL `fanr` 验证）
+- [~] 表子对象缓存失效：顶部刷新、单库刷新、DDL 后都会清空并重载约束/触发器/索引（W-20261118-06；DDL 时若表子对象正展开会先变空，需收起再展开）
 - [ ] 右键 DDL 弹窗打开后若切换库，执行目标库的锁定/提示
 
 #### 5.1.3 作业详情页签
@@ -1307,13 +1325,15 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 ### 5.2 左侧对象树 / Agent（近期）
 
 - [~] 作业树增加显式刷新入口（对象树顶部刷新已联动作业；详情页有刷新按钮，待真机验收）
-- [ ] 作业树支持右键：启动/停止/启用/禁用、在编辑器中打开、复制作业名
-- [ ] SQL Server Agent 节点在未连接/非 MSSQL 时的空态与禁用态
+- [~] 作业树右键：启动/停止/启用/禁用、复制作业名已实现；「在编辑器中打开」仍缺（W-20261109-100）
+- [~] SQL Server Agent 节点在非 MSSQL 时隐藏、未连接时显示连接状态；禁用态由连接/权限错误覆盖
 - [ ] 表/视图/作业的空态文案统一（“无表/无视图/没有作业”）
-- [ ] 树节点键盘操作：上下移动、左右展开/收起、Enter 打开
-- [ ] 记住每个连接的树展开状态（当前是全局状态）
-- [ ] 连接节点显示健康状态（已连接/连接中/失败），失败悬停原因
-- [ ] SQLite 文件拖入连接（MOD-01 P0 缺口）
+- [ ] 作业树「在编辑器中打开」
+- [~] 树节点键盘操作：上下移动、左右展开/收起、Home/End、Enter 打开（W-20261118-06；Playwright 真实 Electron 验证）
+- [~] 记住每个连接的树展开状态：展开状态按连接保存并写入 localStorage，收起连接/重启后保留（W-20261118-06；Playwright 验证收起再展开）
+- [~] 连接节点显示健康状态（已连接/连接中/失败），失败悬停显示原因（W-20261118-06；Playwright 验证错误连接的状态点 title 与树内文案）
+- [~] 对象树节点悬停/选中态：单击表/视图/存储过程后高亮当前节点（W-20261118-06）
+- [~] SQLite 文件拖入连接（App 全局 drag/drop，只接受 `.db/.sqlite/.sqlite3`；W-20261111-111）
 
 ### 5.3 主框架 / 标签栏 / 工具栏
 
@@ -1321,7 +1341,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] 标签标题显示连接 / 当前库（W-20261109-12；E2E/构建通过，待人工验收）
 - [~] 执行按钮旁数据库下拉（W-20261109-12；SQLite 隐藏；MySQL 系待真机）
 - [~] 标签右键菜单：关闭 / 关闭其他 / 关闭右侧 / 全部关闭 / 复制 / 重命名（W-20261109-12；待人工验收）
-- [~] 标签状态点：运行中 / 失败 / 未保存或未提交（W-20261109-12；待人工验收）
+- [~] 标签状态点：左侧连接状态（绿=已连接 / 空心琥珀=未连接）、运行中、失败；未保存/未提交在关闭按钮位置显示琥珀点（W-20261109-12 / W-20261118-04；待人工验收）
 - [~] 状态栏显示当前库与活动会话数（W-20261109-12；待人工验收）
 - [~] 编辑保存连接不重连标签、收起左侧树（W-20261109-12；待人工验收）
 - [~] 删除连接保留 tab session / SQL / 结果，标记「连接已删除」（W-20261109-12；快照持久化 W-20261109-17）
@@ -1346,7 +1366,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] 补全弹层定位、上下翻转、键盘选择自动滚动、Esc/移动关闭、异步加载态、引号/括号配对（W-20261113-02；输入后弹层被 `select` 事件误关已修，W-20261116-01；IME 与真机待验收）
 - [~] CTE / 子查询别名列展开、引号标识符内补全、`lower_case_table_names` 大小写策略（W-20261113-03；待人工验收）
 - [ ] 错误波浪线（解析失败/可定位错误）
-- [ ] 未选中时执行“光标所在语句”
+- [~] 未选中时执行“光标所在语句”（`statementAtCursor`，SqlEditor 已接入；待人工验收）
 - [~] 编辑器右键菜单：执行 SQL、格式化 SQL、复制、剪切、粘贴、从历史插入；复制/剪切需有选区，粘贴需剪贴板有文本（W-20261116-05；真实 Electron 自动化验证通过，待人工验收）
 - [~] 执行与取消合并为同一按钮：执行中显示红色「取消」（复用 `.btn-danger`），取消或查询结束后自动回到绿色「执行」，尺寸、图标与位置不变（W-20261116-03/04；typecheck/build、e2e:sqlite 通过，待人工验收）
 - [~] T-SQL 多语句格式化：`GO` 独占一行、语句级关键字换行不合并、`OVER(PARTITION BY ...)` 无多余空格（W-20261116-06；test:sql-format 与真实 Electron 验证通过，待人工验收）
@@ -1362,8 +1382,8 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] WHERE / select list 列补全：`SELECT`/`SELECT DISTINCT` 后空格自动弹层；MSSQL 元数据请求串行、列加载失败不缓存，JOIN/别名场景也能列出列（W-20261117-02；真实 MSSQL + Electron 临时脚本验证，待人工验收）
 - [~] 多语句执行：`;` / MSSQL `GO` / MySQL `DELIMITER` 分句、逐条执行、遇错停止（W-20261109-22；E2E 覆盖 SQLite 主路径，待人工验收）
 - [~] 多结果页签 + 消息面板（W-20261109-22；E2E 覆盖结果切换/失败停止，待人工验收）
-- [ ] 驱动级多结果集、MSSQL `PRINT`/`RAISERROR` 消息、MySQL warning 进入消息面板
-- [ ] `GO 5` 重复批次
+- [~] 驱动级多结果集、MSSQL `PRINT`/`RAISERROR` 消息、MySQL warning 进入消息面板（W-20261109-55/117；check:mssql 已验证多结果集）
+- [~] `GO n` 重复批次：MSSQL `GO 2`/`GO 5` 按整个批次重复，`GO 0` 和超过单次语句上限会拒绝（W-20261118-15；test:sql-script + e2e:mssql 验证）
 - [~] 打开/另存为/最近文件/拖入 `.sql`（W-20261109-54；待真机验收）
 
 ### 5.5 查询历史（MOD-03）
@@ -1379,14 +1399,17 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 ### 5.6 结果网格与表数据（MOD-05/MOD-06）
 
 - [~] 结果集全部加载（无行数上限），移除设置项与截断提示；导出同样加载全部（W-20261116-14；E2E 覆盖 SQLite 2001 行，待人工验收）
-- [ ] 过滤 UI：文本/数字/日期/布尔操作符、多条件 AND
-- [ ] 多列排序（Shift+点击）与列头序号
-- [ ] 列宽拖拽、隐藏列、固定前 N 列、按表记忆
-- [ ] 多行选择 + 批量删除（Delete 键）
-- [ ] F2 编辑、日期/布尔编辑器、大文本弹窗、BLOB 查看器
-- [ ] 显式 NULL vs 留空默认值；`IDENTITY_INSERT`
-- [ ] 冲突预检与“跳过冲突行”
-- [ ] 单元格/区域复制（TSV）、网格右键菜单
+- [~] 过滤 UI：文本/数字/日期/布尔操作符、多条件 AND（W-20261109-79；代码主路径已实现，待人工点击验收）
+- [~] 多列排序（Shift+点击）与列头序号（W-20261109-78）
+- [~] 列宽拖拽、隐藏列、固定前 N 列、按表记忆（W-20261109-80）
+- [~] 多行选择 + 批量删除（工具栏/按钮路径，W-20261109-85）
+- [~] Delete 键触发批量删除（PRD §3.2；网格选中行后按 Delete，走同一 `onDeleteRow`）
+- [~] 类型化编辑、日期/布尔编辑器、大文本弹窗、BLOB 查看器（W-20261109-81/115）
+- [~] F2 进入单元格编辑（PRD §3.2；调用 RevoGrid `setCellEdit`，优先读 grid 当前焦点）
+- [~] 显式 NULL vs 留空默认值；`IDENTITY_INSERT`（W-20261109-83/84）
+- [~] 冲突预检与“跳过冲突行”（W-20261109-88）
+- [~] 单元格/区域复制（TSV）、网格右键菜单（W-20261109-92）
+- [~] 从 Excel/TSV 粘贴多行多列：打开表页后自动聚焦网格，未点选时 Ctrl+V 按行尾追加、点选后按单元格改写；工具栏始终追加；超出末行生成待提交新增行并自动滚动到新行，类型不匹配标红（W-20261119-01/02、W-20261120-01；E2E 覆盖工具栏粘贴与 Ctrl+V 追加行，真实 MSSQL `1 2 2027/12/10 sdaf` 临时脚本验证；待人工用真实 Excel 复制验收）
 - [ ] 空结果、加载中的统一空态/骨架
 
 ### 5.7 DDL 与弹窗（MOD-04）
@@ -1394,26 +1417,31 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] 右击表「编辑表结构…」、右击连接/表「新建表…」在独立页签打开（待人工真机验收）
 - [~] 保存后按新建/编辑生成 DDL；SQLite 修改列走整表重建（E2E 已覆盖）
 - [~] 删除列在预览页输入表名确认
+- [~] 编辑表结构页签的列定义改为表格 grid：列头（`# / 列名 / 类型 / 主键 / 自增 / 非空 / 唯一 / 默认值 / 操作`）、行号、单元格内编辑、新增行高亮、行内上移/下移/删除；新建表与编辑表共用（W-20261118-11；Playwright 真实 Electron 验证）
+- [~] MSSQL 编辑 dbo 表结构不改表名时不再误报「新旧表名相同」：同表只生成列变更，真正改名才生成 `sp_rename`（W-20261118-12；test:ddl + 真实 MSSQL 验证）
+- [~] 表右键菜单精简为「打开表数据 / 编辑表结构… / 表结构详情… / 管理索引… / 复制 DDL / 重命名表… / 删除表…」；列操作统一到编辑表结构页签，创建/删除索引合并到「管理索引…」，移除表菜单里的「新建表…」与「查看 DDL」（W-20261118-08/09；Playwright 真实 Electron 验证）
+- [~] 复制 DDL 覆盖表、视图、存储过程；视图菜单为「打开视图数据 / 复制 DDL / 删除视图…」，存储过程菜单为「生成调用 SQL / 复制 DDL / 复制名称」（W-20261118-09）
+- [~] 表子对象右键：约束/触发器/索引文件夹支持「刷新此项 / 表结构详情… / 复制名称」，索引项支持「复制名称 / 删除索引… / 表结构详情…」（W-20261118-09）
 - [~] 执行 DDL 前可选择目标数据库（SQLite 隐藏；编辑模式固定表所在库；待 MySQL 真机验收）
 - [ ] 编辑页签支持唯一约束/索引变更（当前仍走索引入口）
 - [~] MSSQL UI 建表/改表（页签支持 schema + IDENTITY + 加/删/改列；后端 DDL 已真机回放）
-- [ ] 新表向导补齐索引/外键/CHECK/注释页签
-- [ ] CHECK 约束新建/删除/编辑
-- [ ] 列顺序调整、表注释预览
-- [ ] DDL 预览弹窗：完整 SQL、可编辑、风险区、方言事务能力
+- [~] 新表向导补齐索引/外键/CHECK/注释：`TableDesignTab` 创建模式已有对应区块（W-20261109 系列）
+- [~] CHECK 约束新建/删除：`TableStructureDialog` 支持添加/删除；编辑通过删后重加
+- [~] 列顺序调整：设计页签 ↑/↓ 完成；表注释在创建/编辑页签可见
+- [~] DDL 预览：设计页签提供完整可编辑 SQL、告警与方言事务提示
 - [ ] 删除/重命名等危险操作的对象名确认一致性
 - [ ] 弹窗尺寸、滚动、焦点陷阱、Esc 行为统一
 
 ### 5.8 设置 / 主题 / 打磨
 
 - [~] “跟随系统”主题（W-20261109-57；待真机验收）
-- [ ] 字体族、Tab 宽度、关键字大小写、补全开关与延迟
+- [~] 字体族、Tab 宽度、关键字大小写、补全开关与延迟（W-20261109-95/20261113-02）
 - [~] 历史去重/脱敏开关（设置面板已接入，待人工真机验收）
-- [ ] 网格自动提交/提交确认
+- [~] 网格自动提交/提交确认（W-20261109-87/96）
 - [~] FROM/JOIN 表名自动加别名开关（设置面板新增，W-20261117-08；未真机验收）
-- [ ] 自定义数据目录 + 迁移
+- [~] 自定义数据目录 + 迁移（W-20261109-101）
 - [~] 浅色主题对比度与强调色（W-20261116-02：错误/告警/成功/选中态文字与 `--faint` 在浅色主题下加深；待真机验收）
-- [ ] 快捷键说明与实际行为一致
+- [~] 快捷键说明与实际行为一致：F2/Delete 已绑定（W-20261118-16）；其余设置面板快捷键仍需逐项对照
 
 ### 5.9 真机验收记录
 
@@ -1686,6 +1714,44 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261117-20 词段匹配优先于贪心子序列（`sys.file`）**：诉求是 `select * from sys.file` 时补全列表里没有 `host_summary_by_file_io`。根因：`rankCompletions` 先用贪心 `matchSubsequence` 过滤候选；`host_summary_by_file_io` 中的 `file` 段会先命中 `file` 的 `f`，但 `i` 被贪心选到后面的 `io` 段，随后找不到 `l`，子序列返回 null，候选在进入词段匹配前就被丢弃。变更：新增 `matchSegmentIndices`（返回词段命中下标，供高亮），`matchSegmentPrefix` 改为它的布尔包装；`rankCompletions` 先尝试词段匹配、再回退贪心子序列，两者都失败才丢弃；限定符下 `sys.file` 仍保留真正前缀候选优先、词段命中其后；非限定符单段输入（如 `file`）仍保持严格前缀，不引入 `user_sessions` 式噪音。涉及 `packages/sql-completion/src/core.ts`、`packages/sql-completion/test/completion.test.mjs`、`AGENTS.md`、`prd/PROJECT_MASTER.md`。验证：`npm run test:completion-core`、`npm run typecheck:completion`、`npm run test:sql-completion`、`npm run typecheck` 通过；真实 MySQL 8.4.7（`USE fanr`）探针 `SELECT * FROM sys.file` 返回 14 条，`host_summary_by_file_io` 第 1 位，`host_summary_by_file_io_type`、`io_global_by_file_by_bytes` 等后段命中均可见；`sys.host` 中真正前缀 `host_summary` 仍在 `host_summary_by_file_io` 前。遗留/风险：词段匹配只按 `_` 切分，驼峰命名不适用；命中高亮使用词段字符下标，弹层实际高亮仍需 UI 验收；未在 Electron 真机点验收。
 
 - **W-20261118-01 限定符下多段输入从任意词段开始（`sys.file_io`）**：诉求是 `select * from sys.file_io` 时补全消失。根因：`matchSegmentIndices` 对多段输入要求首段必须命中候选名字第一段（用于避免 `sql_text` 把任意中间段当成开头），而 `host_summary_by_file_io` 的 `file` 在第 4 段；贪心子序列又把 `i` 选到后面的 `io` 段，导致 `l` 失败，候选在词段匹配前被丢弃。变更：限定符补全传入的 `allowSegmentAnywhere` 同时放宽单段任意段和多段首段起点；非限定符输入仍要求多段首段从名字第一段开始；`matchSegmentIndices`/`matchSegmentPrefix` 参数与注释同步，新增 `sys.file_io` 命中 `host_summary_by_file_io`/`latest_file_io`、非限定符仍只保留 `file_io` 前缀的回归测试。涉及 `packages/sql-completion/src/core.ts`、`packages/sql-completion/test/completion.test.mjs`、`AGENTS.md`、`prd/PROJECT_MASTER.md`。验证：`npm run test:completion-core`、`npm run typecheck:completion`、`npm run test:sql-completion`、`npm run typecheck`、`npm run build` 通过；真实 MySQL 8.4.7（`USE fanr`）探针 `SELECT * FROM sys.file_io` 返回 10 条，`host_summary_by_file_io` 第 1 位，`sys.file` 仍返回 14 条且 `host_summary_by_file_io` 第 1 位。遗留/风险：限定符下较短多段输入会命中较多后段组合（例如 `sys.io_file` 不会命中 `file_io`，符合段顺序语义），靠真正前缀优先；只按 `_` 分词；未在 Electron 真机点验收。
+
+- **W-20261118-02 重启恢复标签不再自动执行 SQL**：诉求是重新打开程序时，恢复的标签虽然会重连，但不应自动重跑标签里的 SQL（草稿里残留的 `DELETE`/`UPDATE` 会重启即执行，结果区也会被自动查询覆盖）。变更：`App.tsx` 启动恢复 effect 去掉 `runQuery(tab.sql, tab, tab.table?.params, { internal: true })`，只保留 `openTabSession`（重连、切回原库）与 `loadTableMeta`（表数据页结构元数据），注释同步为「只重连、不执行」；同时去掉候选筛选里的 `tab.sql.trim().length > 0`（既然不再执行，空 SQL 的绑定标签也应该恢复会话），其余草稿持久化与最多 5 个标签的上限不变。涉及 `src/renderer/src/App.tsx`、`prd/PROJECT_MASTER.md`（§2.4.3、§4、§5）。验证：`npm run typecheck` 通过；未在真实 Electron 里做重启验收。遗留/风险：恢复后结果区为空，需要用户自己点执行；表数据标签恢复时仍会加载一次表结构（不发数据查询）；`runQuery` 的 `internal` 选项仍被表页刷新/导出「加载全部」等路径使用。
+
+- **W-20261118-03 标签补回「会话已连接」状态点**：诉求是 W-20261118-02 去掉自动重跑后，重启恢复的标签上原来那个小圆点没了。排查：标签标题左侧的圆点是 `.tab-state`，只有运行中（蓝）/失败（红）/未保存或未提交（琥珀）三种，仓库历史里从来没有「已连接」点；重启后看到的点其实是旧自动执行草稿 SQL 产生的 running 点，自动执行移除后自然消失，所以不是 W-20261118-02 写坏了状态逻辑。变更：`tabStatuses` 增加 `connected: runtime?.status === 'ready'`；`Workspace` 在标签既未运行、未失败、也未标脏时渲染绿色 `.tab-state.is-connected`（title「会话已连接」），优先级低于前三种状态，避免掩盖待处理信息；`styles.css` 增加样式并沿用 `--ok`（深浅主题都有定义）。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/styles.css`、`prd/PROJECT_MASTER.md`（§2.3、§3、§4、§5）。验证：`npm run build`（含 typecheck）、`npm run e2e:sqlite` 通过；用 Playwright 真实 Electron 复现重启（临时 user-data-dir）：SQLite 与 MSSQL 首次连接并编辑 SQL 时标签为 `is-dirty`，关闭重开后为 `is-connected`（title「会话已连接」），连接名/库前缀、工具栏会话徽标、状态栏绿点均保留。遗留/风险：一个标签只有一个圆点，脏标签仍显示琥珀点、不重复显示已连接；未在真实用户 profile 上人工点验收。
+
+- **W-20261118-04 标签圆点改为连接状态语义**：诉求是标签左侧圆点应当「已连接=绿色、未连接=琥珀色」。变更：`tabStatuses` 不再用布尔 `connected`，改为透出会话状态 `connection: SessionStatus`；`Workspace` 只在运行中（蓝）/失败（红）时覆盖圆点，其余时候常驻渲染连接点——`is-connected` 实心绿、`is-disconnected` 空心琥珀（title 区分未连接/正在打开会话）；原「未保存/未提交」琥珀点从左侧移动关闭按钮位置：脏标签在 × 位置显示琥珀点，悬停或键盘聚焦时变回 ×，`aria-label` 追加「（有未保存的 SQL）」，点击行为不变；删除不再使用的 `.tab-state.is-dirty` 样式。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/styles.css`、`prd/PROJECT_MASTER.md`（§2.3、§3、§4、§5）。验证：`npm run build`（含 typecheck）通过；Playwright 真实 Electron（临时 user-data-dir）确认：未绑定连接的「查询 1」显示空心琥珀、编辑中的已连接标签显示绿色连接点 + 关闭位置琥珀点、悬停后关闭位置变回 ×、执行后保持不变、重启恢复后为绿色连接点且无琥珀点。遗留/风险：连接点优先展示运行/失败而暂时不显示绿色；空心琥珀与实心琥珀在极小尺寸下仍需人工确认可辨；未在真实用户 profile 上人工点验收。
+
+- **W-20261118-05 启动不自动建连，标签右键提供「连接 / 重连」**：诉求是打开应用不要自动连接数据库，改由标签右击「连接」。变更：删除 `App.tsx` 启动恢复 effect（原先对最多 5 个绑定标签串行 `openTabSession`，并加载表结构），启动只恢复标签与 SQL，标签显示「未连接」；标签右键菜单按会话状态显示「连接」（idle）或「重连」（error，替代原先只在 error 出现的重连）、opening 时显示禁用的「连接中…」，未绑定连接（`connectionId` 为空）及 `kind` 标签不显示；`reconnectTab` 改为把表数据页所属库传给 `openTabSession`（不再二次 `switchDatabase`），并在表数据页连接后补 `loadTableMeta`；修复标签右键菜单在真实右击时刚弹出就被 `ContextMenu` 的 window `contextmenu` 监听关掉的问题（`onContextMenu` 补 `event.stopPropagation()`，与 Sidebar 一致）；执行按钮在无会话但已绑定连接时改为可用（title「连接并执行 SQL」），与 F5/Ctrl+Enter 现有的按需建连行为一致。涉及 `src/renderer/src/App.tsx`、`src/renderer/src/components/Workspace.tsx`、`AGENTS.md`、`prd/PROJECT_MASTER.md`（§2.3、§2.4、§4）。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；Playwright 真实 Electron（临时 user-data-dir）确认：关闭重开后状态栏「0 个会话」、两个标签均为空心琥珀「未连接」；未绑定标签菜单无「连接」，绑定标签菜单出现「连接」，点击后变绿色「会话已连接」且恢复 `main` 库；已连接标签菜单不再显示「连接」；重开后直接点「执行」会先建连再执行（5 行）。遗留/风险：首次执行仍会隐式建连（既有 runQuery 行为），若要求「必须先显式连接」需另行收紧；恢复后的标签需用户主动连接才能用对象树/执行按钮（执行按钮现已可用并会顺带建连）；未在真实用户 profile 人工点验收。
+
+- **W-20261118-06 左侧对象树补齐右键菜单、键盘、展开状态与失败原因**：诉求是左侧树「有很多功能都没做」。变更：`ObjectTree` 的数据库行拆成折叠按钮 + 标签按钮（折叠不再顺带切库）；数据库 / 表-视图-存储过程文件夹 / MSSQL schema / 约束-触发器-索引项都支持右键；新增树内键盘导航（↑/↓、←/→ 展开收起、Home/End、Enter/空格激活），容器可 Tab 聚焦；展开状态改为受控并由 `Sidebar` 按连接保存到 `localStorage`（`dbcraft.tree-expanded.v1`），收起连接或重启后保留；系统库（MSSQL `master/model/msdb/tempdb`，MySQL 系 `information_schema/mysql/performance_schema/sys`）默认收起并标记「系统」；单击表/视图/存储过程显示选中态；连接状态点失败时 title 与树内错误文案显示具体原因（`BrowseConnectionView.message`）。`Sidebar` 新增节点菜单（设为当前库、新建查询、新建表、新建视图、刷新此库对象、复制名称），连接右键新增打开/收起对象树、刷新对象树、复制连接名；新建表/视图/查询会把连接与目标库显式传给 `App`。`App` 新增 `ensureQueryTabForConnection`（返回具体 tab）、`openCreateView(database, connectionId)`（先确保会话并切库，弹窗执行走目标 tab/库）、`openTableDesignTab` 支持 `connectionId`、`addTab` 支持目标库、`refreshBrowseDatabase`，顶部刷新与单库刷新都会清空表子对象缓存，`executeDdlSql` 支持指定 tab/库。涉及 `src/renderer/src/components/ObjectTree.tsx`、`Sidebar.tsx`、`styles.css`、`App.tsx`、`types.ts`、`AGENTS.md`、`prd/PROJECT_MASTER.md`（§3、§5）。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；临时 Playwright 真实 Electron（临时 user-data-dir，脚本已删除）确认：折叠「表」后收起并重新展开连接、关闭应用再重启，状态都保留；文件夹右键出现新建表/新建查询/刷新此库对象/复制数据库名；展开表子对象后右击索引出现复制名称；Tab 聚焦树后 ↓ + Enter 填入 `SELECT * FROM ...`；坏路径 SQLite 连接的状态点 title 与树内文案都包含具体失败原因。遗留/风险：MySQL/MariaDB/MSSQL 多库的数据库与 schema 右键菜单、系统库默认收起未在真实实例回归（当前 MySQL 便携实例未启动，MSSQL 未跑）；连接/分组树的键盘导航未做（本次只覆盖对象树）；表子对象正展开时执行 DDL 会先清空、需收起再展开；树展开状态跨重启仅按连接 id 保存，删除连接不会清理旧键（无害）；未人工逐项点验收。
+
+- **W-20261118-07 修复展开数据库不加载对象导致 `fanr` 表看起来消失**：诉求是 192.168.0.52 的 `fanr` 库在左侧对象树里没有表。排查：用 `MssqlSession` 直连确认 `fanr` 状态 `ONLINE / MULTI_USER / 非只读`，`INFORMATION_SCHEMA.TABLES` 有 3 张表（`aaa`/`ccc`/`ddd`）和 1 个存储过程 `sp_aaa`，服务器数据完好；真实 Electron 复现显示 `fanr` 默认处于展开状态但只有「表 0 / 视图 0 / 存储过程 0」。根因是 W-20261118-06 把数据库默认展开条件写成 `database.current || query || !system`，所有非系统库都自动展开，而 W-20261118-06 又把数据库行拆成折叠按钮 + 标签按钮，展开箭头不再触发加载，于是「已展开但从未加载」的库显示为空。变更：默认展开恢复为「当前库 + 搜索时全部」，系统库即使当前也默认收起；展开箭头/数据库名称点击时若该库对象未缓存则调用 `onLoadDatabase` 跨库加载（点名称仍会切当前库）；新增挂载 effect，对默认展开或从 localStorage 恢复为展开但未缓存的数据库自动加载一次（`lazyRequested` 去重，显式展开/点击可绕过去重重试）。涉及 `src/renderer/src/components/ObjectTree.tsx`、`prd/PROJECT_MASTER.md`（§5）。验证：`npm run typecheck`、`npm run build` 通过；临时 Playwright 真实 Electron（临时 user-data-dir，脚本已删除）连接 192.168.0.52（`sa`，`master`）确认：`fanr` 初始收起，点展开箭头后出现「表 3 → dbo → aaa/ccc/ddd」「存储过程 1 → dbo → sp_aaa」，点数据库名切为当前库后仍显示；直连探针确认服务器端对象一致。遗留/风险：只验证了 MSSQL；MySQL/MariaDB 多库展开未在真实实例回归；重启后若有多个数据库被恢复为展开，会各自发一次跨库元数据请求（每个库去重一次）。
+
+- **W-20261118-08 精简表/视图右键菜单**：诉求是表右键菜单项太多。变更：表菜单从 14 项减到 8 项——保留「打开表数据 / 编辑表结构… / 表结构详情… / 管理索引… / 查看 DDL / 复制 DDL / 重命名表… / 删除表…」；移除「新建表…」（库/文件夹/连接菜单已有）、「查询数据」（单击表本来就会填入查询）、「添加列/重命名列/修改列/删除列」（统一走编辑表结构页签，页签内已有列增删改与删除列输入表名确认）；「查看表结构…」改名为「表结构详情…」，保留约束/触发器/注释能力；「创建索引…/删除索引…」合并为「管理索引…」，`IndexDialog` 新增 `manage` 模式与创建/删除两个页签；视图菜单从 5 项减到 4 项（打开视图数据 / 查看 DDL / 复制 DDL / 删除视图…），移除「查询数据」和「新建表…」。删除不再可达的 `AddColumnDialog`、`AlterColumnDialog`、`DropColumnDialog` 及其 App 状态/渲染，列变更统一由 `TableDesignTab` 生成参数化预览 DDL。同步更新 `scripts/e2e-sqlite.mjs` 的加列/删列/索引用例为设计页签与「管理索引…」路径。涉及 `src/renderer/src/components/Sidebar.tsx`、`IndexDialog.tsx`、`App.tsx`、`styles.css`、删除三个列弹窗、`scripts/e2e-sqlite.mjs`、`prd/PROJECT_MASTER.md`（§5）。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；临时 Playwright 真实 Electron（临时 user-data-dir，脚本已删除）确认表菜单恰好 8 项、视图菜单恰好 4 项，「管理索引…」弹窗出现「创建索引/删除索引」两个页签且可切换。遗留/风险：快捷加列/改列弹窗被移除，列操作需要多一步进入编辑表结构页签；删除索引仍需手输索引名（后续可从表子对象列表选择）；「表结构详情…」与「编辑表结构…」仍有部分重叠，但前者保留约束/触发器能力，暂不合并。
+
+- **W-20261118-09 移除「查看 DDL」，补齐存储过程/表子对象右键并修复 procedure DDL 校验**：诉求是删掉「查看 DDL」、让「复制 DDL」真正覆盖表/视图/存储过程，并处理右击很多功能没实现的问题。变更：表/视图菜单移除「查看 DDL」及 `onViewDdl`/`viewDdl` 接线，表菜单变为 7 项（打开表数据 / 编辑表结构… / 表结构详情… / 管理索引… / 复制 DDL / 重命名表… / 删除表…），视图菜单 3 项；对象树存储过程行补右键菜单（生成调用 SQL / 复制 DDL / 复制名称），MSSQL 扩展存储过程（`SchemaObject.extended`）的「复制 DDL」显示为禁用并注明没有 SQL 定义；修复 `src/main/ipc/schemas.ts` 的 `ddlGetSchema.kind` 只允许 `table|view` 的问题——契约 `DdlObjectKind` 早已包含 `procedure`，但主进程校验会报「DDL 参数无效」，这是存储过程复制 DDL 失效的根因；表子对象文件夹（约束/触发器/索引）新增右键「刷新此项 / 表结构详情… / 复制名称」，索引明细项新增「复制名称 / 删除索引… / 表结构详情…」，删除索引会打开「管理索引…」并预填索引名（`IndexDialog.initialIndexName`）；`loadTableExtras` 增加 `force` 参数并新增 `onReloadTableExtras` 供「刷新此项」使用；数据库/文件夹/schema/子对象右键在非当前连接上会先 `ensureConnectionTab` 再弹菜单，避免「表结构详情/删除索引」作用到错误连接。涉及 `src/main/ipc/schemas.ts`、`src/renderer/src/components/ObjectTree.tsx`、`Sidebar.tsx`、`IndexDialog.tsx`、`App.tsx`、`scripts/e2e-sqlite.mjs`、`prd/PROJECT_MASTER.md`（§5）。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过（E2E 改为复制 DDL 并校验剪贴板）；临时 Playwright 真实 Electron（临时 user-data-dir，脚本已删除）确认：SQLite 表菜单 7 项、视图菜单 3 项，打开表数据/编辑表结构/表结构详情/管理索引/复制 DDL/重命名/删除均能打开对应界面；约束/触发器/索引文件夹与索引项菜单正常，索引「删除索引…」预填名称并停在删除页签；真实 MSSQL 192.168.0.52 `fanr.dbo.sp_aaa` 右键出现三项，复制 DDL 剪贴板得到定义，生成调用 SQL 填入 `EXEC [sp_aaa];`。遗留/风险：存储过程删除/修改未做（没有 `buildDropProcedure`，且需求未明确）；约束/触发器深层操作仍通过「表结构详情…」完成，未做单独删除/启用菜单；索引删除预填名称但仍需手动确认；MySQL/MariaDB 的存储过程复制 DDL 未在真实实例回归（当前无实例）；扩展存储过程按设计无法复制 DDL。
+
+- **W-20261118-10 补齐存储过程删除/编辑定义与触发器删除/启用禁用**：诉求是继续完成 W-20261118-09 遗留的右击能力。变更：`shared/dialect/ddl.ts` 新增 `buildDropProcedure`（MySQL/MariaDB/MSSQL，SQLite 明确不支持）与 `buildSetTriggerEnabled`（仅 MSSQL；表名带 schema 时自动把 schema 补到未限定的触发器名上）；`TableActionDialog` 扩展 `drop-procedure` / `drop-trigger` / `enable-trigger` / `disable-trigger` 模式，支持可选的触发器所属表，删除类仍需输入对象名确认，禁用按钮使用危险样式；存储过程右键新增「编辑定义…」（把 `sys.sql_modules` / `SHOW CREATE PROCEDURE` 的定义打开到独立编辑器标签，不自动执行）和「删除存储过程…」，扩展存储过程同时禁用定义/DDL/删除；触发器明细右键新增「删除触发器…」和「启用/禁用触发器」，非 dbo schema 通过 `qualifiedName` 传入限定名，显示与复制仍用短名；App 增加 `tableAction.tableName`、`onDropProcedure`、`onDropTrigger`、`onToggleTrigger`、`onEditProcedureDefinition` 接线，DDL 执行后复用原有对象树刷新。涉及 `src/shared/dialect/ddl.ts`、`src/renderer/src/components/TableActionDialog.tsx`、`Sidebar.tsx`、`ObjectTree.tsx`、`App.tsx`、`scripts/test-ddl.mjs`、`prd/PROJECT_MASTER.md`（§3、§5）。验证：`npm run typecheck`、`npm run test:ddl`、`npm run build`、`npm run e2e:sqlite` 通过；真实 Electron + MSSQL 192.168.0.52：`fanr.dbo.sp_aaa` 右键 5 项，编辑定义标签出现 `create proc sp_aaa ...`，删除对话框生成 `DROP PROCEDURE [sp_aaa];`；在 `fanr` 建临时表和触发器后，右键禁用 → 树内出现「禁用」标记，启用 → 标记消失，删除 → 确认名后树内消失，临时对象已在 finally 清理；便携 MySQL 8.0.44 与 MariaDB 11.4.13 实例验证 `getDdl('sp_probe','procedure')` 返回含 `CREATE ... PROCEDURE` 的定义（实例已 teardown）。遗留/风险：编辑定义打开的是原始 `CREATE` 文本，已存在的存储过程直接重跑通常需要用户自行改成 `ALTER`/`CREATE OR REPLACE`；触发器启用/禁用仅 SQL Server，MySQL/MariaDB/SQLite 只提供删除；MySQL/MariaDB 的存储过程右键未在 Electron 里逐项点击（后端同路径已验证）；便携实例仅用于本次探针，已停止。
+
+- **W-20261118-11 编辑表结构列定义改为表格 grid**：诉求是「编辑表结构」不要现在这种一行行表单，换成 grid。变更：`TableDesignTab` 的列编辑从 `designer-columns` 的 flex/grid 表单行改为原生 `<table class="structure-grid">`——列头为 `# / 列名 / 类型 / 主键 / 自增 / 非空 / 唯一 / 默认值 / 操作`，带行号、粘性表头、单元格内输入、复选框居中、行内上移/下移/删除，新增列行用淡蓝底标识，无列时显示空态；新建表和编辑表共用同一 grid，原有 aria-label（`第 N 列列名/类型/...`）与「添加列」「保存并生成 DDL」按钮保持不变，避免破坏既有测试与键盘 Tab 顺序；输入框默认无边框，悬停/聚焦才显示单元格背景和强调色边框，靠近电子表格观感；`styles.css` 新增 `structure-grid*` 样式，保留 `designer-column-row` 供 `CreateViewDialog` 使用。涉及 `src/renderer/src/components/TableDesignTab.tsx`、`styles.css`、`prd/PROJECT_MASTER.md`（§5）。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；临时 Playwright 真实 Electron（临时 user-data-dir，截图与脚本已删除）确认 `demo_users` 编辑表结构出现 9 列表头、7 行数据、每行 3 个操作按钮，单元格可直接改名并恢复，深色主题下表格边框/表头/复选框正常。遗留/风险：这是 HTML 表格 grid，不是 RevoGrid 组件；暂不支持列宽拖拽、单元格方向键导航或拖拽排序（仍用 ↑/↓ 按钮）；若后续要求与结果集一致的选中/编辑手感，可再评估引入 RevoGrid 自定义编辑器。
+
+- **W-20261118-12 修复编辑 MSSQL 表结构误报「新旧表名相同」**：诉求是编辑表结构后点「保存并生成 DDL」报“新旧表名相同”。根因：`table-diff.ts` 用 `targetName`（MSSQL 会拼成 `dbo.users`）和 `detail.name`（dbo 表不带 schema，`users`）比较来判断是否重命名；两者恒不相等，于是进入重命名分支，再调用 `buildRenameTable(dialect, detail.name, tableName)`，此时两个参数都是 `users`，返回“新旧表名相同”。变更：编辑模式改为比较**对象名**——MSSQL 从 `detail.name` 去掉 schema 后与输入表名比较，只有真正的对象名变化才生成重命名；`currentTable` 仍使用带 schema 的 `targetName` 供后续列语句使用。`test-ddl` 新增 MSSQL 同表编辑（改列类型）不生成 `sp_rename`、以及真正改名生成 `sp_rename` 的回归用例；`e2e:mssql` 新增 UI 回归：打开 `dbcraft_e2e_mssql` 编辑表结构 grid，改列类型保存应生成 `ALTER COLUMN` 且不报错，改表名预览应生成 `sp_rename`，同时适配系统库默认收起（先展开 `master`）。涉及 `src/shared/dialect/table-diff.ts`、`scripts/test-ddl.mjs`、`scripts/e2e-mssql.mjs`、`prd/PROJECT_MASTER.md`（§5）。验证：`npm run test:ddl`、`npm run typecheck`、`npm run build`、`npm run e2e:sqlite`、`npm run e2e:mssql` 通过；真实 Electron UI 逐项确认：MSSQL dbo `fanr.dbo.aaa`、MSSQL 非 dbo `fanr.dbcraft_probe.probe_table`、MySQL 8.0.44 与 MariaDB 11.4.13 的 `probe_table` 编辑保存均生成对应 `ALTER/MODIFY COLUMN`，不再出现“新旧表名相同”；MSSQL 同表编辑与改名在 UI 预览分别得到 `ALTER COLUMN` 与 `sp_rename`。遗留/风险：未在真实 Percona 上重复该 UI 路径；回归依赖真实 MSSQL 实例，默认 `self-test` 不含 `e2e:mssql`。
+
+- **W-20261118-13 新增详细自测清单 `prd/SELF_TEST.md`**：诉求是功能测试写得太粗，要求重新扫描功能并生成详细自测。变更：新增 `prd/SELF_TEST.md`，包含环境与数据准备、启动/主框架、连接管理、左侧对象树、编辑器与补全、执行/结果、表数据页、UI DDL/表设计 grid、存储过程/触发器/索引/约束、查询历史、设置、文件导入导出、超时/取消/错误/安全、多库与 MSSQL Agent 共 14 组用例，并单独列出 12 条近期回归专项（含本次「新旧表名相同」、MSSQL 同表编辑、展开库不加载、存储过程 DDL、触发器启停、表设计 grid 等）；每组用例标注 `[自动]/[半自动]/[手工]`，附完整自动化命令基线与结果记录模板。`README.md` 文档索引加入该文件。涉及 `prd/SELF_TEST.md`、`README.md`、`prd/PROJECT_MASTER.md`（§6）。验证：按清单逐项核对现有实现与脚本，并实际执行 `test:safety/groups/ddl/dml/export/history/errors/connection-export/timeouts/pagination/settings/sql-highlight/sql-format/sql-completion/completion-core/typecheck:completion/metadata/sql-brackets/sql-mask/sql-script/xlsx/sqlite-rebuild/checks/mssql`、`typecheck`、`build`、`e2e:sqlite`、`check:mssql`、`check:mssql-multidb`，全部通过；真实 Electron 临时脚本覆盖 REG-01/02（MSSQL 同表编辑与改名）。未在真实 MySQL/MariaDB 上逐条跑完整 UI 清单，MSSQL Agent 清单未在本轮执行。遗留/风险：清单中的手工项仍需按版本逐条执行并在 §16 模板记录；自动化脚本尚未按清单拆分成独立 `self-test` 命令；Agent/MySQL/MariaDB 的完整清单依赖实例可用性。
+
+- **W-20261118-14 新增 `npm run self-test` 一键自测入口**：诉求是详细自测要能重复执行，而不是只写在文档里。变更：新增 `scripts/self-test.mjs`，默认串行执行 24 个纯逻辑测试、`typecheck`、`build`、`e2e:sqlite` 共 27 步，逐步打印 OK/FAIL 与耗时，最后汇总失败项并以非零退出；支持 `-- --with-mssql`（追加 `check:mssql`、`check:mssql-multidb`）、`-- --with-mysql`、`-- --with-mariadb`；Windows 下通过 `cmd.exe /d /s /c npm run ...` 执行，避免 `npm.cmd` 解析问题；`package.json`、`README.md`、`AGENTS.md`、`prd/SELF_TEST.md` §15 同步命令说明。涉及 `scripts/self-test.mjs`、`package.json`、`README.md`、`AGENTS.md`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§6）。验证：`npm run self-test` 跑完 27 步全部 OK（含 `e2e:sqlite`）；`npm run self-test -- --with-mssql --with-mysql` 跑完 30 步全部 OK（含 `check:mssql`、`check:mssql-multidb`、`check:mysql`）；MariaDB 因当前环境没有实例，本轮跳过 `--with-mariadb`（此前便携实例已单独验证过存储过程 DDL 与表设计保存）。遗留/风险：可选真实实例步骤依赖 3307/3308 与 `.env.local`，未启动时需手动加对应 flag；MariaDB 需要单独安装/启动实例；清单中的手工 UI 项仍需按 §16 模板记录；`self-test` 不替代真实 Electron 人工验收。
+
+- **W-20261118-15 实现 MSSQL `GO n` 重复批次**：诉求是文档里 `GO 5` 仍未实现。变更：`splitSqlStatements` 增加当前 GO 批次缓存，遇到 `GO n` 时把该批次整体再追加 `n-1` 次；批内有分号的语句也按整批重复，而不是只重复最后一条；`GO 0`、非整数或 `n` 超过单次语句上限（默认 50）直接返回明确错误，避免生成超大数组。`test-sql-script` 增加 `GO 3`、`GO 3` 带分号、多条语句 `GO 2`、`GO 0`、超限五类用例；`e2e:mssql` 增加 `SELECT 1 AS a\nGO 2\nSELECT 2 AS b` 的真实执行用例（3 个结果页签，结果 1/2 为 1，结果 3 为 2）。涉及 `src/renderer/src/utils/sql-script.ts`、`scripts/test-sql-script.mjs`、`scripts/e2e-mssql.mjs`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§5）。验证：`npm run test:sql-script`、`npm run e2e:mssql` 通过（E2E 含构建）。遗留/风险：`GO n` 会按批次放大执行条数，仍受单次 50 条上限约束；只对 MSSQL 生效；未在 50 条以上的大批次上单独压测。
+
+- **W-20261118-16 补 F2/Delete 键并修复 SQLite 表数据页变只读**：诉求是继续补文档中未实现项。变更：`ResultGrid` 增加键盘监听——F2 调用 RevoGrid `setCellEdit`（优先 `getFocused()` 读实时焦点，React 状态滞后时回退 `focusedCell`/选中区域），Delete 调用 `onDeleteRow`，编辑器内不拦截；`Workspace` 把已有的 `onDeleteRow` 传给网格。验证 F2 时发现真实 bug：SQLite 对象树把 `main` 当作 database 传给表数据页，标签记录 `table.database='main'`，`loadTableMeta` 调 `ensureDatabase` 触发 `USE main`，SQLite 返回“不支持切换数据库”，导致整张表 `editable=false` 且标题显示 `main.demo_users`。修复：SQLite 表数据页不再写入 `table.database`（`openTableData` / `openTableDataFromBrowse`），`loadTableMeta`、`openTabSession`、`switchDatabase` 对 SQLite 跳过 `USE`，单表点击预览也不再触发切库；`e2e:sqlite` 增加“表数据页可编辑、新增行可用”断言。涉及 `src/renderer/src/features/grid/ResultGrid.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`scripts/e2e-sqlite.mjs`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§5）。验证：`npm run typecheck`、`npm run build`、`npm run e2e:sqlite` 通过；临时 Playwright 真实 Electron（临时 user-data-dir，脚本已删除）确认 SQLite `demo_users` 表数据页 `readonly=false`、F2 打开 `textarea.grid-typed-editor`、Delete 生成“待提交 1 项”、回滚后清零。遗留/风险：E2E 只断言可编辑状态，F2/Delete 的坐标点击在 E2E 环境中不稳定，仍以临时脚本/手工验收为主；Delete 只删除当前选中行/区间，不做键盘多选扩展。
+
+- **W-20261119-01 Excel/TSV 粘贴自动追加待提交新增行并按列类型标红**：诉求是 PRD §4.5.2/§4.5.6 要求从 Excel 粘贴多行多列，AC 要求「复制 3 行 4 列粘贴后生成待提交新增行，类型校验失败的单元格标红」。核对发现 RevoGrid 4.31.4 的默认粘贴会把数据裁剪到已有行，追加的行只进内部 store、不进入上层待提交状态，且没有类型校验。变更：新增纯逻辑模块 `src/shared/table-paste.ts`（`parseClipboardTsv` 支持引号包裹的单元格内 Tab/换行/`""` 转义/CRLF；`normalizePastedValue` 空单元格转 NULL；`pastedValueError` 校准整数/小数/布尔/日期/时间/枚举/varchar 长度）；`ResultGrid` 监听 RevoGrid 的 `beforepasteapply`，在捕获到网格内、非编辑器焦点的粘贴时调用 `preventDefault` 阻止默认写入，用 `getFocused()` 读取实时焦点（React `focusedCell` 可能滞后），把矩阵和实际列下标交给上层；粘贴目标是 SQL 编辑器/单元格编辑器时只取消网格写入，保留浏览器默认粘贴；新增 `onPasteCells`/`invalidCells` 属性，失败单元格加 `grid-cell-invalid` 与错误 title。`App` 把 `applyCellChanges` 拆成 `applyChangeSet`（返回 changed/aborted，避免定位不到主键时部分写入），新增 `pasteTableCells`：从焦点行开始改写，超出末行自动追加待提交新增行，新增行空白=默认值、已有行空白=NULL，无主键高风险模式只允许新增行，整次粘贴只记一个撤销快照；新增 `invalidCellsByTab` 状态，粘贴时设置、手动编辑该格/撤销/回滚/提交/关闭标签时清理，删行时行号前移；新增 `pasteFromClipboard` 并接入工具栏「从 Excel 粘贴」按钮（无焦点时从行尾、第一个可写列开始，避免自增主键吃掉第一个值）。新增 `scripts/test-table-paste.mjs` 与 `npm run test:table-paste`，并把它加入 `scripts/self-test.mjs` 的默认步骤。涉及 `src/shared/table-paste.ts`、`src/renderer/src/features/grid/ResultGrid.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`src/renderer/src/styles.css`、`scripts/test-table-paste.mjs`、`scripts/self-test.mjs`、`scripts/e2e-sqlite.mjs`、`package.json`、`AGENTS.md`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§3/§5）。验证：`npm run typecheck`、`npm run test:table-paste`、`npm run test:pagination`、`npm run test:dml`、`npm run build`、`npm run e2e:sqlite` 通过（E2E 新增：剪贴板写入 2 行 6 列 → 点「从 Excel 粘贴」→ 出现「类型不匹配」提示与「待提交 2 项」→ 回滚恢复）；另用临时 Playwright 真实 Electron 脚本（临时 user-data-dir，脚本已删除）验证 `setCellsFocus` 后 `Ctrl+V`：RevoGrid `beforepasteapply` 被取消、源行数 200→201、待提交 3 项、toast「已粘贴 2 行，新增 1 行待提交」，并验证在 `.cm-content` 编辑器内粘贴不会改变网格行数。遗留/风险：类型校验只拦截明显不可能写入的值（数字列贴中文、布尔贴 2、超长 varchar 等），不替代数据库约束；日期依赖宿主 `Date.parse`，不同方言的日期格式边界未穷举；工具栏粘贴无焦点时从第一个可写列开始，隐藏列不参与 Excel 粘贴的列映射；MySQL/MariaDB/MSSQL 尚未用真实 Excel 复制做人工验收。
+
+- **W-20261119-02 修复 MSSQL 双击跨库表打开数据页退回默认库**：诉求是 MSSQL 双击表后表数据页报 `Invalid object name 'test'. EREQUEST · errno 208`，用户问为什么表标签不能选数据库。复现与根因：对象树双击表会用表所属库（例如 `fanr`）打开会话并执行 `USE`，但紧接着 `runQuery` 读取的是本次渲染的 `sessions` 快照；新会话还没提交到 React state，`runQuery` 判定未就绪后调用 `openTabSession(tab, connectionId)` **没有带数据库**，主进程按连接默认库（`master`）重建会话，之前的 `USE fanr` 丢失，未限定 schema 的 `[test]` 在 master 中不存在。变更：`runQuery` 的兜底重开改为 `openTabSession(tab, connection.id, tab.table?.database ?? (非 SQLite 时 currentDatabaseByTab[tab.id]))`，表数据页始终回到自己的库，SQL 标签重连也保留当前库。表数据标签本来就不显示数据库下拉：它绑定打开时的 `table.database`，标题为 `表 · <库>.<表>`，不需要用户再选。`e2e:mssql` 增加跨库回归：在 `tempdb.dbo.dbcraft_e2e_crossdb` 建临时表，展开 tempdb 双击表，断言状态栏「库 tempdb」、无 `.result-error`、网格出现 `cross-alpha`，结束后删除临时表。涉及 `src/renderer/src/App.tsx`、`scripts/e2e-mssql.mjs`、`AGENTS.md`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§3.5/§6）。验证：`npm run typecheck`、`npm run e2e:mssql`（真实 SQL Server 2016 SP2，跨库用例通过）、`npm run e2e:sqlite` 通过。遗留/风险：对象树单击表仍会把当前 SQL 标签切到该表所在库（预览 SQL 的既有行为），双击跨库表后当前标签的库会随之改变；E2E 的跨库表建在 tempdb，依赖当前账号对 tempdb 的建表权限；MySQL/MariaDB 的跨库表双击沿用同一路径，尚无同类 E2E；`dbo` 表在对象树里仍省略 schema（`qualifiedName`），若登录的默认 schema 不是 `dbo`，表数据页仍可能找不到对象，需后续单独处理。
+
+- **W-20261120-01 修复表数据页打开后 Ctrl+V 无法粘贴**：诉求是从 Excel 复制 `1 2 2027/12/10 sdaf` 后粘贴不到表数据页。复现：双击表打开页签后不点单元格直接 `Ctrl+V`，没有任何待提交变化；先点/聚焦单元格后再 `Ctrl+V` 才生效。根因：双击发生在对象树按钮上，DOM 焦点仍留在树里；浏览器只向当前焦点元素派发 paste，RevoGrid 的 document 监听与 W-20261119-01 的 `beforepasteapply` 接管都不会触发，而我们在非网格焦点时又主动取消以避免误写 SQL 编辑器，于是静默丢弃。变更：`ResultGrid` 在表数据加载后延迟 200ms 聚焦网格宿主和第一个可写单元格，并在 300ms 后补一次焦点确认；期间用户首次 `pointerdown` 就取消，编辑器/输入框有焦点时跳过；新增 `autoPasteAtEnd` 标记——自动焦点还没被用户点选或方向键移动改变时，`Ctrl+V` 按行尾追加，避免覆盖第一行；用户点选/移动后改为按当前单元格改写；`beforepasteapply` 的接管范围从“必须在网格内”放宽到“同一 `.workspace` 内的非编辑器焦点”，标签栏/工具栏按钮聚焦时也能粘贴，但输入框、单元格编辑器、SQL 编辑器仍保留原生粘贴；工具栏「从 Excel 粘贴」固定追加到行尾；待提交新增行数量增长时自动 `scrollToRow` 到最后一行，避免新行在 200 行视口外、用户以为粘贴没反应。顺带修复双击时第一下单击预览会触发 `ensureDatabase`、对还在 `opening` 的会话执行 `USE` 而弹出「会话未打开，请重新连接。」：现在只对 ready 会话切换库，idle/error 会话直接带目标库打开，opening 交给在途打开。涉及 `src/renderer/src/features/grid/ResultGrid.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`AGENTS.md`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§3.4.5/§3.5/§5）。验证：`npm run typecheck`、`npm run e2e:sqlite`、`npm run e2e:mssql` 通过；临时 Playwright 真实 MSSQL 脚本（临时 user-data-dir，已删除）在 `fanr.dbo.test` 上复现用户数据：打开表页后直接 `Ctrl+V` → 网格 200→201 行、待提交 1 项、toast「已粘贴 1 行（新增 1 行），2 个单元格类型不匹配，已标红。」（`nchar(3)` 收到 `2027/12/10`、`int` 收到 `sdaf`），回滚后恢复 200 行；同时确认打开时不再出现「会话未打开」；`e2e:sqlite` 新增断言：工具栏粘贴 2 行后网格文本出现「用户A」，证明已自动滚动到新增行。遗留/风险：自动聚焦有 200ms 延迟，键盘用户在打开后立刻按 Ctrl+V 仍可能赶在聚焦前；自动插入模式下程序化焦点（测试/E2E）不会清除 `autoPasteAtEnd`，只有真实 pointerdown/方向键会清除；类型校验仍是启发式，不替代数据库约束。
+
+- **W-20261120-02 修复 MSSQL 表格提交「无法开启事务」（错误 266）并统一事务控制**：诉求是粘贴后点「提交修改」提示「无法开启事务」。根因：`applyTableEdits` 用 `session.query('BEGIN TRANSACTION')` 开启事务，而 MSSQL 的 tedious `execSql` 会把批处理包在 EXECUTE 里；批处理结束时事务仍打开，SQL Server 返回错误 266（`Transaction count after EXECUTE indicates a mismatching number of BEGIN and COMMIT statements`），提交被中止，事务却已经在服务器端打开。`COMMIT` / `ROLLBACK` 同理不能单独走 execSql。变更：`DatabaseSession` 增加可选 `beginTransaction/commitTransaction/rollbackTransaction`；`MssqlSession` 用 tedious `connection.beginTransaction/commitTransaction/rollbackTransaction` 实现，并把 `run` 重构为通用 `enqueue`，让事务控制与查询共用同一队列；`applyTableEdits` 优先调用驱动原生事务方法（非 MSSQL 仍发 SQL），BEGIN 失败时尽力回滚；`executeQuery` / `executeQueryScript` 统一走新的 `runStatement`，MSSQL 下识别单条 `BEGIN [TRAN[SACTION]]`、`COMMIT [TRANSACTION|WORK]`、`ROLLBACK [TRANSACTION|WORK]` 并走原生 API，其余语句不变；渲染层 `transactionAction` 解析前剥掉末尾分号，修复 `COMMIT;` / `ROLLBACK;` 不更新事务面板、面板一直停在「事务中」的问题。`e2e:mssql` 新增回归：创建 `tempdb.dbo.dbcraft_e2e_edit`（IDENTITY 主键），打开空表后直接 `Ctrl+V` → 待提交 1 项 → 点「提交修改」→ 通过连接池断言 `name='e2e-row'`、`qty=7` 已落库。涉及 `src/main/services/DatabaseSession.ts`、`src/main/services/mssql/MssqlSession.ts`、`src/main/services/ConnectionManager.ts`、`src/renderer/src/App.tsx`、`scripts/e2e-mssql.mjs`、`AGENTS.md`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§3.5/§6）。验证：`npm run typecheck`、`npm run e2e:mssql` 通过；临时 Playwright 真实 MSSQL 脚本（临时 user-data-dir，已删除）验证空表 Ctrl+V → 提交成功写入 1 行，事务面板「开始事务」→「回滚当前事务」后状态回到「无事务」，均无错误 266。遗留/风险：原生事务期间同一会话的补全/元数据查询会加入同一物理事务（队列保证不交错，但事务范围仍是整个会话）；命名事务、`SAVE TRANSACTION`、隔离级别未暴露 UI；如果一条语句文本里同时包含 `BEGIN TRAN` 和后续 SQL 且分句器没有拆开，仍可能触发 266，当前编辑器按 `;` / GO / DELIMITER 分句，常规写法可覆盖。
 
 ## 7. 附录：旧文档合并映射
 

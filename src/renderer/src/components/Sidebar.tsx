@@ -11,16 +11,30 @@ import type {
 import { agentRunStatusLabel } from '@shared/agent';
 import type { BrowseConnectionView, SavedConnection, SessionStatus } from '../types';
 import { buildGroupTree, countGroup, type GroupNode } from '../utils/groups';
-import { ContextMenu } from './ContextMenu';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { Icon } from './Icon';
-import { ObjectTree } from './ObjectTree';
+import { ObjectTree, type ObjectTreeContextTarget } from './ObjectTree';
+
+/** 每个连接的对象树展开状态；跨重启保留，连接 id 稳定。 */
+const TREE_EXPANDED_STORAGE_KEY = 'dbcraft.tree-expanded.v1';
+
+/** 表子对象（约束/触发器/索引）的展开键；这些不跨重启保存。 */
+function isExtrasExpansionKey(key: string): boolean {
+  return (
+    key.startsWith('extras:') ||
+    key.startsWith('constraints:') ||
+    key.startsWith('triggers:') ||
+    key.startsWith('indexes:')
+  );
+}
 
 interface SidebarProps {
   connections: SavedConnection[];
   activeConnectionId: string | null;
   activeConnection: SavedConnection | null;
   connectionStates: Record<string, SessionStatus>;
-  activeSessionStatus: SessionStatus;
+  /** 每个连接最近一次会话失败原因，用于状态点悬停提示。 */
+  connectionErrors: Record<string, string>;
   schemaObjects: SchemaObject[];
   databases: DatabaseInfo[];
   objectsByDatabase: Record<string, SchemaObject[]>;
@@ -38,10 +52,14 @@ interface SidebarProps {
   onOpenBrowseConnection: (id: string) => void;
   onCollapseBrowseConnection: (id: string) => void;
   onRefreshBrowse: (connectionId: string) => void;
+  /** 只刷新某个数据库的对象并清掉它的表子对象缓存。 */
+  onRefreshBrowseDatabase: (connectionId: string, database: string) => void;
   onToggleBrowseSystemObjects: (connectionId: string, next: boolean) => void;
   onSelectBrowseDatabase: (connectionId: string, database: string) => void;
   onLoadBrowseDatabase: (connectionId: string, database: string) => void;
   onLoadBrowseTableExtras: (connectionId: string, database: string, table: string) => void;
+  /** 强制重载某张表的约束/触发器/索引。 */
+  onReloadTableExtras: (connectionId: string, database: string, table: string) => void;
   onOpenTableInBrowse: (connectionId: string, name: string, database?: string) => void;
   onOpenTableDataInBrowse: (
     connectionId: string,
@@ -56,32 +74,39 @@ interface SidebarProps {
   onToggleSystemObjects: (next: boolean) => void;
   onSelectDatabase: (database: string) => void;
   onLoadTableExtras: (database: string, table: string) => void;
-  onOpenTable: (name: string, database?: string) => void;
   onOpenTableData: (name: string, kind: 'table' | 'view', database?: string) => void;
   onOpenProcedure: (name: string, database?: string) => void;
   onDeleteConnection: (id: string) => void;
   onEditConnection: (id: string) => void;
   onDuplicateConnection: (id: string) => void;
   onDisconnectConnection: (id: string) => void;
-  onNewQueryForConnection: (id: string) => void;
+  onNewQueryForConnection: (id: string, database?: string) => void;
   onRenameGroup: (oldPath: string, newPath: string) => void;
   onDeleteGroup: (path: string) => void;
   onMoveConnection: (id: string, group: string) => void;
-  onViewDdl: (name: string, kind: DdlObjectKind, database?: string) => void;
   onCopyDdl: (name: string, kind: DdlObjectKind, database?: string) => void;
   onRenameTable: (name: string, database?: string) => void;
   onDropTable: (name: string, database?: string) => void;
   onDropView: (name: string, database?: string) => void;
-  onAddColumn: (name: string, database?: string) => void;
-  onRenameColumn: (name: string, database?: string) => void;
-  onModifyColumn: (name: string, database?: string) => void;
+  onDropProcedure: (name: string, database?: string) => void;
+  onDropTrigger: (table: string, trigger: string, database?: string) => void;
+  onToggleTrigger: (
+    table: string,
+    trigger: string,
+    enabled: boolean,
+    database?: string,
+  ) => void;
+  /** 把存储过程定义打开到编辑器，供修改后执行。 */
+  onEditProcedureDefinition: (name: string, database?: string) => void;
+  /** 表结构详情：列/主键/索引/约束/触发器/注释。 */
   onShowStructure: (name: string, database?: string) => void;
   onEditStructure: (name: string, database?: string) => void;
-  onCreateIndex: (name: string, database?: string) => void;
-  onDropIndex: (name: string, database?: string) => void;
-  onDropColumn: (name: string, database?: string) => void;
-  onNewTable: (schema?: string) => void;
-  onNewView: () => void;
+  /** 管理索引：创建与删除合并在同一个弹窗；可直接带入要删除的索引名。 */
+  onManageIndex: (name: string, database?: string, indexName?: string) => void;
+  /** 新建表：可指定 schema、目标库与连接（从任意已展开的对象树发起）。 */
+  onNewTable: (schema?: string, database?: string, connectionId?: string) => void;
+  /** 新建视图：可指定目标库与连接。 */
+  onNewView: (database?: string, connectionId?: string) => void;
   onRunScript: () => void;
   onGenerateDatabaseDdl: (connectionId: string) => void;
   onExportConnection: (connectionId: string) => void;
@@ -128,7 +153,7 @@ export function Sidebar({
   connections,
   activeConnectionId,
   connectionStates,
-  activeSessionStatus,
+  connectionErrors,
   schemaObjects,
   databases,
   objectsByDatabase,
@@ -139,16 +164,19 @@ export function Sidebar({
   onOpenBrowseConnection,
   onCollapseBrowseConnection,
   onRefreshBrowse,
+  onRefreshBrowseDatabase,
   onToggleBrowseSystemObjects,
   onSelectBrowseDatabase,
   onLoadBrowseDatabase,
   onLoadBrowseTableExtras,
+  onReloadTableExtras,
   onOpenTableInBrowse,
   onOpenTableDataInBrowse,
   onOpenProcedureInBrowse,
   onEnsureConnectionTab,
   onNewConnection,
-  onOpenTable,
+  onOpenTableData,
+  onOpenProcedure,
   onDeleteConnection,
   onEditConnection,
   onDuplicateConnection,
@@ -157,19 +185,17 @@ export function Sidebar({
   onRenameGroup,
   onDeleteGroup,
   onMoveConnection,
-  onViewDdl,
   onCopyDdl,
   onRenameTable,
   onDropTable,
   onDropView,
-  onAddColumn,
-  onRenameColumn,
-  onModifyColumn,
+  onDropProcedure,
+  onDropTrigger,
+  onToggleTrigger,
+  onEditProcedureDefinition,
   onShowStructure,
   onEditStructure,
-  onCreateIndex,
-  onDropIndex,
-  onDropColumn,
+  onManageIndex,
   onNewTable,
   onNewView,
   onRunScript,
@@ -254,7 +280,68 @@ export function Sidebar({
     kind: DdlObjectKind;
     database?: string;
     schema?: string;
+    connectionId?: string;
+    /** MSSQL 扩展存储过程没有 SQL 定义。 */
+    extended?: boolean;
   } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{
+    x: number;
+    y: number;
+    connectionId: string;
+    target: ObjectTreeContextTarget;
+  } | null>(null);
+  /** 按连接保存对象树展开状态：收起连接、重启应用后都不会回到默认。 */
+  const [treeExpanded, setTreeExpanded] = useState<Record<string, Record<string, boolean>>>(() => {
+    try {
+      const raw = window.localStorage.getItem(TREE_EXPANDED_STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as Record<string, Record<string, boolean>>) : {};
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try {
+      // 表子对象的展开状态不跨重启保存：重启后 extras 缓存不存在，
+      // 直接展开会显示空壳；收起后由用户展开再触发懒加载。
+      const persistent = Object.fromEntries(
+        Object.entries(treeExpanded).map(([connectionId, view]) => [
+          connectionId,
+          Object.fromEntries(
+            Object.entries(view).filter(([key]) => !isExtrasExpansionKey(key)),
+          ),
+        ]),
+      );
+      window.localStorage.setItem(
+        TREE_EXPANDED_STORAGE_KEY,
+        JSON.stringify(persistent),
+      );
+    } catch {
+      // localStorage 不可用时只保留本次会话内的展开状态。
+    }
+  }, [treeExpanded]);
+  const collapseExtrasFor = (connectionId: string) => {
+    setTreeExpanded((current) => {
+      const view = current[connectionId];
+      if (!view) return current;
+      const next = Object.fromEntries(
+        Object.entries(view).filter(([key]) => !isExtrasExpansionKey(key)),
+      );
+      return { ...current, [connectionId]: next };
+    });
+  };
+  const toggleTreeExpanded = (connectionId: string, key: string, defaultValue = false) => {
+    setTreeExpanded((current) => {
+      const view = current[connectionId] ?? {};
+      return {
+        ...current,
+        [connectionId]: { ...view, [key]: !(view[key] ?? defaultValue) },
+      };
+    });
+  };
+
+  const copyText = (text: string) => {
+    void navigator.clipboard.writeText(text).catch(() => undefined);
+  };
 
   const normalizedQuery = treeQuery.trim().toLowerCase();
   const matchesName = (name: string) => name.toLowerCase().includes(normalizedQuery);
@@ -434,6 +521,10 @@ export function Sidebar({
           : state === 'error'
             ? '连接失败'
             : '未连接';
+    const stateTitle =
+      state === 'error'
+        ? `连接失败：${connectionErrors[connection.id] ?? '原因未知'}`
+        : stateLabel;
 
     return (
       <div className="connection-branch" key={connection.id}>
@@ -499,8 +590,8 @@ export function Sidebar({
             </span>
             <span
               className={`connection-state is-${state}`}
-              title={stateLabel}
-              aria-label={stateLabel}
+              title={stateTitle}
+              aria-label={stateTitle}
             />
             <span className={`env-badge env-${connection.input.env}`}>
               {ENVIRONMENT_LABELS[connection.input.env]}
@@ -522,11 +613,14 @@ export function Sidebar({
 
         {expanded && view && view.status !== 'ready' && (
           <div className="connection-objects">
-            <div className="tree-empty">
+            <div
+              className={`tree-empty ${view.status === 'error' ? 'tree-error-text' : ''}`}
+              title={view.status === 'error' ? view.message : undefined}
+            >
               {view.status === 'opening'
                 ? '正在连接…'
                 : view.status === 'error'
-                  ? '连接失败'
+                  ? `连接失败：${view.message ?? '原因未知'}`
                   : '未连接'}
             </div>
           </div>
@@ -539,15 +633,7 @@ export function Sidebar({
                 type="button"
                 className="icon-btn"
                 title={sessionReadOnly ? '当前为只读会话，无法建表' : '新建表'}
-                onClick={() => {
-                  if (browseCanManage) {
-                    onNewTable();
-                  } else {
-                    void Promise.resolve(onEnsureConnectionTab(connection.id)).then((ok) => {
-                      if (ok) onNewTable();
-                    });
-                  }
-                }}
+                onClick={() => onNewTable(undefined, undefined, connection.id)}
                 disabled={sessionReadOnly}
               >
                 <Icon name="plus" size={14} />
@@ -556,15 +642,7 @@ export function Sidebar({
                 type="button"
                 className="icon-btn"
                 title={sessionReadOnly ? '当前为只读会话，无法建视图' : '新建视图'}
-                onClick={() => {
-                  if (browseCanManage) {
-                    onNewView();
-                  } else {
-                    void Promise.resolve(onEnsureConnectionTab(connection.id)).then((ok) => {
-                      if (ok) onNewView();
-                    });
-                  }
-                }}
+                onClick={() => onNewView(undefined, connection.id)}
                 disabled={sessionReadOnly}
               >
                 <Icon name="view" size={14} />
@@ -593,7 +671,10 @@ export function Sidebar({
                 type="button"
                 className="icon-btn"
                 title="刷新对象"
-                onClick={() => onRefreshBrowse(connection.id)}
+                onClick={() => {
+                  collapseExtrasFor(connection.id);
+                  onRefreshBrowse(connection.id);
+                }}
                 disabled={view.schemaLoading}
               >
                 <Icon name="refresh" size={14} />
@@ -630,6 +711,10 @@ export function Sidebar({
               loading={view.schemaLoading}
               tableExtras={view.tableExtras}
               tableExtrasLoadingKey={tableExtrasLoadingKey}
+              expanded={treeExpanded[connection.id] ?? {}}
+              onToggleExpanded={(key, defaultValue) =>
+                toggleTreeExpanded(connection.id, key, defaultValue)
+              }
               onSelectDatabase={(database) =>
                 onSelectBrowseDatabase(connection.id, database)
               }
@@ -648,7 +733,7 @@ export function Sidebar({
               onOpenProcedure={(name, database) =>
                 onOpenProcedureInBrowse(connection.id, name, database)
               }
-              onTableContextMenu={(event, name, kind, database, schema) => {
+              onTableContextMenu={(event, name, kind, database, schema, extended) => {
                 const position = { x: event.clientX, y: event.clientY };
                 const showMenu = () => {
                   setObjectMenu({
@@ -656,10 +741,31 @@ export function Sidebar({
                     y: position.y,
                     name,
                     kind,
+                    connectionId: connection.id,
                     ...(database ? { database } : {}),
                     ...(schema ? { schema } : {}),
+                    ...(extended ? { extended } : {}),
                   });
                 };
+                if (browseCanManage) {
+                  showMenu();
+                  return;
+                }
+                void Promise.resolve(onEnsureConnectionTab(connection.id)).then((ok) => {
+                  if (ok) showMenu();
+                });
+              }}
+              onNodeContextMenu={(event, target) => {
+                const position = { x: event.clientX, y: event.clientY };
+                const showMenu = () => {
+                  setNodeMenu({
+                    x: position.x,
+                    y: position.y,
+                    connectionId: connection.id,
+                    target,
+                  });
+                };
+                // 表结构详情/删除索引等动作依赖活动标签，非当前连接先激活它。
                 if (browseCanManage) {
                   showMenu();
                   return;
@@ -763,6 +869,185 @@ export function Sidebar({
           </>
         )}
       </div>
+    );
+  };
+
+  /** 数据库 / 文件夹 / schema / 表子对象的右键菜单。 */
+  const renderNodeMenu = () => {
+    if (!nodeMenu) return null;
+    const { connectionId, target } = nodeMenu;
+    const items: ContextMenuItem[] = (() => {
+      switch (target.type) {
+        case 'database':
+          return [
+            {
+              label: '设为当前库',
+              disabled: target.current,
+              onSelect: () => onSelectBrowseDatabase(connectionId, target.database),
+            },
+            {
+              label: '新建查询',
+              onSelect: () => onNewQueryForConnection(connectionId, target.database),
+            },
+            {
+              label: '新建表…',
+              onSelect: () => onNewTable(undefined, target.database, connectionId),
+            },
+            {
+              label: '新建视图…',
+              onSelect: () => onNewView(target.database, connectionId),
+            },
+            {
+              label: '刷新此库对象',
+              onSelect: () => {
+                collapseExtrasFor(connectionId);
+                onRefreshBrowseDatabase(connectionId, target.database);
+              },
+            },
+            {
+              label: '复制数据库名',
+              onSelect: () => copyText(target.database),
+            },
+          ];
+        case 'folder':
+          return [
+            ...(target.folder === 'tables'
+              ? [
+                  {
+                    label: '新建表…',
+                    onSelect: () =>
+                      onNewTable(undefined, target.database, connectionId),
+                  },
+                ]
+              : []),
+            ...(target.folder === 'views'
+              ? [
+                  {
+                    label: '新建视图…',
+                    onSelect: () => onNewView(target.database, connectionId),
+                  },
+                ]
+              : []),
+            {
+              label: '新建查询',
+              onSelect: () => onNewQueryForConnection(connectionId, target.database),
+            },
+            {
+              label: '刷新此库对象',
+              onSelect: () => {
+                collapseExtrasFor(connectionId);
+                onRefreshBrowseDatabase(connectionId, target.database);
+              },
+            },
+            {
+              label: '复制数据库名',
+              onSelect: () => copyText(target.database),
+            },
+          ];
+        case 'schema':
+          return [
+            {
+              label: '新建表…',
+              onSelect: () =>
+                onNewTable(target.schema, target.database, connectionId),
+            },
+            {
+              label: '新建查询',
+              onSelect: () => onNewQueryForConnection(connectionId, target.database),
+            },
+            {
+              label: '刷新此库对象',
+              onSelect: () => {
+                collapseExtrasFor(connectionId);
+                onRefreshBrowseDatabase(connectionId, target.database);
+              },
+            },
+            {
+              label: '复制 schema 名',
+              onSelect: () => copyText(target.schema),
+            },
+          ];
+        case 'extras':
+          return [
+            {
+              label: '刷新此项',
+              onSelect: () =>
+                onReloadTableExtras(connectionId, target.database, target.table),
+            },
+            {
+              label: '表结构详情…',
+              onSelect: () => onShowStructure(target.table, target.database),
+            },
+            {
+              label: '复制名称',
+              onSelect: () =>
+                copyText(
+                  target.folder === 'constraints'
+                    ? '约束'
+                    : target.folder === 'triggers'
+                      ? '触发器'
+                      : '索引',
+                ),
+            },
+          ];
+        case 'detail':
+          return [
+            {
+              label: '复制名称',
+              onSelect: () => copyText(target.name),
+            },
+            ...(target.detailKind === 'index'
+              ? [
+                  {
+                    label: '删除索引…',
+                    danger: true,
+                    onSelect: () =>
+                      onManageIndex(target.table, target.database, target.name),
+                  },
+                ]
+              : []),
+            ...(target.detailKind === 'trigger'
+              ? [
+                  {
+                    label: '删除触发器…',
+                    danger: true,
+                    onSelect: () =>
+                      onDropTrigger(
+                        target.table,
+                        target.qualifiedName ?? target.name,
+                        target.database,
+                      ),
+                  },
+                  ...(target.canToggle
+                    ? [
+                        {
+                          label: target.disabled ? '启用触发器' : '禁用触发器',
+                          onSelect: () =>
+                            onToggleTrigger(
+                              target.table,
+                              target.qualifiedName ?? target.name,
+                              Boolean(target.disabled),
+                              target.database,
+                            ),
+                        },
+                      ]
+                    : []),
+                ]
+              : []),
+            {
+              label: '表结构详情…',
+              onSelect: () => onShowStructure(target.table, target.database),
+            },
+          ];
+      }
+    })();
+    return (
+      <ContextMenu
+        x={nodeMenu.x}
+        y={nodeMenu.y}
+        onClose={() => setNodeMenu(null)}
+        items={items}
+      />
     );
   };
 
@@ -875,10 +1160,43 @@ export function Sidebar({
               onSelect: () => onNewQueryForConnection(menu.connection.id),
             },
             {
+              label:
+                browseViews[menu.connection.id] &&
+                expandedConnections[menu.connection.id]
+                  ? '收起对象树'
+                  : '打开对象树',
+              onSelect: () => {
+                const view = browseViews[menu.connection.id];
+                if (view && expandedConnections[menu.connection.id]) {
+                  setExpandedConnections((current) => ({
+                    ...current,
+                    [menu.connection.id]: false,
+                  }));
+                  onCollapseBrowseConnection(menu.connection.id);
+                  return;
+                }
+                setExpandedConnections((current) => ({
+                  ...current,
+                  [menu.connection.id]: true,
+                }));
+                onOpenBrowseConnection(menu.connection.id);
+              },
+            },
+            {
+              label: '刷新对象树',
+              disabled: browseViews[menu.connection.id]?.status !== 'ready',
+              onSelect: () => {
+                collapseExtrasFor(menu.connection.id);
+                onRefreshBrowse(menu.connection.id);
+              },
+            },
+            {
               label: '新建表…',
-              disabled:
-                menu.connection.id !== activeConnectionId || activeSessionStatus !== 'ready',
-              onSelect: () => onNewTable(),
+              onSelect: () => onNewTable(undefined, undefined, menu.connection.id),
+            },
+            {
+              label: '复制连接名',
+              onSelect: () => copyText(menu.connection.input.name),
             },
             {
               label: '生成库级 DDL',
@@ -981,85 +1299,108 @@ export function Sidebar({
         />
       )}
 
+      {renderNodeMenu()}
+
       {objectMenu && (
         <ContextMenu
           x={objectMenu.x}
           y={objectMenu.y}
           onClose={() => setObjectMenu(null)}
-          items={[
-            {
-              label: '查询数据',
-              onSelect: () => onOpenTable(objectMenu.name, objectMenu.database),
-            },
-            {
-              label: '查看 DDL',
-              onSelect: () => onViewDdl(objectMenu.name, objectMenu.kind, objectMenu.database),
-            },
-            {
-              label: '复制 DDL',
-              onSelect: () => onCopyDdl(objectMenu.name, objectMenu.kind, objectMenu.database),
-            },
-            ...(objectMenu.kind === 'table'
+          items={
+            objectMenu.kind === 'procedure'
               ? [
                   {
-                    label: '编辑表结构…',
-                    onSelect: () => onEditStructure(objectMenu.name, objectMenu.database),
+                    label: '生成调用 SQL',
+                    onSelect: () =>
+                      onOpenProcedure(objectMenu.name, objectMenu.database),
                   },
                   {
-                    label: '新建表…',
-                    onSelect: () => onNewTable(objectMenu.schema),
+                    label: objectMenu.extended
+                      ? '编辑定义（扩展存储过程无定义）'
+                      : '编辑定义…',
+                    disabled: objectMenu.extended === true,
+                    onSelect: () =>
+                      onEditProcedureDefinition(objectMenu.name, objectMenu.database),
                   },
                   {
-                    label: '查看表结构…',
-                    onSelect: () => onShowStructure(objectMenu.name, objectMenu.database),
+                    label: objectMenu.extended
+                      ? '复制 DDL（扩展存储过程无定义）'
+                      : '复制 DDL',
+                    disabled: objectMenu.extended === true,
+                    onSelect: () =>
+                      onCopyDdl(objectMenu.name, 'procedure', objectMenu.database),
                   },
                   {
-                    label: '添加列…',
-                    onSelect: () => onAddColumn(objectMenu.name, objectMenu.database),
+                    label: '复制名称',
+                    onSelect: () => copyText(objectMenu.name),
                   },
                   {
-                    label: '重命名列…',
-                    onSelect: () => onRenameColumn(objectMenu.name, objectMenu.database),
-                  },
-                  {
-                    label: '修改列…',
-                    onSelect: () => onModifyColumn(objectMenu.name, objectMenu.database),
-                  },
-                  {
-                    label: '删除列…',
+                    label: '删除存储过程…',
                     danger: true,
-                    onSelect: () => onDropColumn(objectMenu.name, objectMenu.database),
-                  },
-                  {
-                    label: '创建索引…',
-                    onSelect: () => onCreateIndex(objectMenu.name, objectMenu.database),
-                  },
-                  {
-                    label: '删除索引…',
-                    onSelect: () => onDropIndex(objectMenu.name, objectMenu.database),
-                  },
-                  {
-                    label: '重命名表…',
-                    onSelect: () => onRenameTable(objectMenu.name, objectMenu.database),
-                  },
-                  {
-                    label: '删除表…',
-                    danger: true,
-                    onSelect: () => onDropTable(objectMenu.name, objectMenu.database),
+                    disabled: objectMenu.extended === true,
+                    onSelect: () =>
+                      onDropProcedure(objectMenu.name, objectMenu.database),
                   },
                 ]
               : [
                   {
-                    label: '新建表…',
-                    onSelect: () => onNewTable(objectMenu.schema),
+                    label:
+                      objectMenu.kind === 'table' ? '打开表数据' : '打开视图数据',
+                    onSelect: () =>
+                      onOpenTableData(
+                        objectMenu.name,
+                        objectMenu.kind as 'table' | 'view',
+                        objectMenu.database,
+                      ),
                   },
+                  ...(objectMenu.kind === 'table'
+                    ? [
+                        {
+                          label: '编辑表结构…',
+                          onSelect: () =>
+                            onEditStructure(objectMenu.name, objectMenu.database),
+                        },
+                        {
+                          label: '表结构详情…',
+                          onSelect: () =>
+                            onShowStructure(objectMenu.name, objectMenu.database),
+                        },
+                        {
+                          label: '管理索引…',
+                          onSelect: () =>
+                            onManageIndex(objectMenu.name, objectMenu.database),
+                        },
+                      ]
+                    : []),
                   {
-                    label: '删除视图…',
-                    danger: true,
-                    onSelect: () => onDropView(objectMenu.name, objectMenu.database),
+                    label: '复制 DDL',
+                    onSelect: () =>
+                      onCopyDdl(objectMenu.name, objectMenu.kind, objectMenu.database),
                   },
-                ]),
-          ]}
+                  ...(objectMenu.kind === 'table'
+                    ? [
+                        {
+                          label: '重命名表…',
+                          onSelect: () =>
+                            onRenameTable(objectMenu.name, objectMenu.database),
+                        },
+                        {
+                          label: '删除表…',
+                          danger: true,
+                          onSelect: () =>
+                            onDropTable(objectMenu.name, objectMenu.database),
+                        },
+                      ]
+                    : [
+                        {
+                          label: '删除视图…',
+                          danger: true,
+                          onSelect: () =>
+                            onDropView(objectMenu.name, objectMenu.database),
+                        },
+                      ]),
+                ]
+          }
         />
       )}
     </aside>

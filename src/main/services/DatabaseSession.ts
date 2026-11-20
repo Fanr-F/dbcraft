@@ -38,6 +38,13 @@ export interface DatabaseSession {
   getTableMeta(name: string, kind: DdlObjectKind): Promise<TableMeta>;
   /** 表结构详情：列 + 索引 + 外键。 */
   getTableDetail(name: string): Promise<TableDetail>;
+  /**
+   * 驱动原生事务控制。MSSQL 不能用 execSql 单独执行 `BEGIN TRANSACTION`：
+   * 批处理结束时事务仍开着会报错误 266（Transaction count after EXECUTE ...）。
+   */
+  beginTransaction?(): Promise<void>;
+  commitTransaction?(): Promise<void>;
+  rollbackTransaction?(): Promise<void>;
   cancel(): Promise<void>;
   close(): Promise<void>;
 }

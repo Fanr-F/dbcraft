@@ -487,29 +487,29 @@ try {
     { timeout: 10000 },
   );
 
-  // MOD-04 Phase 1：右键表 → 查看 DDL，应在新标签中给出建表 SQL。
+  // MOD-04 Phase 1：右键表 → 复制 DDL，剪贴板里应是建表 SQL（不再单独开 DDL 标签）。
+  const tabCountBeforeDdl = await page.locator('.tab').count();
   await page.locator('.tree-item', { hasText: 'demo_users' }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: '查看 DDL' }).click();
+  await page.getByRole('menuitem', { name: '复制 DDL' }).click();
   await page.waitForFunction(
-    () => document.querySelectorAll('.tab').length === 3,
+    () => document.querySelector('.toast')?.textContent?.includes('已复制 demo_users 的 DDL') ?? false,
     null,
-    { timeout: 5000 },
+    { timeout: 10000 },
   );
-  await page.waitForFunction(
-    () => document.querySelector('.tab.is-active')?.textContent?.includes('DDL · demo_users') ?? false,
-    null,
-    { timeout: 5000 },
+  assert(
+    (await page.locator('.tab').count()) === tabCountBeforeDdl,
+    'copy DDL should not open a new tab',
   );
-  const ddlText = await page.locator('.cm-content').innerText();
-  assert(ddlText.includes('CREATE TABLE demo_users'), 'DDL tab missing CREATE TABLE');
-  assert(ddlText.includes('demo_users'), 'DDL tab missing table name');
+  const ddlText = await app.evaluate(({ clipboard }) => clipboard.readText());
+  assert(ddlText.includes('CREATE TABLE demo_users'), 'copied DDL missing CREATE TABLE');
+  assert(ddlText.includes('demo_users'), 'copied DDL missing table name');
 
   // 连接右键 → 生成库级 DDL：包含表与视图。
   await page.locator('.connection-item').first().click({ button: 'right' });
   await page.getByRole('menuitem', { name: '生成库级 DDL' }).click();
   await page.waitForFunction(
-    () => document.querySelectorAll('.tab').length === 4,
-    null,
+    (expected) => document.querySelectorAll('.tab').length === expected,
+    tabCountBeforeDdl + 1,
     { timeout: 10000 },
   );
   await page.waitForFunction(
@@ -583,17 +583,23 @@ try {
     timeout: 15000,
   });
 
-  // MOD-04：添加列，再用查询确认列存在。
+  // MOD-04：添加列统一走「编辑表结构…」页签。
   await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: '添加列…' }).click();
-  await page.getByLabel('列名').fill('note');
-  await page.getByLabel('列类型').fill('TEXT');
-  await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
-  await page.waitForFunction(
-    () => !document.querySelector('.modal'),
-    null,
-    { timeout: 10000 },
+  await page.getByRole('menuitem', { name: '编辑表结构…' }).click();
+  await page.waitForSelector('.table-design-tab', { timeout: 15000 });
+  await page.locator('.table-design-tab').getByRole('button', { name: '添加列' }).click();
+  await page.getByLabel('第 3 列列名').fill('note');
+  await page.getByLabel('第 3 列类型').fill('TEXT');
+  await page.getByRole('button', { name: '保存并生成 DDL' }).click();
+  await page.waitForSelector('.ddl-preview', { timeout: 5000 });
+  assert(
+    (await page.locator('.ddl-preview').inputValue()).includes('ADD COLUMN "note"'),
+    'add column preview missing ADD COLUMN',
   );
+  await page.locator('.table-design-tab').getByRole('button', { name: '执行 DDL' }).click();
+  await page.waitForFunction(() => !document.querySelector('.table-design-tab'), null, {
+    timeout: 15000,
+  });
   await page.locator('.cm-content').fill('SELECT * FROM "e2e_created" LIMIT 1;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(
@@ -602,9 +608,9 @@ try {
     { timeout: 15000 },
   );
 
-  // MOD-04：创建/删除索引。
+  // MOD-04：创建/删除索引合并到「管理索引…」。
   await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: '创建索引…' }).click();
+  await page.getByRole('menuitem', { name: '管理索引…' }).click();
   await page.getByPlaceholder('例如：status, created_at').fill('note');
   await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 10000 });
@@ -620,18 +626,24 @@ try {
   );
 
   await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: '删除索引…' }).click();
+  await page.getByRole('menuitem', { name: '管理索引…' }).click();
+  await page.getByRole('tab', { name: '删除索引', exact: true }).click();
   await page.getByPlaceholder('例如：idx_orders_status').fill('idx_e2e_created_note');
   await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 10000 });
 
-  // MOD-04：删除列（输入列名两次确认）。
+  // MOD-04：删除列也走「编辑表结构…」，在 DDL 预览里输入表名确认。
   await page.locator('.tree-item', { hasText: 'e2e_created' }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: '删除列…' }).click();
-  await page.getByPlaceholder('例如：note').fill('note');
-  await page.getByLabel('再次输入列名确认').fill('note');
-  await page.locator('.modal').getByRole('button', { name: '执行', exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 10000 });
+  await page.getByRole('menuitem', { name: '编辑表结构…' }).click();
+  await page.waitForSelector('.table-design-tab', { timeout: 15000 });
+  await page.locator('.table-design-tab').getByRole('button', { name: '删除第 3 列' }).click();
+  await page.getByRole('button', { name: '保存并生成 DDL' }).click();
+  await page.waitForSelector('.ddl-preview', { timeout: 5000 });
+  await page.getByLabel('输入表名确认删除列').fill('e2e_created');
+  await page.locator('.table-design-tab').getByRole('button', { name: '执行 DDL' }).click();
+  await page.waitForFunction(() => !document.querySelector('.table-design-tab'), null, {
+    timeout: 15000,
+  });
 
   await page.locator('.cm-content').fill('SELECT * FROM "e2e_created" LIMIT 1;');
   await page.getByRole('button', { name: '执行', exact: true }).click();
@@ -700,6 +712,15 @@ try {
     () => document.querySelector('.statusbar')?.textContent?.includes('200 行') ?? false,
     null,
     { timeout: 15000 },
+  );
+  // SQLite 表数据页必须可编辑（不能因为 main 触发 USE 失败而变只读）。
+  assert(
+    (await page.locator('revo-grid').getAttribute('readonly')) === 'false',
+    'SQLite table data grid should be editable',
+  );
+  assert(
+    !(await page.getByRole('button', { name: '新增行', exact: true }).isDisabled()),
+    'SQLite table data 新增行 should be enabled',
   );
   assert(
     (await page.locator('.table-pager').innerText()).includes('第 1 页'),
@@ -778,6 +799,37 @@ try {
   });
   assert(resetHidden.length === 0, 'column layout reset failed');
   await page.locator('.grid-layout summary').click();
+
+  // MOD-05：从 Excel/TSV 粘贴多行多列。没有单元格焦点时从第一个可写列、
+  // 行尾开始追加待提交新增行；非数字写入 REAL 列要标红。
+  await app.evaluate(({ clipboard }) =>
+    clipboard.writeText(
+      '用户A\ta@example.com\tactive\t2024-01-01\tabc\t备注A\n用户B\tb@example.com\tpending\t2024-01-02\t3.5\t备注B',
+    ),
+  );
+  await page.getByRole('button', { name: '从 Excel 粘贴', exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector('.toast')?.textContent?.includes('类型不匹配') ?? false,
+    null,
+    { timeout: 5000 },
+  );
+  await page.waitForFunction(
+    () => document.querySelector('.badge.badge-warn')?.textContent?.includes('待提交 2 项') ?? false,
+    null,
+    { timeout: 5000 },
+  );
+  // 新增行在 200 行之外，必须自动滚动过去，否则用户看不到粘贴结果。
+  await page.waitForFunction(
+    () => document.querySelector('revo-grid')?.textContent?.includes('用户A') ?? false,
+    null,
+    { timeout: 5000 },
+  );
+  await page.locator('button[title="丢弃本次修改并重新加载"]').click();
+  await page.waitForFunction(
+    () => !document.querySelector('.badge.badge-warn'),
+    null,
+    { timeout: 15000 },
+  );
 
   // 查询超时：上面把设置面板的查询超时调成了 10 秒。
   await page.locator('.cm-content').fill(

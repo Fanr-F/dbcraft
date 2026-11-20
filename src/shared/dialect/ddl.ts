@@ -633,6 +633,59 @@ export function buildDropTrigger(
   return { ok: true, sql: `DROP TRIGGER IF EXISTS ${quoted};`, warnings: [] };
 }
 
+/** 删除存储过程；SQLite 没有存储过程，不生成 SQL。 */
+export function buildDropProcedure(
+  dialect: DatabaseType,
+  name: string,
+): DdlGenerateResult {
+  const procedure = requireName(name, '存储过程名');
+  if (!procedure.ok) return { ok: false, message: procedure.message, warnings: [] };
+  if (dialect === 'sqlite') {
+    return { ok: false, message: 'SQLite 不支持存储过程。', warnings: [] };
+  }
+  return {
+    ok: true,
+    sql: `DROP PROCEDURE ${quoteIdent(dialect, procedure.name)};`,
+    warnings: ['删除存储过程不可撤销。'],
+  };
+}
+
+/** 启用/禁用触发器；仅 SQL Server 支持单独启停。 */
+export function buildSetTriggerEnabled(
+  dialect: DatabaseType,
+  triggerName: string,
+  tableName: string,
+  enabled: boolean,
+): DdlGenerateResult {
+  if (dialect !== 'mssql') {
+    return {
+      ok: false,
+      message: '只有 SQL Server 支持单独启用/禁用触发器。',
+      warnings: [],
+    };
+  }
+  const trigger = requireName(triggerName, '触发器名');
+  if (!trigger.ok) return { ok: false, message: trigger.message, warnings: [] };
+  const table = requireName(tableName, '表名');
+  if (!table.ok) return { ok: false, message: table.message, warnings: [] };
+  // 触发器与表同 schema；非 dbo 表名带 schema 时，把 schema 补到未限定的触发器名上。
+  const tableSchema = table.name.includes('.')
+    ? table.name.slice(0, table.name.lastIndexOf('.'))
+    : '';
+  const effectiveTrigger =
+    trigger.name.includes('.') || !tableSchema
+      ? trigger.name
+      : `${tableSchema}.${trigger.name}`;
+  return {
+    ok: true,
+    sql: `${enabled ? 'ENABLE' : 'DISABLE'} TRIGGER ${quoteIdent(
+      dialect,
+      effectiveTrigger,
+    )} ON ${quoteIdent(dialect, table.name)};`,
+    warnings: enabled ? [] : ['禁用后该触发器在本表上不再执行，直到重新启用。'],
+  };
+}
+
 /** ALTER TABLE ... COMMENT（MySQL 系）或扩展属性（MSSQL）；SQLite 不支持。 */
 export function buildTableComment(
   dialect: DatabaseType,

@@ -19,6 +19,9 @@ export function splitSqlStatements(
   const isMysqlFamily =
     dialect === 'mysql' || dialect === 'percona' || dialect === 'mariadb';
   const statements: string[] = [];
+  /** 当前 GO 批次内的语句；GO n 需要整批重复。 */
+  let batch: string[] = [];
+  let parseError: string | null = null;
   const length = sql.length;
   let current = '';
   let hasContent = false;
@@ -29,6 +32,7 @@ export function splitSqlStatements(
     const text = current.trim();
     if (text.length > 0 && hasContent) {
       statements.push(text);
+      batch.push(text);
     }
     current = '';
     hasContent = false;
@@ -121,11 +125,33 @@ export function splitSqlStatements(
       continue;
     }
 
-    // 行级指令：MSSQL GO / MySQL DELIMITER。
+    // 行级指令：MSSQL GO（含 GO n）/ MySQL DELIMITER。
     if (atLineStart(index)) {
       const line = linePattern(index);
-      if (isMssql && /^\s*GO\s*(?:--.*)?$/i.test(line)) {
+      const goMatch = isMssql ? /^\s*GO(?:\s+(\d+))?\s*(?:--.*)?$/i.exec(line) : null;
+      if (goMatch) {
         flush();
+        const repeat = goMatch[1] ? Number(goMatch[1]) : 1;
+        if (!Number.isSafeInteger(repeat) || repeat < 1) {
+          parseError = 'GO 后的重复次数必须是大于 0 的整数。';
+          break;
+        }
+        if (repeat > limit) {
+          parseError = `GO 重复次数 ${repeat} 超过单次最多执行 ${limit} 条。`;
+          break;
+        }
+        for (let turn = 1; turn < repeat; turn += 1) {
+          for (const statement of batch) {
+            statements.push(statement);
+            if (statements.length > limit) {
+              parseError = `单次最多执行 ${limit} 条语句，当前为 ${statements.length} 条。`;
+              break;
+            }
+          }
+          if (parseError) break;
+        }
+        batch = [];
+        if (parseError) break;
         index += line.length;
         if (sql[index] === '\n') index += 1;
         continue;
@@ -203,6 +229,10 @@ export function splitSqlStatements(
     current += char;
     if (!/\s/.test(char)) hasContent = true;
     index += 1;
+  }
+
+  if (parseError) {
+    return { ok: false, message: parseError };
   }
 
   flush();

@@ -341,118 +341,154 @@ export function TableDesignTab({
               </label>
             </div>
 
-            <div className="designer-columns">
-              <div className="designer-column-head">
-                <span>列名</span>
-                <span>类型</span>
-                <span>主键</span>
-                <span>{dialect === 'mssql' ? 'Identity' : '自增'}</span>
-                <span>非空</span>
-                <span>唯一</span>
-                <span>默认值</span>
-                <span />
-              </div>
-
-              {columns.map((column, index) => (
-                <div className="designer-column-row" key={index}>
-                  <input
-                    value={column.name}
-                    placeholder="列名"
-                    title={column.originalName}
-                    aria-label={`第 ${index + 1} 列列名`}
-                    onChange={(event) => updateColumn(index, 'name', event.target.value)}
-                  />
-                  <input
-                    list="table-design-type-suggestions"
-                    value={column.type}
-                    placeholder="类型"
-                    aria-label={`第 ${index + 1} 列类型`}
-                    onChange={(event) => updateColumn(index, 'type', event.target.value)}
-                  />
-                  <input
-                    type="checkbox"
-                    checked={Boolean(column.primaryKey)}
-                    disabled={!canEditPrimary}
-                    title={!canEditPrimary ? '编辑表结构时不能修改主键' : undefined}
-                    aria-label={`第 ${index + 1} 列主键`}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      updateColumn(index, 'primaryKey', checked);
-                      if (!checked) updateColumn(index, 'autoIncrement', false);
-                    }}
-                  />
-                  <input
-                    type="checkbox"
-                    checked={Boolean(column.autoIncrement)}
-                    disabled={!canEditPrimary || !column.primaryKey}
-                    title={!canEditPrimary ? '编辑表结构时不能修改自增' : undefined}
-                    aria-label={`第 ${index + 1} 列自增`}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      updateColumn(index, 'autoIncrement', checked);
-                      if (checked && dialect === 'sqlite') {
-                        updateColumn(index, 'type', 'INTEGER');
-                      }
-                    }}
-                  />
-                  <input
-                    type="checkbox"
-                    checked={Boolean(column.notNull)}
-                    aria-label={`第 ${index + 1} 列非空`}
-                    onChange={(event) => updateColumn(index, 'notNull', event.target.checked)}
-                  />
-                  <input
-                    type="checkbox"
-                    checked={Boolean(column.unique)}
-                    disabled={editing}
-                    title={editing ? '唯一约束请通过索引管理修改' : undefined}
-                    aria-label={`第 ${index + 1} 列唯一`}
-                    onChange={(event) => updateColumn(index, 'unique', event.target.checked)}
-                  />
-                  <input
-                    value={column.defaultValue ?? ''}
-                    placeholder="默认值"
-                    aria-label={`第 ${index + 1} 列默认值`}
-                    onChange={(event) =>
-                      updateColumn(index, 'defaultValue', event.target.value)
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    title="上移列"
-                    aria-label={`上移第 ${index + 1} 列`}
-                    disabled={index === 0}
-                    onClick={() => moveColumn(index, -1)}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    title="下移列"
-                    aria-label={`下移第 ${index + 1} 列`}
-                    disabled={index === columns.length - 1}
-                    onClick={() => moveColumn(index, 1)}
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    title={
-                      column.originalName && column.primaryKey
-                        ? '主键列不能删除'
-                        : '删除列'
-                    }
-                    aria-label={`删除第 ${index + 1} 列`}
-                    disabled={Boolean(column.originalName && column.primaryKey)}
-                    onClick={() => removeColumn(index)}
-                  >
-                    <Icon name="close" size={13} />
-                  </button>
-                </div>
-              ))}
+            <div className="structure-grid-wrap">
+              <table className="structure-grid" aria-label="列定义">
+                <thead>
+                  <tr>
+                    <th className="structure-grid-index">#</th>
+                    <th>列名</th>
+                    <th>类型</th>
+                    <th className="structure-grid-flag">主键</th>
+                    <th className="structure-grid-flag">
+                      {dialect === 'mssql' ? 'Identity' : '自增'}
+                    </th>
+                    <th className="structure-grid-flag">非空</th>
+                    <th className="structure-grid-flag">唯一</th>
+                    <th>默认值</th>
+                    <th className="structure-grid-actions">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {columns.map((column, index) => (
+                    <tr key={index} className={column.originalName ? undefined : 'is-new'}>
+                      <td className="structure-grid-index">{index + 1}</td>
+                      <td>
+                        <input
+                          value={column.name}
+                          placeholder="列名"
+                          title={column.originalName}
+                          aria-label={`第 ${index + 1} 列列名`}
+                          onChange={(event) => updateColumn(index, 'name', event.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          list="table-design-type-suggestions"
+                          value={column.type}
+                          placeholder="类型"
+                          aria-label={`第 ${index + 1} 列类型`}
+                          onChange={(event) => updateColumn(index, 'type', event.target.value)}
+                        />
+                      </td>
+                      <td className="structure-grid-check">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(column.primaryKey)}
+                          disabled={!canEditPrimary}
+                          title={!canEditPrimary ? '编辑表结构时不能修改主键' : undefined}
+                          aria-label={`第 ${index + 1} 列主键`}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            updateColumn(index, 'primaryKey', checked);
+                            if (!checked) updateColumn(index, 'autoIncrement', false);
+                          }}
+                        />
+                      </td>
+                      <td className="structure-grid-check">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(column.autoIncrement)}
+                          disabled={!canEditPrimary || !column.primaryKey}
+                          title={!canEditPrimary ? '编辑表结构时不能修改自增' : undefined}
+                          aria-label={`第 ${index + 1} 列自增`}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            updateColumn(index, 'autoIncrement', checked);
+                            if (checked && dialect === 'sqlite') {
+                              updateColumn(index, 'type', 'INTEGER');
+                            }
+                          }}
+                        />
+                      </td>
+                      <td className="structure-grid-check">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(column.notNull)}
+                          aria-label={`第 ${index + 1} 列非空`}
+                          onChange={(event) =>
+                            updateColumn(index, 'notNull', event.target.checked)
+                          }
+                        />
+                      </td>
+                      <td className="structure-grid-check">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(column.unique)}
+                          disabled={editing}
+                          title={editing ? '唯一约束请通过索引管理修改' : undefined}
+                          aria-label={`第 ${index + 1} 列唯一`}
+                          onChange={(event) =>
+                            updateColumn(index, 'unique', event.target.checked)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={column.defaultValue ?? ''}
+                          placeholder="默认值"
+                          aria-label={`第 ${index + 1} 列默认值`}
+                          onChange={(event) =>
+                            updateColumn(index, 'defaultValue', event.target.value)
+                          }
+                        />
+                      </td>
+                      <td className="structure-grid-actions">
+                        <button
+                          type="button"
+                          className="structure-row-action"
+                          title="上移列"
+                          aria-label={`上移第 ${index + 1} 列`}
+                          disabled={index === 0}
+                          onClick={() => moveColumn(index, -1)}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="structure-row-action"
+                          title="下移列"
+                          aria-label={`下移第 ${index + 1} 列`}
+                          disabled={index === columns.length - 1}
+                          onClick={() => moveColumn(index, 1)}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          className="structure-row-action is-danger"
+                          title={
+                            column.originalName && column.primaryKey
+                              ? '主键列不能删除'
+                              : '删除列'
+                          }
+                          aria-label={`删除第 ${index + 1} 列`}
+                          disabled={Boolean(column.originalName && column.primaryKey)}
+                          onClick={() => removeColumn(index)}
+                        >
+                          <Icon name="close" size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {columns.length === 0 && (
+                    <tr>
+                      <td className="structure-grid-empty" colSpan={9}>
+                        还没有列，点击下方「添加列」开始。
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
 
             {mode === 'create' && (

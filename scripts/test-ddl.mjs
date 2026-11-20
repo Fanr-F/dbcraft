@@ -18,10 +18,12 @@ import {
   buildDropIndex,
   buildDropObject,
   buildDropPrimaryKey,
+  buildDropProcedure,
   buildDropTrigger,
   buildModifyColumn,
   buildRenameColumn,
   buildRenameTable,
+  buildSetTriggerEnabled,
   buildTableComment,
 } from '../src/shared/dialect/ddl.ts';
 
@@ -479,8 +481,36 @@ console.log('ddl check constraint check passed');
 expectSql(buildDropTrigger('mysql', 'trg_orders'), 'DROP TRIGGER IF EXISTS `trg_orders`;');
 expectSql(buildDropTrigger('sqlite', 'trg_orders'), 'DROP TRIGGER IF EXISTS "trg_orders";');
 expectSql(buildDropTrigger('mssql', 'trg_orders'), 'DROP TRIGGER [trg_orders];');
+expectSql(
+  buildSetTriggerEnabled('mssql', 'dbo.trg_orders', 'dbo.orders', false),
+  'DISABLE TRIGGER [dbo].[trg_orders] ON [dbo].[orders];',
+);
+expectSql(
+  buildSetTriggerEnabled('mssql', 'dbo.trg_orders', 'dbo.orders', true),
+  'ENABLE TRIGGER [dbo].[trg_orders] ON [dbo].[orders];',
+);
+expectSql(
+  buildSetTriggerEnabled('mssql', 'trg_orders', 'sales.orders', false),
+  'DISABLE TRIGGER [sales].[trg_orders] ON [sales].[orders];',
+);
+assert(
+  !buildSetTriggerEnabled('mysql', 'trg_orders', 'orders', false).ok,
+  'mysql should not support disabling a trigger',
+);
+assert(
+  !buildSetTriggerEnabled('sqlite', 'trg_orders', 'orders', false).ok,
+  'sqlite should not support disabling a trigger',
+);
 
 console.log('ddl trigger check passed');
+
+// PROCEDURE
+expectSql(buildDropProcedure('mysql', 'sp_orders'), 'DROP PROCEDURE `sp_orders`;');
+expectSql(buildDropProcedure('mariadb', 'sp_orders'), 'DROP PROCEDURE `sp_orders`;');
+expectSql(buildDropProcedure('mssql', 'dbo.sp_orders'), 'DROP PROCEDURE [dbo].[sp_orders];');
+assert(!buildDropProcedure('sqlite', 'sp_orders').ok, 'sqlite has no procedures');
+
+console.log('ddl procedure check passed');
 
 // PRIMARY KEY
 expectSql(buildDropPrimaryKey('mysql', 'orders'), 'ALTER TABLE `orders` DROP PRIMARY KEY;');
@@ -645,6 +675,56 @@ assert(
 assert(
   editDesign.ok && editDesign.statements[4].includes('MODIFY COLUMN `note` VARCHAR(50) NOT NULL'),
   'modified column missing',
+);
+
+// MSSQL: detail.name 对 dbo 表不带 schema，编辑时不能把 `users` -> `dbo.users` 误判为重命名。
+const mssqlEditColumns = detail.columns.map((column) => ({
+  name: column.name,
+  type: column.declaredType,
+  primaryKey: column.primaryKey,
+  autoIncrement: column.autoIncrement,
+  notNull: column.notNull,
+  unique: false,
+  defaultValue: column.defaultValue ?? undefined,
+  originalName: column.name,
+}));
+const mssqlSameName = buildTableDesign({
+  dialect: 'mssql',
+  mode: 'edit',
+  tableName: 'users',
+  schema: 'dbo',
+  detail,
+  columns: mssqlEditColumns.map((column) =>
+    column.name === 'name' ? { ...column, type: 'VARCHAR(20)' } : column,
+  ),
+});
+assert(
+  mssqlSameName.ok,
+  `mssql same-name edit should succeed: ${mssqlSameName.ok ? '' : mssqlSameName.message}`,
+);
+assert(
+  mssqlSameName.ok && !mssqlSameName.statements.some((sql) => sql.includes('sp_rename')),
+  'mssql same-name edit should not rename the table',
+);
+assert(
+  mssqlSameName.ok && mssqlSameName.statements.some((sql) => sql.includes('ALTER COLUMN')),
+  'mssql same-name edit should still emit column changes',
+);
+
+const mssqlRename = buildTableDesign({
+  dialect: 'mssql',
+  mode: 'edit',
+  tableName: 'accounts',
+  schema: 'dbo',
+  detail,
+  columns: mssqlEditColumns,
+});
+assert(mssqlRename.ok, `mssql rename edit should succeed: ${mssqlRename.ok ? '' : mssqlRename.message}`);
+assert(
+  mssqlRename.ok &&
+    mssqlRename.statements[0].includes('sp_rename') &&
+    mssqlRename.statements[0].includes('accounts'),
+  'mssql rename statement missing',
 );
 
 const sqliteModify = buildTableDesign({

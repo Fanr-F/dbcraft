@@ -147,7 +147,7 @@ export const schemaTableExtrasSchema = z.object({
 export const ddlGetSchema = z.object({
   sessionId: z.string().min(1).max(128),
   name: z.string().min(1).max(256),
-  kind: z.enum(['table', 'view']),
+  kind: z.enum(['table', 'view', 'procedure']),
 });
 
 export const schemaTableSchema = z.object({

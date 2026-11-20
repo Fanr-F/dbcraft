@@ -1,14 +1,30 @@
 import { useState } from 'react';
 import type { DatabaseType } from '@shared/ipc-contract';
-import { buildDropObject, buildRenameTable, ddlTransactionHint } from '@shared/dialect/ddl';
+import {
+  buildDropObject,
+  buildDropProcedure,
+  buildDropTrigger,
+  buildRenameTable,
+  buildSetTriggerEnabled,
+  ddlTransactionHint,
+} from '@shared/dialect/ddl';
 import { Icon } from './Icon';
 
-export type TableActionMode = 'rename' | 'drop-table' | 'drop-view';
+export type TableActionMode =
+  | 'rename'
+  | 'drop-table'
+  | 'drop-view'
+  | 'drop-procedure'
+  | 'drop-trigger'
+  | 'enable-trigger'
+  | 'disable-trigger';
 
 interface TableActionDialogProps {
   dialect: DatabaseType;
   mode: TableActionMode;
   name: string;
+  /** 触发器所属表；启用/禁用触发器需要 ON 表名。 */
+  tableName?: string;
   onClose: () => void;
   onExecute: (sql: string) => Promise<{ ok: boolean; message: string }>;
 }
@@ -17,6 +33,7 @@ export function TableActionDialog({
   dialect,
   mode,
   name,
+  tableName,
   onClose,
   onExecute,
 }: TableActionDialogProps) {
@@ -29,10 +46,23 @@ export function TableActionDialog({
   const generated =
     mode === 'rename'
       ? buildRenameTable(dialect, name, newName)
-      : buildDropObject(dialect, name, kind);
+      : mode === 'drop-procedure'
+        ? buildDropProcedure(dialect, name)
+        : mode === 'drop-trigger'
+          ? buildDropTrigger(dialect, name)
+          : mode === 'enable-trigger' || mode === 'disable-trigger'
+            ? buildSetTriggerEnabled(
+                dialect,
+                name,
+                tableName ?? '',
+                mode === 'enable-trigger',
+              )
+            : buildDropObject(dialect, name, kind);
 
   const sql = generated.ok ? generated.sql : '';
-  const confirmed = mode === 'rename' || confirmName.trim() === name;
+  const requiresConfirmName = mode.startsWith('drop-');
+  const destructive = requiresConfirmName || mode === 'disable-trigger';
+  const confirmed = !requiresConfirmName || confirmName.trim() === name;
 
   const run = async () => {
     if (!generated.ok || !sql || !confirmed || busy) return;
@@ -52,10 +82,22 @@ export function TableActionDialog({
     }
   };
 
+  const objectLabel =
+    mode === 'drop-procedure'
+      ? '存储过程'
+      : mode === 'drop-trigger' || mode === 'enable-trigger' || mode === 'disable-trigger'
+        ? '触发器'
+        : kind === 'view'
+          ? '视图'
+          : '表';
   const title =
     mode === 'rename'
-      ? `重命名${kind === 'view' ? '视图' : '表'}`
-      : `删除${kind === 'view' ? '视图' : '表'}`;
+      ? '重命名表'
+      : mode === 'enable-trigger'
+        ? '启用触发器'
+        : mode === 'disable-trigger'
+          ? '禁用触发器'
+          : `删除${objectLabel}`;
 
   return (
     <div className="modal-backdrop" onMouseDown={() => !busy && onClose()}>
@@ -69,7 +111,10 @@ export function TableActionDialog({
         <header className="modal-header">
           <div>
             <h2 id="table-action-title">{title}</h2>
-            <p>对象：{name}</p>
+            <p>
+              对象：{name}
+              {tableName && mode !== 'rename' ? `（表 ${tableName}）` : ''}
+            </p>
           </div>
           <button
             type="button"
@@ -92,7 +137,7 @@ export function TableActionDialog({
                 onChange={(event) => setNewName(event.target.value)}
               />
             </label>
-          ) : (
+          ) : requiresConfirmName ? (
             <label className="field">
               <span>输入对象名确认</span>
               <input
@@ -102,12 +147,14 @@ export function TableActionDialog({
                 onChange={(event) => setConfirmName(event.target.value)}
               />
             </label>
-          )}
+          ) : null}
 
           {generated.ok ? (
             <pre className="danger-sql">{generated.sql}</pre>
           ) : (
-            newName.length > 0 && <div className="form-error">{generated.message}</div>
+            (mode !== 'rename' || newName.length > 0) && (
+              <div className="form-error">{generated.message}</div>
+            )
           )}
 
           {generated.ok && generated.warnings.length > 0 && (
@@ -119,7 +166,7 @@ export function TableActionDialog({
           )}
           <p className="form-note">{ddlTransactionHint(dialect)}</p>
 
-          {mode !== 'rename' && (
+          {requiresConfirmName && (
             <p className="form-note">
               确认名称匹配后才能执行；删除操作不可撤销，建议先备份。
             </p>
@@ -135,7 +182,7 @@ export function TableActionDialog({
           <span className="spacer" />
           <button
             type="button"
-            className={`btn ${mode === 'rename' ? 'btn-primary' : 'btn-danger'}`}
+            className={`btn ${destructive ? 'btn-danger' : 'btn-primary'}`}
             disabled={busy || !generated.ok || !confirmed}
             onClick={() => void run()}
           >

@@ -48,6 +48,8 @@ npm run smoke       # 构建后启动 Electron，检查窗口与 preload 桥接
 npm run e2e:sqlite  # 构建后跑 SQLite 真实链路 E2E（连接、对象树、查询、错误）
 npm run e2e:mysql   # 构建后跑 MySQL UI E2E（需 127.0.0.1:3307 便携实例）
 npm run e2e:mssql   # 构建后跑 MSSQL UI E2E（读取 .env.local，会建删临时表）
+npm run self-test   # 自测入口：纯逻辑 + 类型检查 + 构建 + SQLite E2E；
+                    # 可加 -- --with-mssql / --with-mysql / --with-mariadb
 npm run pack        # 生成未打包目录（release/）
 npm run dist        # 生成 Windows NSIS 安装包
 ```
@@ -167,6 +169,7 @@ src/
 - `packages/sql-completion/README.md`：补全内核（方言策略、Provider 接口、引擎）与独立发布说明
 - `prd/TECH_DESIGN.md`：技术设计（进程、IPC、驱动、存储、安全）
 - `prd/PROJECT_MASTER.md`：项目主文档：文档定位、连接/服务器/标签/会话模型、实现现状与验收、未完成项、UI 真机验收、变更记录
+- `prd/SELF_TEST.md`：详细自测清单（环境准备、模块用例、近期回归专项、自动化命令与记录模板）
 
 ## 许可证
 

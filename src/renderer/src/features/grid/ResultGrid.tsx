@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { QueryCell, QueryColumn } from '@shared/ipc-contract';
+import { normalizePastedValue, parseClipboardTsv } from '@shared/table-paste';
 import { Icon } from '../../components/Icon';
 import { ContextMenu } from '../../components/ContextMenu';
 import { typedEditor } from './typed-editor';
@@ -31,10 +32,23 @@ interface ResultGridProps {
   onSetCellDefault?: (rowIndex: number, columnIndex: number) => void;
   /** 拖拽/Shift 选择的行区间（含端点）。 */
   onRowRangeChange?: (start: number, end: number) => void;
+  /** Delete 键删除当前选中行。 */
+  onDeleteRow?: () => void;
   /** 把当前选中区域交给上层打开导出对话框。 */
   onExportRange?: (columns: QueryColumn[], rows: QueryCell[][]) => void;
   /** 表数据页的布局记忆键；为空时不做持久化（普通查询结果）。 */
   layoutKey?: string;
+  /** Excel / TSV 粘贴：行号 + 每个矩阵列对应的实际列下标。 */
+  onPasteCells?: (paste: GridPastePayload) => void;
+  /** 按 `${rowIndex}:${columnIndex}` 索引的粘贴校验错误，用于把单元格标红。 */
+  invalidCells?: Record<string, string>;
+}
+
+export interface GridPastePayload {
+  startRow: number;
+  /** 矩阵第 N 列要写入的实际列下标（已排除隐藏列）。 */
+  columnIndexes: number[];
+  values: QueryCell[][];
 }
 
 /** 按表记忆的列布局：拖动后的宽度、隐藏列、固定前 N 列。 */
@@ -146,8 +160,11 @@ export function ResultGrid({
   onSetCellNull,
   onSetCellDefault,
   onRowRangeChange,
+  onDeleteRow,
   onExportRange,
   layoutKey,
+  onPasteCells,
+  invalidCells,
 }: ResultGridProps) {
   const gridRef = useRef<HTMLElement | null>(null);
   const readOnlySet = useMemo(() => new Set(readOnlyColumns), [readOnlyColumns]);
@@ -165,11 +182,183 @@ export function ResultGrid({
     x1: number;
     y1: number;
   } | null>(null);
+  const selectedRangeRef = useRef(selectedRange);
+  selectedRangeRef.current = selectedRange;
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setLayout(readLayout(layoutKey));
   }, [layoutKey]);
+
+  // 表数据页刚打开时，让网格拿到焦点再聚焦第一个可写单元格：
+  // 用户从对象树双击表后直接按 Ctrl+V 也能粘贴，而不是因为焦点还在树上被忽略。
+  // 只在首次加载/换表时执行，不抢 SQL 编辑器或弹窗输入框的焦点。
+  const autoFocused = useRef(false);
+  /** 打开表页后自动聚焦的焦点还没被用户改过：此时粘贴按“行尾追加”处理。 */
+  const autoPasteAtEnd = useRef(false);
+  const rowsLengthRef = useRef(rows.length);
+  rowsLengthRef.current = rows.length;
+  useEffect(() => {
+    autoFocused.current = false;
+    autoPasteAtEnd.current = false;
+  }, [layoutKey]);
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || autoFocused.current || !editable) return;
+    const visible = columns.filter((column) => !layout.hidden.includes(column.name));
+    const firstWritable = visible.findIndex((column) => !readOnlySet.has(column.name));
+    if (firstWritable < 0) return;
+
+    let cancelled = false;
+    let retry: number | null = null;
+    // 用户在打开后已经点了别处（例如继续浏览对象树）就不再抢焦点。
+    const interacted = () => {
+      cancelled = true;
+    };
+    document.addEventListener('pointerdown', interacted, { capture: true, once: true });
+    const focusGrid = () => {
+      if (cancelled || autoFocused.current || !element.isConnected) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.isContentEditable) return;
+      autoFocused.current = true;
+      autoPasteAtEnd.current = true;
+      element.focus();
+      const api = element as unknown as {
+        setCellsFocus?: (
+          start: { x: number; y: number },
+          end: { x: number; y: number },
+        ) => Promise<void>;
+      };
+      const focusCell = () => {
+        // 空表没有可聚焦的行；宿主焦点已足够让 Ctrl+V 的 paste 事件落到我们手里。
+        if (rowsLengthRef.current <= 0) return;
+        void api
+          .setCellsFocus?.({ x: firstWritable, y: 0 }, { x: firstWritable, y: 0 })
+          .catch(() => undefined);
+      };
+      focusCell();
+      // Stencil 初次渲染/数据到达后再确认一次焦点和单元格。
+      retry = window.setTimeout(() => {
+        if (cancelled || !element.isConnected) return;
+        focusCell();
+        if (document.activeElement !== element) {
+          const now = document.activeElement as HTMLElement | null;
+          if (!now?.isContentEditable) element.focus();
+        }
+      }, 300);
+    };
+    // 等表格数据和 Stencil 渲染稳定后再聚焦；过早 focus 会被后续渲染覆盖。
+    const timer = window.setTimeout(focusGrid, 200);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('pointerdown', interacted, { capture: true });
+      window.clearTimeout(timer);
+      if (retry !== null) window.clearTimeout(retry);
+    };
+  }, [editable, rows.length, columns, layout.hidden, readOnlySet]);
+
+  // 用户一旦在网格里点选或键盘移动到别的单元格，粘贴就按当前焦点改写，
+  // 而不是继续使用“打开页签时的行尾追加”语义。
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element) return;
+    const clear = () => {
+      autoPasteAtEnd.current = false;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (
+        [
+          'ArrowUp',
+          'ArrowDown',
+          'ArrowLeft',
+          'ArrowRight',
+          'Tab',
+          'Enter',
+          'Home',
+          'End',
+          'PageUp',
+          'PageDown',
+        ].includes(event.key)
+      ) {
+        clear();
+      }
+    };
+    element.addEventListener('pointerdown', clear, true);
+    element.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      element.removeEventListener('pointerdown', clear, true);
+      element.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, []);
+
+  // 空表没有数据行时 RevoGrid 不会挂载 overlay（也就没有 clipboard 组件），
+  // beforepasteapply 不会触发；这里直接接住网格宿主上的原生 paste，按行尾追加。
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || !editable || !onPasteCells || rows.length > 0) return;
+
+    const handler = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (!text) return;
+      const values = parseClipboardTsv(text).map((row) => row.map(normalizePastedValue));
+      while (
+        values.length > 0 &&
+        values[values.length - 1]!.every((value) => value === null)
+      ) {
+        values.pop();
+      }
+      if (values.length === 0) return;
+
+      const visible = columns.filter((column) => !layout.hidden.includes(column.name));
+      const firstWritable = visible.findIndex((column) => !readOnlySet.has(column.name));
+      if (firstWritable < 0) return;
+      const width = Math.max(...values.map((row) => row.length));
+      const columnIndexes = visible
+        .slice(firstWritable, firstWritable + width)
+        .map((column) => columns.indexOf(column));
+      if (columnIndexes.length === 0) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      onPasteCells({
+        startRow: 0,
+        columnIndexes,
+        values: values.map((row) => row.slice(0, columnIndexes.length)),
+      });
+    };
+
+    element.addEventListener('paste', handler, true);
+    return () => element.removeEventListener('paste', handler, true);
+  }, [editable, onPasteCells, rows.length, columns, layout.hidden, readOnlySet]);
+
+  // 追加待提交行（粘贴/新增行）后滚动到新行；否则数据在 200 行之外，
+  // 用户看不到任何变化，容易以为粘贴失败。
+  const previousInsertCount = useRef(0);
+  useEffect(() => {
+    const element = gridRef.current;
+    const count = insertRows.length;
+    if (!element || count <= previousInsertCount.current) {
+      previousInsertCount.current = count;
+      return;
+    }
+    previousInsertCount.current = count;
+    const target = Math.max(...insertRows);
+    const api = element as unknown as {
+      scrollToRow?: (row: number) => Promise<void>;
+    };
+    void api.scrollToRow?.(target).catch(() => undefined);
+  }, [insertRows]);
 
   const updateLayout = (next: GridColumnLayout) => {
     setLayout(next);
@@ -222,7 +411,24 @@ export function ResultGrid({
           ...(editor ? { editor } : {}),
           // 普通查询结果使用网格本地排序；表数据页由列头点击触发服务端 ORDER BY。
           sortable: !onHeaderClick,
-          cellProperties: ((props: never) => cellProperties(props, dateLike)) as never,
+          cellProperties: ((props: {
+            rowIndex?: number;
+            model?: Record<string, unknown>;
+            prop?: string;
+          }) => {
+            const base: Record<string, unknown> = cellProperties(props, dateLike) ?? {};
+            const reason =
+              props.rowIndex === undefined
+                ? undefined
+                : invalidCells?.[`${props.rowIndex}:${index}`];
+            if (!reason) return base;
+            return {
+              ...base,
+              class: [base.class, 'grid-cell-invalid'].filter(Boolean).join(' '),
+              style: { ...(base.style as Record<string, unknown> | undefined), color: 'var(--danger)' },
+              title: reason,
+            };
+          }) as never,
           readonly:
             !editable || readOnlySet.has(column.name)
               ? true
@@ -254,6 +460,7 @@ export function ResultGrid({
     layout.pinned,
     onHeaderClick,
     requiredSet,
+    invalidCells,
   ]);
 
   const source = useMemo(
@@ -307,6 +514,110 @@ export function ResultGrid({
     element.addEventListener('afteredit', handler);
     return () => element.removeEventListener('afteredit', handler);
   }, [editable, onCellChange, onCellsChange]);
+
+  // Excel / TSV 粘贴：RevoGrid 原生实现会把粘贴区域裁剪到现有行数，
+  // 空表或末尾之外的内容会被静默丢弃。这里接管网格内的粘贴，
+  // 由上层决定哪些行改写、哪些行追加为待提交新增行。
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || !editable || !onPasteCells) return;
+
+    const handler = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          parsed?: string[][];
+          dataText?: string;
+          event?: ClipboardEvent;
+        }>
+      ).detail;
+      if (!detail) return;
+
+      const path = detail.event?.composedPath?.() ?? [];
+      const inEditor = path.some((node) => {
+        if (!(node instanceof HTMLElement)) return false;
+        return (
+          node.tagName === 'INPUT' ||
+          node.tagName === 'TEXTAREA' ||
+          node.tagName === 'SELECT' ||
+          node.isContentEditable
+        );
+      });
+      const inGrid = path.includes(element);
+      // 表数据页里，焦点可能停在标签栏/工具栏按钮上；只要还在同一个 workspace，
+      // 就把粘贴交给表数据页处理，而不是静默丢弃。
+      const workspace = element.closest('.workspace');
+      const target = path[0];
+      const inWorkspace =
+        workspace !== null && target instanceof Node && workspace.contains(target);
+      // 粘贴目标是 SQL 编辑器或单元格编辑器时，只取消 RevoGrid 的写入，
+      // 保留浏览器默认粘贴，避免同一段文本同时落进编辑器和网格。
+      if (inEditor || (!inGrid && !inWorkspace)) {
+        event.preventDefault();
+        return;
+      }
+
+      const rawMatrix = detail.dataText
+        ? parseClipboardTsv(detail.dataText)
+        : (detail.parsed ?? []);
+      if (!Array.isArray(rawMatrix) || rawMatrix.length === 0) return;
+      const values = rawMatrix.map((row) => row.map(normalizePastedValue));
+      // Excel 区域末尾常带空行；整行为空不生成新增行。
+      while (
+        values.length > 0 &&
+        values[values.length - 1]!.every((value) => value === null)
+      ) {
+        values.pop();
+      }
+      if (values.length === 0) return;
+
+      const visible = columns
+        .map((column, index) => ({ index, hidden: layout.hidden.includes(column.name) }))
+        .filter((item) => !item.hidden)
+        .map((item) => item.index);
+      if (visible.length === 0) return;
+      const width = Math.max(...values.map((row) => row.length));
+
+      // 先取消 RevoGrid 默认写入（它会直接改内部 store，绕过上层待提交状态），
+      // 再读取实时焦点。React 的 focusedCell 可能落后于网格内部焦点。
+      event.preventDefault();
+      detail.event?.preventDefault();
+
+      const api = element as unknown as {
+        getFocused?: () => Promise<{ cell?: { x: number; y: number } } | null>;
+      };
+      void (async () => {
+        const live = await api.getFocused?.().catch(() => null);
+        const firstWritable = visible.findIndex(
+          (index) => !readOnlySet.has(columns[index]!.name),
+        );
+        // 打开表页后的自动焦点还没被用户改过时，粘贴按“行尾追加”处理，
+        // 避免把 Excel 数据直接覆盖到第一行；用户点过单元格后按当前位置写入。
+        const pasteAtEnd = autoPasteAtEnd.current;
+        const startRow = pasteAtEnd
+          ? rows.length
+          : (live?.cell?.y ?? focusedCell?.rowIndex ?? rows.length);
+        const startVisible = pasteAtEnd
+          ? firstWritable
+          : live?.cell !== undefined
+            ? live.cell.x
+            : focusedCell
+              ? visible.indexOf(focusedCell.columnIndex)
+              : firstWritable;
+        if (startRow === undefined || startVisible < 0) return;
+
+        const columnIndexes = visible.slice(startVisible, startVisible + width);
+        if (columnIndexes.length === 0) return;
+        onPasteCells({
+          startRow,
+          columnIndexes,
+          values: values.map((row) => row.slice(0, columnIndexes.length)),
+        });
+      })();
+    };
+
+    element.addEventListener('beforepasteapply', handler);
+    return () => element.removeEventListener('beforepasteapply', handler);
+  }, [editable, onPasteCells, focusedCell, columns, rows.length, layout.hidden, readOnlySet]);
 
   // 列头点击交给上层生成 ORDER BY（服务端排序）。
   useEffect(() => {
@@ -474,6 +785,58 @@ export function ResultGrid({
     element.addEventListener('beforerange', handler);
     return () => element.removeEventListener('beforerange', handler);
   }, [onRowRangeChange]);
+
+  // F2 进入编辑、Delete 删除选中行（PRD §3.2）；编辑器内不拦截。
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || !editable) return;
+
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          'input, textarea, select, [contenteditable="true"], .revogr-edit',
+        )
+      ) {
+        return;
+      }
+      if (event.key === 'F2') {
+        event.preventDefault();
+        const fallback =
+          focusedCell ??
+          (selectedRangeRef.current
+            ? {
+                rowIndex: selectedRangeRef.current.y,
+                columnIndex: selectedRangeRef.current.x,
+              }
+            : null);
+        const gridApi = element as unknown as {
+          getFocused?: () => Promise<{
+            cell?: { x: number; y: number };
+          } | null>;
+          setCellEdit: (row: number, prop: string) => Promise<void>;
+        };
+        void (async () => {
+          // 焦点状态可能还没同步到 React；优先读 RevoGrid 自己的当前焦点。
+          const live = await gridApi.getFocused?.().catch(() => null);
+          const cell = live?.cell ?? fallback;
+          if (!cell) return;
+          const rowIndex = 'rowIndex' in cell ? cell.rowIndex : cell.y;
+          const columnIndex = 'columnIndex' in cell ? cell.columnIndex : cell.x;
+          await gridApi.setCellEdit(rowIndex, `c${columnIndex}`);
+        })();
+        return;
+      }
+      if (event.key === 'Delete') {
+        if (!onDeleteRow) return;
+        event.preventDefault();
+        onDeleteRow();
+      }
+    };
+
+    element.addEventListener('keydown', handler);
+    return () => element.removeEventListener('keydown', handler);
+  }, [editable, focusedCell, onDeleteRow]);
 
   // 列宽拖动结束后按表记忆。
   useEffect(() => {

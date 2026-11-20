@@ -15,7 +15,6 @@ import type {
   QueryScriptStatement,
   QuerySource,
   SchemaObject,
-  TableColumnMeta,
   TableDetail,
   TableEdit,
   TableExtras,
@@ -42,17 +41,20 @@ import { buildTablePageQuery, buildTablePreviewSql, quoteIdent } from '@shared/d
 import type { TableFilter, TableSort } from '@shared/dialect/identifiers';
 import { inspectDangerousSql, type DangerMatch } from '@shared/dialect/safety';
 import { explainErrorText, explainQueryError } from '@shared/errors';
+import {
+  normalizePastedValue,
+  parseClipboardTsv,
+  pastedValueError,
+} from '@shared/table-paste';
 import { serializeConnections } from '@shared/connection-export';
+import type { GridPastePayload } from './features/grid/ResultGrid';
 import { ConnectionDialog } from './features/connections/ConnectionDialog';
 import { DangerConfirmDialog } from './components/DangerConfirmDialog';
 import { TableActionDialog, type TableActionMode } from './components/TableActionDialog';
 import { TableStructureDialog } from './components/TableStructureDialog';
-import { AddColumnDialog } from './components/AddColumnDialog';
 import { AgentTabPanel } from './components/AgentTabPanel';
-import { AlterColumnDialog } from './components/AlterColumnDialog';
 import { CellViewerDialog } from './components/CellViewerDialog';
 import { CreateViewDialog } from './components/CreateViewDialog';
-import { DropColumnDialog } from './components/DropColumnDialog';
 import { IndexDialog, type IndexMode } from './components/IndexDialog';
 import { ExportDialog } from './components/ExportDialog';
 import { HistoryDialog } from './components/HistoryDialog';
@@ -304,6 +306,8 @@ interface PendingTableEdits {
 interface EditSnapshot {
   rows: QueryCell[][];
   pending: PendingTableEdits;
+  /** 粘贴校验标记；撤销时一并恢复。 */
+  invalid: Record<string, string>;
 }
 
 function emptyPendingTableEdits(): PendingTableEdits {
@@ -325,6 +329,9 @@ type TransactionAction = 'begin' | 'commit' | 'rollback' | null;
 function transactionAction(sql: string): TransactionAction {
   const cleaned = sql
     .replace(/^\s*(?:--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|\s)+/g, '')
+    .trim()
+    // 事务面板下发的语句带分号（`COMMIT;` / `ROLLBACK;`），不剥掉会识别不到。
+    .replace(/;+\s*$/, '')
     .trim();
   const words = cleaned.split(/\s+/);
   const first = words[0]?.toUpperCase() ?? '';
@@ -342,6 +349,8 @@ function beginTransactionSql(dialect: DatabaseType): string {
   if (dialect === 'sqlite') return 'BEGIN;';
   return 'START TRANSACTION;';
 }
+
+const EMPTY_INVALID_CELLS: Record<string, string> = {};
 
 const IDLE_TRANSACTION: TransactionRuntime = {
   state: 'idle',
@@ -370,6 +379,23 @@ function shiftPendingRows(state: PendingTableEdits, removedIndex: number): Pendi
     inserts: shift(state.inserts),
     deletes: shift(state.deletes),
   };
+}
+
+/** 删除一行后，粘贴校验标记的行号整体前移。 */
+function shiftInvalidCells(
+  map: Record<string, string>,
+  removedIndex: number,
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [key, reason] of Object.entries(map)) {
+    const separator = key.indexOf(':');
+    const row = Number(key.slice(0, separator));
+    const column = key.slice(separator + 1);
+    if (!Number.isInteger(row) || separator < 0) continue;
+    if (row < removedIndex) next[key] = reason;
+    else if (row > removedIndex) next[`${row - 1}:${column}`] = reason;
+  }
+  return next;
 }
 
 /** 表数据页当前排序；sorts 优先，兼容旧草稿里的单列 sort。 */
@@ -461,6 +487,10 @@ export default function App() {
     rowIndex: number;
   } | null>(null);
   const [editHistory, setEditHistory] = useState<Record<string, EditSnapshot[]>>({});
+  /** 粘贴后按 `${rowIndex}:${columnIndex}` 记录的类型校验错误，网格据此标红。 */
+  const [invalidCellsByTab, setInvalidCellsByTab] = useState<
+    Record<string, Record<string, string>>
+  >({});
   const [noPkMode, setNoPkMode] = useState<Record<string, boolean>>({});
   /** 主键修改是高风险操作，必须为每个标签显式开启。 */
   const [pkEditMode, setPkEditMode] = useState<Record<string, boolean>>({});
@@ -480,6 +510,11 @@ export default function App() {
     match: DangerMatch;
   } | null>(null);
   const [createViewOpen, setCreateViewOpen] = useState(false);
+  /** 新建视图弹窗执行 DDL 的目标标签与库（从对象树任意库发起时不能只看 activeTab）。 */
+  const [createViewTarget, setCreateViewTarget] = useState<{
+    tabId: string;
+    database?: string;
+  } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportOverride, setExportOverride] = useState<{
     columns: import('@shared/ipc-contract').QueryColumn[];
@@ -490,19 +525,15 @@ export default function App() {
   const [tableAction, setTableAction] = useState<{
     mode: TableActionMode;
     name: string;
-  } | null>(null);
-  const [addColumnTarget, setAddColumnTarget] = useState<string | null>(null);
-  const [alterColumnTarget, setAlterColumnTarget] = useState<{
-    mode: 'rename' | 'modify';
-    table: string;
-    columns: TableColumnMeta[];
-    detail?: TableDetail;
+    /** 触发器所属表（启用/禁用触发器用）。 */
+    tableName?: string;
   } | null>(null);
   const [tableStructure, setTableStructure] = useState<TableDetail | null>(null);
-  const [dropColumnTarget, setDropColumnTarget] = useState<string | null>(null);
   const [indexAction, setIndexAction] = useState<{
     mode: IndexMode;
     table: string;
+    /** 从索引节点右键删除时带入索引名。 */
+    indexName?: string;
   } | null>(null);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
@@ -629,7 +660,6 @@ export default function App() {
   };
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
-  const restoredSessions = useRef(false);
 
   useEffect(() => {
     tabsRef.current = tabs;
@@ -783,36 +813,8 @@ export default function App() {
     };
   }, []);
 
-  // 重启后恢复标签会话与结果：重新打开保存连接并执行草稿 SQL（不缓存旧结果）。
-  useEffect(() => {
-    if (restoredSessions.current || connections.length === 0) return;
-    restoredSessions.current = true;
-    const candidates = tabs
-      .filter(
-        (tab) =>
-          !tab.kind &&
-          tab.connectionId !== null &&
-          tab.sql.trim().length > 0 &&
-          connections.some((connection) => connection.id === tab.connectionId),
-      )
-      .slice(0, 5);
-    if (candidates.length === 0) return;
-
-    void (async () => {
-      for (const tab of candidates) {
-        const connection = connections.find((item) => item.id === tab.connectionId);
-        if (!connection) continue;
-        const ready = await openTabSession(
-          tab,
-          connection.id,
-          connection.input.type === 'sqlite' ? undefined : tab.table?.database,
-        );
-        if (!ready) continue;
-        await loadTableMeta(tab);
-        await runQuery(tab.sql, tab, tab.table?.params, { internal: true });
-      }
-    })();
-  }, [connections]);
+  // 启动只恢复标签与 SQL，不自动建连：连接由标签右键「连接」或首次执行/操作按需建立，
+  // 避免打开应用即静默连上（尤其是生产库）所有绑定连接。
 
   useEffect(() => {
     return () => {
@@ -873,6 +875,21 @@ export default function App() {
       }
     }
     return states;
+  }, [tabs, sessions]);
+  /** 每个连接最近一次会话失败原因；状态点悬停和树内错误都用它。 */
+  const connectionErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    const record = (connectionId: string | null | undefined, runtime: SessionRuntime | undefined) => {
+      if (!connectionId || !runtime || runtime.status !== 'error') return;
+      errors[connectionId] ??= runtime.message ?? '连接失败';
+    };
+    for (const tab of tabs) record(tab.connectionId, sessions[tab.id]);
+    for (const [sessionId, runtime] of Object.entries(sessions)) {
+      if (sessionId.startsWith('browse-')) {
+        record(sessionId.slice('browse-'.length), runtime);
+      }
+    }
+    return errors;
   }, [tabs, sessions]);
   const activeDatabases = databasesByTab[activeTab.id] ?? [];
   const activeVersion = sessions[activeTab.id]?.version ?? '';
@@ -960,13 +977,17 @@ export default function App() {
     return labels;
   }, [tabs, connections, currentDatabaseByTab]);
   const tabStatuses = useMemo(() => {
-    const statuses: Record<string, { running: boolean; error: boolean; dirty: boolean }> = {};
+    const statuses: Record<
+      string,
+      { running: boolean; error: boolean; dirty: boolean; connection: SessionStatus }
+    > = {};
     for (const tab of tabs) {
       const runtime = sessions[tab.id];
       statuses[tab.id] = {
         running: Boolean(runningTabs[tab.id]),
         error: runtime?.status === 'error' || Boolean(runs[tab.id]?.error),
         dirty: Boolean(tab.dirty) || countPendingEdits(pendingTableEdits[tab.id]) > 0,
+        connection: runtime?.status ?? 'idle',
       };
     }
     return statuses;
@@ -981,6 +1002,7 @@ export default function App() {
       const connectionId = sessionId.slice('browse-'.length);
       views[connectionId] = {
         status: runtime.status,
+        ...(runtime.message ? { message: runtime.message } : {}),
         schemaObjects: schemas[sessionId] ?? [],
         databases: databasesByTab[sessionId] ?? [],
         objectsByDatabase: dbObjectsByTab[sessionId] ?? {},
@@ -1006,6 +1028,7 @@ export default function App() {
   const running = Boolean(runningTabs[activeTab.id]);
   const activeTransaction = transactions[activeTab.id] ?? IDLE_TRANSACTION;
   const activeTableMeta = tableMetas[activeTab.id] ?? null;
+  const activeInvalidCells = invalidCellsByTab[activeTab.id] ?? EMPTY_INVALID_CELLS;
   const pendingEditCount = countPendingEdits(pendingTableEdits[activeTab.id]);
   const committing = Boolean(committingTabs[activeTab.id]);
   const canUndoEdit = (editHistory[activeTab.id]?.length ?? 0) > 0;
@@ -1033,7 +1056,11 @@ export default function App() {
     setEditHistory((current) => {
       const list = [
         ...(current[tabId] ?? []),
-        { rows: run.rows.map((row) => [...row]), pending: structuredClone(pending) },
+        {
+          rows: run.rows.map((row) => [...row]),
+          pending: structuredClone(pending),
+          invalid: { ...(invalidCellsByTab[tabId] ?? {}) },
+        },
       ];
       return { ...current, [tabId]: list.slice(-30) };
     });
@@ -1149,6 +1176,13 @@ export default function App() {
   const switchDatabase = async (tabId: string, database: string): Promise<boolean> => {
     const api = window.dbcraft;
     if (!api) return false;
+    // SQLite 是单库（main/main 之外的 ATTACH 也不通过 USE 切换），直接当作已切换。
+    const tab = tabs.find((item) => item.id === tabId);
+    const connectionId = tabId.startsWith('browse-')
+      ? tabId.slice('browse-'.length)
+      : tab?.connectionId;
+    const connection = connections.find((item) => item.id === connectionId);
+    if (connection?.input.type === 'sqlite') return true;
     invalidateUserMetadata(tabId);
     try {
       const result = await api.schema.useDatabase(tabId, database);
@@ -1195,12 +1229,13 @@ export default function App() {
     database: string,
     table: string,
     sessionId: string = activeTab.id,
+    force = false,
   ) => {
     const api = window.dbcraft;
     if (!api) return;
     const tabId = sessionId;
     const key = tableExtrasKey(database, table);
-    if (tableExtrasByTab[tabId]?.[key]) return;
+    if (!force && tableExtrasByTab[tabId]?.[key]) return;
 
     setTableExtrasLoadingKey(key);
     try {
@@ -1225,7 +1260,8 @@ export default function App() {
     const api = window.dbcraft;
     if (!api || !tab.table) return null;
 
-    if (tab.table.database) {
+    const tabConnection = connectionForTab(tab);
+    if (tab.table.database && tabConnection?.input.type !== 'sqlite') {
       const switched = await ensureDatabase(tab.id, tab.table.database);
       if (!switched) return null;
     }
@@ -1342,8 +1378,12 @@ export default function App() {
           if (!target) return current;
           return [target, ...current.filter((item) => item.id !== connectionId)];
         });
-        if (database) {
-          const used = await api.schema.useDatabase(tab.id, database);
+        // SQLite 没有 USE；即使调用方传了 main，也不能走切库 IPC。
+        const connection = connections.find((item) => item.id === connectionId);
+        const databaseToUse =
+          connection?.input.type === 'sqlite' ? undefined : database;
+        if (databaseToUse) {
+          const used = await api.schema.useDatabase(tab.id, databaseToUse);
           if (!used.ok) {
             showNotice('error', used.message);
             return false;
@@ -1396,6 +1436,8 @@ export default function App() {
   const refreshBrowse = (connectionId: string) => {
     const id = browseSessionId(connectionId);
     if (sessions[id]?.status === 'ready') {
+      // 刷新对象列表时必须同时丢掉表子对象缓存，否则约束/索引还是旧的。
+      setTableExtrasByTab((current) => ({ ...current, [id]: {} }));
       void loadSchema(id, showSystemObjects[id] ?? false);
     }
     // 对象树顶部的刷新按钮同时刷新对应 MSSQL 连接的 Agent 作业。
@@ -1403,6 +1445,14 @@ export default function App() {
     if (connection?.input.type === 'mssql' && connectionId === activeTab.connectionId) {
       void loadAgentJobs();
     }
+  };
+
+  /** 只刷新对象树里某个数据库，不动其他库的缓存与当前库。 */
+  const refreshBrowseDatabase = (connectionId: string, database: string) => {
+    const id = browseSessionId(connectionId);
+    if (sessions[id]?.status !== 'ready') return;
+    setTableExtrasByTab((current) => ({ ...current, [id]: {} }));
+    void loadDatabaseObjects(id, database, { force: true });
   };
 
   const selectBrowseDatabase = async (
@@ -1461,7 +1511,16 @@ export default function App() {
       !activeTab.kind &&
       !activeTab.table
     ) {
-      if (database) void ensureDatabase(activeTab.id, database);
+      if (database && connection.input.type !== 'sqlite') {
+        const status = sessions[activeTab.id]?.status;
+        if (status === 'ready') {
+          void ensureDatabase(activeTab.id, database);
+        } else if (status === 'idle' || status === 'error') {
+          // 没有可用会话时直接按目标库打开，避免对未打开的会话执行 USE
+          // 弹出「会话未打开」；opening 状态的在途打开已经带上了目标库。
+          void openTabSession(activeTab, connection.id, database);
+        }
+      }
       updateSql(buildTablePreviewSql(connection.input.type, name));
       showNotice('info', `已填入 ${name} 查询，按 Ctrl+Enter 执行。`);
       return;
@@ -1489,18 +1548,19 @@ export default function App() {
   ) => {
     const connection = connections.find((item) => item.id === connectionId);
     if (!connection) return;
+    const tableDatabase = connection.input.type === 'sqlite' ? undefined : database;
     const pageSize = 200;
     const number = tabCounter.current;
     tabCounter.current += 1;
     const tab: QueryTab = {
       id: `query-${number}`,
-      title: `表 · ${database ? `${database}.` : ''}${name}`,
+      title: `表 · ${tableDatabase ? `${tableDatabase}.` : ''}${name}`,
       sql: '',
       connectionId,
       table: {
         name,
         kind,
-        ...(database ? { database } : {}),
+        ...(tableDatabase ? { database: tableDatabase } : {}),
         page: 0,
         pageSize,
       },
@@ -1515,7 +1575,7 @@ export default function App() {
     const ready = await openTabSession(
       tab,
       connectionId,
-      connection.input.type === 'sqlite' ? undefined : database,
+      connection.input.type === 'sqlite' ? undefined : tableDatabase,
     );
     if (!ready) return;
     const meta = await loadTableMeta(tab);
@@ -1540,17 +1600,24 @@ export default function App() {
   };
 
   /** 为 browse-only 连接的对象操作准备一个活动 tab；返回是否可用。 */
-  const ensureConnectionTab = async (connectionId: string): Promise<boolean> => {
+  /**
+   * 找到/创建某个保存连接可用的查询标签，并返回它。
+   * 树上的「新建视图」需要拿到具体 tab 才能先切库；其他调用只关心是否成功。
+   */
+  const ensureQueryTabForConnection = async (
+    connectionId: string,
+  ): Promise<QueryTab | null> => {
     const connection = connections.find((item) => item.id === connectionId);
     if (!connection) {
       showNotice('error', '保存连接已删除，无法执行该操作。');
-      return false;
+      return null;
     }
     if (activeTab.connectionId === connectionId && !activeTab.kind) {
       if (sessions[activeTab.id]?.status !== 'ready') {
-        return openTabSession(activeTab, connection.id);
+        const ok = await openTabSession(activeTab, connection.id);
+        return ok ? activeTab : null;
       }
-      return true;
+      return activeTab;
     }
     const bound = tabs.find(
       (tab) => tab.connectionId === connectionId && !tab.kind && !tab.table,
@@ -1558,9 +1625,10 @@ export default function App() {
     if (bound) {
       setActiveTabId(bound.id);
       if (sessions[bound.id]?.status !== 'ready') {
-        return openTabSession(bound, connection.id);
+        const ok = await openTabSession(bound, connection.id);
+        return ok ? bound : null;
       }
-      return true;
+      return bound;
     }
     const number = tabCounter.current;
     tabCounter.current += 1;
@@ -1572,8 +1640,12 @@ export default function App() {
     };
     setTabs((current) => [...current, tab]);
     setActiveTabId(tab.id);
-    return openTabSession(tab, connection.id);
+    const ok = await openTabSession(tab, connection.id);
+    return ok ? tab : null;
   };
+
+  const ensureConnectionTab = async (connectionId: string): Promise<boolean> =>
+    (await ensureQueryTabForConnection(connectionId)) !== null;
 
   const runQuery = async (
     overrideSql?: string,
@@ -1649,7 +1721,14 @@ export default function App() {
 
     let ready = sessions[tab.id]?.status === 'ready';
     if (!ready) {
-      ready = await openTabSession(tab, connection.id);
+      // sessions 是本次渲染的快照；刚在同一个异步流程里打开的会话还没提交到 state，
+      // 这里会再开一次连接。必须带上标签自己的目标库，否则会退回连接的默认库。
+      ready = await openTabSession(
+        tab,
+        connection.id,
+        tab.table?.database ??
+          (connection.input.type === 'sqlite' ? undefined : currentDatabaseByTab[tab.id]),
+      );
     }
     if (!ready) return;
 
@@ -2061,19 +2140,19 @@ export default function App() {
     void runQuery('ROLLBACK;', activeTab);
   };
 
-  /** 批量单元格修改（单格编辑与多行粘贴共用），累积为待提交 UPDATE/INSERT。 */
-  const applyCellChanges = (
+  /** 把一组单元格变化写入 rows/state；aborted 表示整批应放弃（例如定位不到主键）。 */
+  const applyChangeSet = (
+    rows: QueryCell[][],
+    state: PendingTableEdits,
     changes: Array<{ rowIndex: number; columnIndex: number; value: QueryCell }>,
-  ) => {
+  ): { changed: boolean; aborted: boolean } => {
     const tab = activeTab;
     const meta = tableMetas[tab.id];
     const run = runs[tab.id];
-    if (!tab.table || !meta || !run || changes.length === 0 || !tableEditable) return;
+    if (!tab.table || !meta || !run || changes.length === 0 || !tableEditable) {
+      return { changed: false, aborted: false };
+    }
 
-    const state: PendingTableEdits = structuredClone(
-      pendingTableEdits[tab.id] ?? emptyPendingTableEdits(),
-    );
-    const rows = run.rows.map((row) => [...row]);
     let changed = false;
 
     for (const change of changes) {
@@ -2109,7 +2188,7 @@ export default function App() {
         );
         if (keyIndexes.some((index) => index < 0)) {
           showNotice('error', '无法定位主键列，已取消本次编辑。');
-          return;
+          return { changed: false, aborted: true };
         }
         meta.primaryKey.forEach((name, index) => {
           keys[name] = row[keyIndexes[index]!] ?? null;
@@ -2154,7 +2233,24 @@ export default function App() {
       }
     }
 
-    if (!changed) return;
+    return { changed, aborted: false };
+  };
+
+  /** 单格 / 原生多行编辑（非 Excel 粘贴路径），累积为待提交 UPDATE/INSERT。 */
+  const applyCellChanges = (
+    changes: Array<{ rowIndex: number; columnIndex: number; value: QueryCell }>,
+  ) => {
+    const tab = activeTab;
+    const meta = tableMetas[tab.id];
+    const run = runs[tab.id];
+    if (!tab.table || !meta || !run || changes.length === 0 || !tableEditable) return;
+
+    const state: PendingTableEdits = structuredClone(
+      pendingTableEdits[tab.id] ?? emptyPendingTableEdits(),
+    );
+    const rows = run.rows.map((row) => [...row]);
+    const result = applyChangeSet(rows, state, changes);
+    if (result.aborted || !result.changed) return;
 
     snapshotTableEdit(tab.id);
     setRuns((current) => {
@@ -2163,6 +2259,164 @@ export default function App() {
       return { ...current, [tab.id]: { ...target, rows } };
     });
     setPendingTableEdits((current) => ({ ...current, [tab.id]: state }));
+
+    // 用户已经手动改过的单元格不再保留粘贴校验标记。
+    setInvalidCellsByTab((current) => {
+      const map = current[tab.id];
+      if (!map) return current;
+      const next = { ...map };
+      let removed = false;
+      for (const change of changes) {
+        const key = `${change.rowIndex}:${change.columnIndex}`;
+        if (key in next) {
+          delete next[key];
+          removed = true;
+        }
+      }
+      return removed ? { ...current, [tab.id]: next } : current;
+    });
+  };
+
+  /**
+   * Excel / TSV 粘贴：从焦点单元格开始改写；超出当前行数时追加待提交新增行。
+   * 空白单元格对新增行表示「使用默认值」，对已有行表示 NULL。
+   */
+  const pasteTableCells = (paste: GridPastePayload) => {
+    const tab = activeTab;
+    const meta = tableMetas[tab.id];
+    const run = runs[tab.id];
+    if (!tab.table || !meta || !run || !tableEditable || running || paste.values.length === 0) {
+      return;
+    }
+
+    const startRow = Math.max(0, paste.startRow);
+    const state: PendingTableEdits = structuredClone(
+      pendingTableEdits[tab.id] ?? emptyPendingTableEdits(),
+    );
+    const rows = run.rows.map((row) => [...row]);
+    const firstNewRow = rows.length;
+    let appended = 0;
+    const lastRow = startRow + paste.values.length - 1;
+    while (rows.length <= lastRow) {
+      const index = rows.length;
+      rows.push(run.columns.map(() => null));
+      state.inserts[index] = {};
+      appended += 1;
+    }
+
+    const changes: Array<{ rowIndex: number; columnIndex: number; value: QueryCell }> = [];
+    const invalid: Record<string, string> = {};
+    for (let rowOffset = 0; rowOffset < paste.values.length; rowOffset += 1) {
+      const rowIndex = startRow + rowOffset;
+      const rowValues = paste.values[rowOffset] ?? [];
+      // 无主键高风险模式只允许改动新增行。
+      if (activeNoPkMode && rowIndex < (editableFromRow ?? firstNewRow)) continue;
+      const isInsert = state.inserts[rowIndex] !== undefined;
+
+      for (let columnOffset = 0; columnOffset < rowValues.length; columnOffset += 1) {
+        const columnIndex = paste.columnIndexes[columnOffset];
+        if (columnIndex === undefined) continue;
+        const value = rowValues[columnOffset] ?? null;
+        // 新增行留空 = 交给数据库默认值，不显式写 NULL。
+        if (value === null && isInsert) continue;
+
+        const column = run.columns[columnIndex];
+        if (!column) continue;
+        const columnMeta = meta.columns.find((item) => item.name === column.name);
+        if (!columnMeta) continue;
+        const identityEditable =
+          activeIdentityInsert && columnMeta.autoIncrement && isInsert;
+        const readOnly =
+          columnMeta.readOnly &&
+          !(activePkEditMode && columnMeta.primaryKey) &&
+          !identityEditable;
+        if (readOnly) continue;
+
+        changes.push({ rowIndex, columnIndex, value });
+        const reason = pastedValueError(columnMeta.declaredType, value);
+        if (reason) invalid[`${rowIndex}:${columnIndex}`] = reason;
+      }
+    }
+
+    const result = applyChangeSet(rows, state, changes);
+    if (result.aborted) return;
+    if (!result.changed && appended === 0) return;
+
+    snapshotTableEdit(tab.id);
+    setRuns((current) => {
+      const target = current[tab.id];
+      if (!target) return current;
+      return {
+        ...current,
+        [tab.id]: { ...target, rows, rowCount: target.rowCount + appended },
+      };
+    });
+    setPendingTableEdits((current) => ({ ...current, [tab.id]: state }));
+    setInvalidCellsByTab((current) => ({ ...current, [tab.id]: invalid }));
+    if (appended > 0) {
+      setTableSelection((current) => ({ ...current, [tab.id]: firstNewRow }));
+    }
+
+    const invalidCount = Object.keys(invalid).length;
+    showNotice(
+      invalidCount > 0 ? 'error' : 'info',
+      invalidCount > 0
+        ? `已粘贴 ${paste.values.length} 行${appended > 0 ? `（新增 ${appended} 行）` : ''}，${invalidCount} 个单元格类型不匹配，已标红。`
+        : `已粘贴 ${paste.values.length} 行${appended > 0 ? `，新增 ${appended} 行待提交` : '待提交修改'}。`,
+    );
+  };
+
+  /** 工具栏「粘贴」：读取系统剪贴板；没有单元格焦点时从行尾第一列开始追加。 */
+  const pasteFromClipboard = async () => {
+    const tab = activeTab;
+    const meta = tableMetas[tab.id];
+    const run = runs[tab.id];
+    if (!tab.table || !meta || !run || !tableEditable) return;
+
+    let text = '';
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      showNotice('error', '无法读取剪贴板，请检查系统剪贴板权限。');
+      return;
+    }
+    if (!text) {
+      showNotice('info', '剪贴板没有可粘贴的文本。');
+      return;
+    }
+
+    const values = parseClipboardTsv(text).map((row) => row.map(normalizePastedValue));
+    // Excel 区域末尾常带空行；整行为空不生成新增行。
+    while (
+      values.length > 0 &&
+      values[values.length - 1]!.every((value) => value === null)
+    ) {
+      values.pop();
+    }
+    if (values.length === 0) {
+      showNotice('info', '剪贴板没有可粘贴的单元格。');
+      return;
+    }
+
+    // 工具栏是批量导入入口：始终追加到行尾，避免自动焦点或当前选中行
+    // 让 Excel 数据覆盖已有记录；按位置覆盖用网格内 Ctrl+V。
+    const startRow = run.rows.length;
+    const startColumn = Math.max(
+      0,
+      run.columns.findIndex((column) => {
+        const columnMeta = meta.columns.find((item) => item.name === column.name);
+        return columnMeta !== undefined && !columnMeta.readOnly;
+      }),
+    );
+    const columnIndexes = run.columns
+      .map((_, index) => index)
+      .filter((index) => index >= startColumn);
+    if (columnIndexes.length === 0) {
+      showNotice('error', '当前列之后没有可写入的列。');
+      return;
+    }
+
+    pasteTableCells({ startRow, columnIndexes, values });
   };
 
   const editTableCell = (rowIndex: number, columnIndex: number, value: QueryCell) => {
@@ -2374,6 +2628,11 @@ export default function App() {
         delete next[tab.id];
         return next;
       });
+      setInvalidCellsByTab((current) => {
+        const next = { ...current };
+        delete next[tab.id];
+        return next;
+      });
       showNotice(
         'info',
         result.skipped
@@ -2399,6 +2658,11 @@ export default function App() {
     if (!tab.table) return;
 
     setPendingTableEdits((current) => {
+      const next = { ...current };
+      delete next[tab.id];
+      return next;
+    });
+    setInvalidCellsByTab((current) => {
       const next = { ...current };
       delete next[tab.id];
       return next;
@@ -2519,6 +2783,7 @@ export default function App() {
       pendingTableEdits[tab.id] ?? emptyPendingTableEdits(),
     );
     const rows = run.rows.map((row) => [...row]);
+    let invalid = { ...(invalidCellsByTab[tab.id] ?? {}) };
 
     for (const index of [...indices].sort((left, right) => right - left)) {
       const isInsert = state.inserts[index] !== undefined;
@@ -2531,6 +2796,7 @@ export default function App() {
       }
       rows.splice(index, 1);
       state = shiftPendingRows(state, index);
+      invalid = shiftInvalidCells(invalid, index);
       if (keys) state.deletes[index] = keys;
     }
 
@@ -2547,6 +2813,7 @@ export default function App() {
       };
     });
     setPendingTableEdits((current) => ({ ...current, [tab.id]: state }));
+    setInvalidCellsByTab((current) => ({ ...current, [tab.id]: invalid }));
     setTableSelection((current) => ({ ...current, [tab.id]: null }));
     setTableSelectionRange((current) => ({ ...current, [tab.id]: null }));
   };
@@ -2568,6 +2835,7 @@ export default function App() {
       };
     });
     setPendingTableEdits((current) => ({ ...current, [tab.id]: snapshot.pending }));
+    setInvalidCellsByTab((current) => ({ ...current, [tab.id]: { ...snapshot.invalid } }));
     setTableSelection((current) => ({ ...current, [tab.id]: null }));
   };
 
@@ -2630,7 +2898,7 @@ export default function App() {
     );
   };
 
-  const addTab = (connectionId?: string) => {
+  const addTab = (connectionId?: string, databaseOverride?: string) => {
     const number = tabCounter.current;
     tabCounter.current += 1;
 
@@ -2648,9 +2916,10 @@ export default function App() {
 
     if (connection) {
       const database =
-        connection.id === activeTab.connectionId
+        databaseOverride ??
+        (connection.id === activeTab.connectionId
           ? currentDatabaseByTab[activeTab.id]
-          : undefined;
+          : undefined);
       void openTabSession(
         tab,
         connection.id,
@@ -2727,6 +2996,11 @@ export default function App() {
       delete copy[id];
       return copy;
     });
+    setInvalidCellsByTab((current) => {
+      const copy = { ...current };
+      delete copy[id];
+      return copy;
+    });
     setEditHistory((current) => {
       const copy = { ...current };
       delete copy[id];
@@ -2770,6 +3044,11 @@ export default function App() {
     if (!closePrompt) return;
     const id = closePrompt.tabId;
     setPendingTableEdits((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setInvalidCellsByTab((current) => {
       const next = { ...current };
       delete next[id];
       return next;
@@ -2842,6 +3121,11 @@ export default function App() {
       return next;
     });
     setPendingTableEdits((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setInvalidCellsByTab((current) => {
       const next = { ...current };
       delete next[id];
       return next;
@@ -3013,13 +3297,15 @@ export default function App() {
       return;
     }
 
-    const database = currentDatabaseByTab[tab.id];
+    const database = tab.table?.database ?? currentDatabaseByTab[tab.id];
     await closeTabSession(tab.id);
     clearTabRuntimeState(tab.id);
-    const ok = await openTabSession(tab, connection.id);
-    if (ok && database && connection.input.type !== 'sqlite') {
-      await switchDatabase(tab.id, database);
-    }
+    const ok = await openTabSession(
+      tab,
+      connection.id,
+      connection.input.type === 'sqlite' ? undefined : database,
+    );
+    if (ok && tab.table) await loadTableMeta(tab);
   };
 
   const reconnectActive = () => reconnectTab(activeTab);
@@ -3043,16 +3329,6 @@ export default function App() {
     showNotice('info', `已尝试重连 ${targets.length} 个标签。`);
   };
 
-  const openTable = async (name: string, database?: string) => {
-    const type = activeConnection?.input.type ?? 'sqlite';
-    if (database && type !== 'sqlite') {
-      const ok = await ensureDatabase(activeTab.id, database);
-      if (!ok) return;
-    }
-    updateSql(buildTablePreviewSql(type, name));
-    showNotice('info', `已填入 ${name} 查询，按 Ctrl+Enter 执行。`);
-  };
-
   const openTableData = async (
     name: string,
     kind: 'table' | 'view' = 'table',
@@ -3064,18 +3340,21 @@ export default function App() {
       return;
     }
 
+    // SQLite 单库没有 USE 概念；不要把对象树的 main 写进标签，
+    // 否则 loadTableMeta 会尝试切库并让表数据页变成只读。
+    const tableDatabase = connection.input.type === 'sqlite' ? undefined : database;
     const pageSize = 200;
     const number = tabCounter.current;
     tabCounter.current += 1;
     const tab: QueryTab = {
       id: `query-${number}`,
-      title: `表 · ${database ? `${database}.` : ''}${name}`,
+      title: `表 · ${tableDatabase ? `${tableDatabase}.` : ''}${name}`,
       sql: '',
       connectionId: connection.id,
       table: {
         name,
         kind,
-        ...(database ? { database } : {}),
+        ...(tableDatabase ? { database: tableDatabase } : {}),
         page: 0,
         pageSize,
       },
@@ -3092,7 +3371,7 @@ export default function App() {
     const ready = await openTabSession(
       tab,
       connection.id,
-      connection.input.type === 'sqlite' ? undefined : database,
+      connection.input.type === 'sqlite' ? undefined : tableDatabase,
     );
     if (!ready) return;
     const meta = await loadTableMeta(tab);
@@ -3401,8 +3680,8 @@ export default function App() {
     );
   };
 
-  const newQueryForConnection = (id: string) => {
-    addTab(id);
+  const newQueryForConnection = (id: string, database?: string) => {
+    addTab(id, database);
   };
 
   const renameGroup = async (oldPath: string, newPath: string) => {
@@ -3481,53 +3760,6 @@ export default function App() {
     showNotice('info', group ? `已移动到「${group}」。` : '已移到未分组。');
   };
 
-  const openAlterColumn = async (name: string, mode: 'rename' | 'modify') => {
-    const api = window.dbcraft;
-    if (!api) {
-      showNotice('error', '未检测到 Electron IPC 桥接。');
-      return;
-    }
-
-    const connection = connections.find((item) => item.id === activeTab.connectionId);
-    if (!connection) {
-      showNotice('error', '当前标签没有绑定连接，请先选择连接。');
-      return;
-    }
-    // MSSQL 的列变更统一走「编辑表结构」页签，避免默认值等属性被静默忽略。
-    if (connection.input.type === 'mssql') {
-      void openTableDesignTab('edit', name);
-      return;
-    }
-    let ready = sessions[activeTab.id]?.status === 'ready';
-    if (!ready) {
-      ready = await openTabSession(activeTab, connection.id);
-    }
-    if (!ready) return;
-
-    const result = await api.schema.table(activeTab.id, name, 'table');
-    if (!result.ok) {
-      showNotice('error', result.message);
-      return;
-    }
-
-    if (mode === 'modify') {
-      const detail = await api.schema.describe(activeTab.id, name);
-      if (!detail.ok) {
-        showNotice('error', detail.message);
-        return;
-      }
-      setAlterColumnTarget({
-        mode,
-        table: name,
-        columns: detail.detail.columns,
-        detail: detail.detail,
-      });
-      return;
-    }
-
-    setAlterColumnTarget({ mode, table: name, columns: result.meta.columns });
-  };
-
   const openTableStructure = async (name: string) => {
     const api = window.dbcraft;
     if (!api) {
@@ -3563,13 +3795,16 @@ export default function App() {
     name?: string,
     database?: string,
     schema?: string,
+    connectionId?: string,
   ) => {
     const api = window.dbcraft;
     if (!api) {
       showNotice('error', '未检测到 Electron IPC 桥接。');
       return;
     }
-    const connection = activeConnection;
+    const connection = connectionId
+      ? connections.find((item) => item.id === connectionId) ?? null
+      : activeConnection;
     if (!connection) {
       showNotice('error', '当前标签没有绑定连接，请先选择连接。');
       return;
@@ -3580,10 +3815,15 @@ export default function App() {
       activeTab.kind === 'table-design'
         ? (activeTab.tableDesign?.sourceTabId ?? activeTab.id)
         : activeTab.id;
+    // 从其他连接的对象树发起时，不能沿用当前标签库，退回到该连接的默认库。
+    const fallbackDatabase =
+      connectionId && connectionId !== activeTab.connectionId
+        ? connection.input.type === 'sqlite'
+          ? undefined
+          : connection.input.database || undefined
+        : currentDatabaseByTab[sourceTabId];
     const targetDatabase =
-      database ??
-      activeTab.tableDesign?.database ??
-      currentDatabaseByTab[sourceTabId];
+      database ?? activeTab.tableDesign?.database ?? fallbackDatabase;
     const targetSchema =
       schema ??
       (mode === 'edit' && name?.includes('.') ? name.slice(0, name.indexOf('.')) : undefined);
@@ -3658,6 +3898,42 @@ export default function App() {
     }
   };
 
+  /**
+   * 新建视图：先确保有一个该连接的查询标签，并把会话切到目标库，
+   * 避免从对象树 A 库右击却在当前标签的 B 库执行。
+   */
+  const openCreateView = async (database?: string, connectionId?: string) => {
+    const targetConnectionId = connectionId ?? activeTab.connectionId;
+    if (!targetConnectionId) {
+      setCreateViewTarget(null);
+      setCreateViewOpen(true);
+      return;
+    }
+    const connection = connections.find((item) => item.id === targetConnectionId);
+    if (!connection) {
+      showNotice('error', '保存连接已删除，无法新建视图。');
+      return;
+    }
+    const tab = await ensureQueryTabForConnection(targetConnectionId);
+    if (!tab) return;
+
+    let targetDatabase = database;
+    if (connection.input.type !== 'sqlite') {
+      if (targetDatabase && currentDatabaseByTab[tab.id] !== targetDatabase) {
+        const ok = await switchDatabase(tab.id, targetDatabase);
+        if (!ok) return;
+      } else if (!targetDatabase) {
+        targetDatabase = currentDatabaseByTab[tab.id] || connection.input.database || undefined;
+      }
+    }
+
+    setCreateViewTarget({
+      tabId: tab.id,
+      ...(targetDatabase ? { database: targetDatabase } : {}),
+    });
+    setCreateViewOpen(true);
+  };
+
   const executeTableDesign = async (
     statements: string[],
     options?: { sqliteForeignKeysOff?: boolean },
@@ -3712,35 +3988,6 @@ export default function App() {
     return result.ddl;
   };
 
-  const viewDdl = async (name: string, kind: DdlObjectKind) => {
-    const ddl = await fetchDdl(name, kind);
-    if (ddl === null) return;
-
-    const number = tabCounter.current;
-    tabCounter.current += 1;
-    const connectionId = activeTab.connectionId;
-    const tab: QueryTab = {
-      id: `query-${number}`,
-      title: `DDL · ${name}`,
-      sql: ddl,
-      connectionId,
-    };
-
-    setTabs((current) => [...current, tab]);
-    setActiveTabId(tab.id);
-    if (connectionId) {
-      const connection = connections.find((item) => item.id === connectionId);
-      void openTabSession(
-        tab,
-        connectionId,
-        connection && connection.input.type !== 'sqlite'
-          ? currentDatabaseByTab[activeTab.id]
-          : undefined,
-      );
-    }
-    showNotice('info', `已打开 ${name} 的 DDL。`);
-  };
-
   const copyDdl = async (name: string, kind: DdlObjectKind) => {
     const ddl = await fetchDdl(name, kind);
     if (ddl === null) return;
@@ -3759,9 +4006,38 @@ export default function App() {
       document.body.removeChild(textarea);
       showNotice(
         copied ? 'info' : 'error',
-        copied ? `已复制 ${name} 的 DDL。` : '复制失败，请打开 DDL 后手动复制。',
+        copied ? `已复制 ${name} 的 DDL。` : '复制失败，请打开定义后手动复制。',
       );
     }
+  };
+
+  /** 存储过程定义打开到独立编辑器标签，用户修改后自行执行。 */
+  const editProcedureDefinition = async (name: string) => {
+    const ddl = await fetchDdl(name, 'procedure');
+    if (ddl === null) return;
+
+    const number = tabCounter.current;
+    tabCounter.current += 1;
+    const connectionId = activeTab.connectionId;
+    const tab: QueryTab = {
+      id: `query-${number}`,
+      title: `存储过程 · ${name}`,
+      sql: ddl,
+      connectionId,
+    };
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+    if (connectionId) {
+      const connection = connections.find((item) => item.id === connectionId);
+      void openTabSession(
+        tab,
+        connectionId,
+        connection && connection.input.type !== 'sqlite'
+          ? currentDatabaseByTab[activeTab.id]
+          : undefined,
+      );
+    }
+    showNotice('info', `已打开 ${name} 的定义，可修改后执行。`);
   };
 
   const generateDatabaseDdl = async (connectionId: string) => {
@@ -3964,28 +4240,35 @@ export default function App() {
     showNotice('info', `已在编辑器中打开「${title}」的脚本，请核对后执行。`);
   };
 
-  const executeDdlSql = async (sql: string): Promise<{ ok: boolean; message: string }> => {
+  const executeDdlSql = async (
+    sql: string,
+    target?: { tabId?: string; database?: string },
+  ): Promise<{ ok: boolean; message: string }> => {
     const api = window.dbcraft;
     if (!api) return { ok: false, message: '未检测到 Electron IPC 桥接。' };
 
-    if (countPendingEdits(pendingTableEdits[activeTab.id]) > 0) {
+    const tab =
+      (target?.tabId ? tabs.find((item) => item.id === target.tabId) : null) ?? activeTab;
+
+    if (countPendingEdits(pendingTableEdits[tab.id]) > 0) {
       return { ok: false, message: '有未提交的表格修改，请先提交或回滚再执行 DDL。' };
     }
 
-    const connection = connections.find((item) => item.id === activeTab.connectionId);
+    const connection = connections.find((item) => item.id === tab.connectionId);
     if (!connection) return { ok: false, message: '当前标签没有绑定连接，请先选择连接。' };
 
-    let ready = sessions[activeTab.id]?.status === 'ready';
+    let ready = sessions[tab.id]?.status === 'ready';
     if (!ready) {
-      ready = await openTabSession(activeTab, connection.id);
+      ready = await openTabSession(tab, connection.id);
     }
     if (!ready) return { ok: false, message: '会话未就绪，请检查连接。' };
 
-    const result = await api.ddl.execute(activeTab.id, [sql], {
+    const result = await api.ddl.execute(tab.id, [sql], {
       connectionId: connection.id,
       connectionName: connection.input.name,
       database:
-        currentDatabaseByTab[activeTab.id] ??
+        target?.database ??
+        currentDatabaseByTab[tab.id] ??
         (connection.input.type === 'sqlite' ? '' : connection.input.database),
     });
     if (!result.ok) {
@@ -3996,16 +4279,16 @@ export default function App() {
     // 表结构变了，旧的主键/列元数据与编辑快照都不能再用。
     setTableMetas((current) => {
       const next = { ...current };
-      delete next[activeTab.id];
+      delete next[tab.id];
       return next;
     });
-    clearEditHistory(activeTab.id);
+    clearEditHistory(tab.id);
     setNoPkMode((current) => {
       const next = { ...current };
-      delete next[activeTab.id];
+      delete next[tab.id];
       return next;
     });
-    void loadSchema(activeTab.id, showSystemObjects[activeTab.id] ?? false);
+    void loadSchema(tab.id, showSystemObjects[tab.id] ?? false);
     invalidateUserMetadata();
     refreshBrowseSchema();
     return { ok: true, message: 'ok' };
@@ -4460,7 +4743,7 @@ export default function App() {
           activeConnectionId={activeTab.connectionId}
           activeConnection={activeConnection}
           connectionStates={connectionStates}
-          activeSessionStatus={activeRuntime?.status ?? 'idle'}
+          connectionErrors={connectionErrors}
           schemaObjects={activeSchema}
           databases={databasesByTab[activeTab.id] ?? []}
           objectsByDatabase={dbObjectsByTab[activeTab.id] ?? {}}
@@ -4479,6 +4762,7 @@ export default function App() {
           onOpenBrowseConnection={(id) => void openBrowseConnection(id)}
           onCollapseBrowseConnection={(id) => collapseBrowseConnection(id)}
           onRefreshBrowse={(id) => refreshBrowse(id)}
+          onRefreshBrowseDatabase={(id, database) => refreshBrowseDatabase(id, database)}
           onToggleBrowseSystemObjects={(id, next) => toggleBrowseSystemObjects(id, next)}
           onSelectBrowseDatabase={(id, database) => void selectBrowseDatabase(id, database)}
           onLoadBrowseDatabase={(id, database) => {
@@ -4486,6 +4770,9 @@ export default function App() {
           }}
           onLoadBrowseTableExtras={(id, database, table) =>
             loadBrowseTableExtras(id, database, table)
+          }
+          onReloadTableExtras={(id, database, table) =>
+            void loadTableExtras(database, table, browseSessionId(id), true)
           }
           onOpenTableInBrowse={(connectionId, name, database) =>
             openTableFromBrowse(connectionId, name, database)
@@ -4502,20 +4789,16 @@ export default function App() {
           onToggleSystemObjects={toggleSystemObjects}
           onSelectDatabase={(database) => void switchDatabase(activeTab.id, database)}
           onLoadTableExtras={(database, table) => void loadTableExtras(database, table)}
-          onOpenTable={(name, database) => void openTable(name, database)}
           onOpenTableData={(name, kind, database) => void openTableData(name, kind, database)}
           onOpenProcedure={(name, database) => void openProcedure(name, database)}
           onDeleteConnection={deleteSavedConnection}
           onEditConnection={openEditDialog}
           onDuplicateConnection={duplicateConnection}
           onDisconnectConnection={disconnectConnection}
-          onNewQueryForConnection={newQueryForConnection}
+          onNewQueryForConnection={(id, database) => newQueryForConnection(id, database)}
           onRenameGroup={renameGroup}
           onDeleteGroup={deleteGroup}
           onMoveConnection={moveConnectionToGroup}
-          onViewDdl={(name, kind, database) =>
-            void withDatabase(database, () => viewDdl(name, kind))
-          }
           onCopyDdl={(name, kind, database) =>
             void withDatabase(database, () => copyDdl(name, kind))
           }
@@ -4528,18 +4811,31 @@ export default function App() {
           onDropView={(name, database) =>
             void withDatabase(database, () => setTableAction({ mode: 'drop-view', name }))
           }
-          onAddColumn={(name, database) => {
-            if (activeConnection?.input.type === 'mssql') {
-              void openTableDesignTab('edit', name, database);
-              return;
-            }
-            void withDatabase(database, () => setAddColumnTarget(name));
-          }}
-          onRenameColumn={(name, database) =>
-            void withDatabase(database, () => openAlterColumn(name, 'rename'))
+          onDropProcedure={(name, database) =>
+            void withDatabase(database, () =>
+              setTableAction({ mode: 'drop-procedure', name }),
+            )
           }
-          onModifyColumn={(name, database) =>
-            void withDatabase(database, () => openAlterColumn(name, 'modify'))
+          onDropTrigger={(table, trigger, database) =>
+            void withDatabase(database, () =>
+              setTableAction({
+                mode: 'drop-trigger',
+                name: trigger,
+                tableName: table,
+              }),
+            )
+          }
+          onToggleTrigger={(table, trigger, enabled, database) =>
+            void withDatabase(database, () =>
+              setTableAction({
+                mode: enabled ? 'enable-trigger' : 'disable-trigger',
+                name: trigger,
+                tableName: table,
+              }),
+            )
+          }
+          onEditProcedureDefinition={(name, database) =>
+            void withDatabase(database, () => editProcedureDefinition(name))
           }
           onShowStructure={(name, database) =>
             void withDatabase(database, () => openTableStructure(name))
@@ -4547,23 +4843,19 @@ export default function App() {
           onEditStructure={(name, database) =>
             void openTableDesignTab('edit', name, database)
           }
-          onCreateIndex={(name, database) =>
-            void withDatabase(database, () => setIndexAction({ mode: 'create', table: name }))
+          onManageIndex={(name, database, indexName) =>
+            void withDatabase(database, () =>
+              setIndexAction({
+                mode: 'manage',
+                table: name,
+                ...(indexName ? { indexName } : {}),
+              }),
+            )
           }
-          onDropIndex={(name, database) =>
-            void withDatabase(database, () => setIndexAction({ mode: 'drop', table: name }))
+          onNewTable={(schema, database, connectionId) =>
+            void openTableDesignTab('create', undefined, database, schema, connectionId)
           }
-          onDropColumn={(name, database) => {
-            if (activeConnection?.input.type === 'mssql') {
-              void openTableDesignTab('edit', name, database);
-              return;
-            }
-            void withDatabase(database, () => setDropColumnTarget(name));
-          }}
-          onNewTable={(schema) =>
-            void openTableDesignTab('create', undefined, undefined, schema)
-          }
-          onNewView={() => setCreateViewOpen(true)}
+          onNewView={(database, connectionId) => void openCreateView(database, connectionId)}
           onRunScript={() => setScriptOpen(true)}
           onGenerateDatabaseDdl={generateDatabaseDdl}
           onExportConnection={(id) => void exportConnectionConfig(id)}
@@ -4692,6 +4984,9 @@ export default function App() {
           onTableFilterChange={(filters) => void changeTableFilters(filters)}
           onCellChange={editTableCell}
           onCellsChange={applyCellChanges}
+          onPasteCells={pasteTableCells}
+          onPasteClipboard={() => void pasteFromClipboard()}
+          invalidCells={activeInvalidCells}
           onRowFocus={(rowIndex) =>
             setTableSelection((current) => ({ ...current, [activeTab.id]: rowIndex }))
           }
@@ -4792,8 +5087,11 @@ export default function App() {
       {createViewOpen && activeConnection && (
         <CreateViewDialog
           dialect={activeConnection.input.type}
-          onClose={() => setCreateViewOpen(false)}
-          onExecute={executeDdlSql}
+          onClose={() => {
+            setCreateViewOpen(false);
+            setCreateViewTarget(null);
+          }}
+          onExecute={(sql) => executeDdlSql(sql, createViewTarget ?? undefined)}
         />
       )}
 
@@ -4887,30 +5185,9 @@ export default function App() {
           dialect={activeConnection.input.type}
           mode={tableAction.mode}
           name={tableAction.name}
+          {...(tableAction.tableName ? { tableName: tableAction.tableName } : {})}
           onClose={() => setTableAction(null)}
           onExecute={executeDdlSql}
-        />
-      )}
-
-      {addColumnTarget && activeConnection && (
-        <AddColumnDialog
-          dialect={activeConnection.input.type}
-          tableName={addColumnTarget}
-          onClose={() => setAddColumnTarget(null)}
-          onExecute={executeDdlSql}
-        />
-      )}
-
-      {alterColumnTarget && activeConnection && (
-        <AlterColumnDialog
-          dialect={activeConnection.input.type}
-          tableName={alterColumnTarget.table}
-          mode={alterColumnTarget.mode}
-          columns={alterColumnTarget.columns}
-          detail={alterColumnTarget.detail}
-          onClose={() => setAlterColumnTarget(null)}
-          onExecute={executeDdlSql}
-          onExecuteScript={executeDdlScript}
         />
       )}
 
@@ -4919,16 +5196,8 @@ export default function App() {
           dialect={activeConnection.input.type}
           tableName={indexAction.table}
           mode={indexAction.mode}
+          {...(indexAction.indexName ? { initialIndexName: indexAction.indexName } : {})}
           onClose={() => setIndexAction(null)}
-          onExecute={executeDdlSql}
-        />
-      )}
-
-      {dropColumnTarget && activeConnection && (
-        <DropColumnDialog
-          dialect={activeConnection.input.type}
-          tableName={dropColumnTarget}
-          onClose={() => setDropColumnTarget(null)}
           onExecute={executeDdlSql}
         />
       )}
