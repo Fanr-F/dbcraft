@@ -95,6 +95,19 @@ try {
   });
   page = await app.firstWindow();
 
+  // 锁屏/无桌面会话时 Windows 剪贴板不可用；粘贴用例改用合成 paste 事件。
+  const clipboardAvailable = await app.evaluate(({ clipboard }) => {
+    try {
+      clipboard.writeText('__dbcraft_clipboard_probe__');
+      return clipboard.readText() === '__dbcraft_clipboard_probe__';
+    } catch {
+      return false;
+    }
+  });
+  if (!clipboardAvailable) {
+    console.warn('[e2e:mssql] OS clipboard unavailable; using synthetic paste events');
+  }
+
   await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15000 });
 
   await page.getByRole('button', { name: '新建连接', exact: true }).first().click();
@@ -258,8 +271,25 @@ try {
     null,
     { timeout: 5000 },
   );
-  await app.evaluate(({ clipboard }) => clipboard.writeText('e2e-row\t7'));
-  await page.keyboard.press('Control+V');
+  if (clipboardAvailable) {
+    await app.evaluate(({ clipboard }) => clipboard.writeText('e2e-row\t7'));
+    await page.keyboard.press('Control+V');
+  } else {
+    await page.evaluate(() => {
+      const data = new DataTransfer();
+      data.setData('text/plain', 'e2e-row\t7');
+      const event = new ClipboardEvent('paste', {
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+      });
+      // Chromium 不在构造参数里接收 clipboardData，需要显式定义。
+      Object.defineProperty(event, 'clipboardData', { value: data });
+      const grids = [...document.querySelectorAll('revo-grid')];
+      const grid = grids.find((element) => element.offsetParent !== null) ?? grids.at(-1);
+      grid?.dispatchEvent(event);
+    });
+  }
   await page.waitForFunction(
     () => document.querySelector('.badge.badge-warn')?.textContent?.includes('待提交 1 项') ?? false,
     null,

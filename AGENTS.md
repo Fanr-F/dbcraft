@@ -153,6 +153,9 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
 - 表数据页只是带分页上下文的 SQL 标签：双击表生成 `SELECT * ... LIMIT/OFFSET`，每页 50/200/500，
   可下拉或点击列头排序（`ORDER BY`），过滤生成参数化 `LIKE ? ESCAPE '!'`；分页/排序/过滤 SQL 用
   `buildTablePageQuery`（`shared/dialect/identifiers.ts`），不要手写方言分支，也不要把过滤值拼进 SQL。
+  表数据页**不渲染 SQL 编辑器**（`Workspace` 对 `activeTab.table` 隐藏 editor-pane），打开即看数据网格；
+  刷新用 table-pager 的「刷新」按钮重新执行带参数的 `tab.sql`。生成的 SQL 挂在
+  `.table-pager[data-table-sql]` 上供 E2E/排查，不要再通过 `.cm-content` 断言表页 SQL。
   表数据标签不显示数据库下拉，而是绑定打开时的 `table.database`；`runQuery` 因 `sessions` 快照过期
   重新 `openTabSession` 时必须带上 `tab.table.database`（或 `currentDatabaseByTab`），
   否则 MSSQL 会退回连接默认库，跨库表数据页报 `Invalid object name`。
@@ -162,15 +165,17 @@ DBCraft 是 Windows 桌面数据库客户端（Electron 45 + React 18 + TypeScri
   影响 0 行按冲突整体回滚。主键与生成列只读；无主键表默认只读，只有显式开启
   `allowNoPrimaryKeyInsert` 时才允许 INSERT（主进程仍会校验 edit 全为 insert）。
   改动后跑 `npm run test:dml`。
-- Excel/TSV 粘贴由 `ResultGrid` 监听 RevoGrid 的 `beforepasteapply` 接管，再交给
-  `App.pasteTableCells`；超出当前行时由渲染层追加待提交新增行，不能依赖 RevoGrid 直接改内部
-  source（那部分不会进入待提交状态/撤销栈）。粘贴解析与类型校验在 `src/shared/table-paste.ts`，
-  改动后跑 `npm run test:table-paste`。在 SQL 编辑器里粘贴必须只取消 RevoGrid 写入，
-  不能吞掉浏览器默认粘贴。
-  表数据页打开后必须让网格宿主拿到 **DOM 焦点**（延迟聚焦 + 首次 pointerdown 取消）：
-  焦点停在对象树/标签按钮时浏览器不会向网格派发 paste，Ctrl+V 会静默失效。
-  未点选单元格时粘贴按行尾追加，用户点选/方向键移动后按当前单元格改写；工具栏「从 Excel 粘贴」
-  始终追加到行尾。粘贴拦截可覆盖同一 workspace 内的标签栏/工具栏焦点，但不能吞掉输入框/编辑器粘贴。
+- Excel/TSV 粘贴由 `ResultGrid` 在 `.workspace` 的 **捕获阶段**监听原生 `paste`，再交给
+  `App.pasteTableCells`；不要依赖 RevoGrid 的 `beforepasteapply`/clipboard 组件——空表或
+  翻页/排序后没有内部焦点时 overlay 会卸载，事件根本不会触发。编辑器/输入框保留浏览器原生粘贴，
+  其余区域 `preventDefault` + `stopPropagation` 后由上层处理；超出当前行时追加待提交新增行，
+  不能依赖 RevoGrid 直接改内部 source（那部分不会进入待提交状态/撤销栈）。
+  粘贴解析与类型校验在 `src/shared/table-paste.ts`，改动后跑 `npm run test:table-paste`。
+  表数据页打开后会自动聚焦网格宿主（延迟聚焦 + 首次 pointerdown 取消），避免焦点停在对象树。
+  粘贴监听挂在 `.workspace` 上，所以焦点在标签栏/工具栏按钮时也能处理；焦点在对象树（workspace 外）
+  时不会冒泡到监听器。未点选单元格（或数据刷新后没有内部焦点）时粘贴按行尾追加，
+  用户点选/方向键移动后按当前单元格改写；工具栏「从 Excel 粘贴」始终追加到行尾。
+  不能吞掉输入框/单元格编辑器/SQL 编辑器的原生粘贴。
 - 生产连接（`env === 'prod'`）执行 `DROP` / `TRUNCATE` / 无顶层 `WHERE` 的 `UPDATE`、`DELETE` 前必须经过
   `src/shared/dialect/safety.ts` 的检查与确认弹窗；改动检查逻辑后跑 `npm run test:safety`。
   该检查在渲染层执行，属于防误操作，不是权限边界；不要把它描述成数据库级保护。

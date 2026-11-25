@@ -31,6 +31,20 @@ const app = await electron.launch({
 });
 const page = await app.firstWindow();
 
+// 锁屏/无桌面会话时 Windows 剪贴板不可用；工具条按钮和 DDL 复制依赖它，
+// 这种情况下改用合成 ClipboardEvent 验证粘贴，并跳过剪贴板内容断言。
+const clipboardAvailable = await app.evaluate(({ clipboard }) => {
+  try {
+    clipboard.writeText('__dbcraft_clipboard_probe__');
+    return clipboard.readText() === '__dbcraft_clipboard_probe__';
+  } catch {
+    return false;
+  }
+});
+if (!clipboardAvailable) {
+  console.warn('[e2e:sqlite] OS clipboard unavailable; clipboard content assertions relaxed');
+}
+
 try {
   await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15000 });
 
@@ -500,9 +514,13 @@ try {
     (await page.locator('.tab').count()) === tabCountBeforeDdl,
     'copy DDL should not open a new tab',
   );
-  const ddlText = await app.evaluate(({ clipboard }) => clipboard.readText());
-  assert(ddlText.includes('CREATE TABLE demo_users'), 'copied DDL missing CREATE TABLE');
-  assert(ddlText.includes('demo_users'), 'copied DDL missing table name');
+  if (clipboardAvailable) {
+    const ddlText = await app.evaluate(({ clipboard }) => clipboard.readText());
+    assert(ddlText.includes('CREATE TABLE demo_users'), 'copied DDL missing CREATE TABLE');
+    assert(ddlText.includes('demo_users'), 'copied DDL missing table name');
+  } else {
+    console.warn('[e2e:sqlite] skip DDL clipboard content assertion');
+  }
 
   // 连接右键 → 生成库级 DDL：包含表与视图。
   await page.locator('.connection-item').first().click({ button: 'right' });
@@ -713,6 +731,15 @@ try {
     null,
     { timeout: 15000 },
   );
+  // 表数据页直接展示网格，不再渲染 SQL 编辑器。
+  assert(
+    (await page.locator('.editor-pane').count()) === 0,
+    'table data page should not render the SQL editor',
+  );
+  assert(
+    ((await page.locator('.table-pager').getAttribute('data-table-sql')) ?? '').length > 0,
+    'table data page should expose the generated SQL on table-pager',
+  );
   // SQLite 表数据页必须可编辑（不能因为 main 触发 USE 失败而变只读）。
   assert(
     (await page.locator('revo-grid').getAttribute('readonly')) === 'false',
@@ -738,18 +765,17 @@ try {
     { timeout: 15000 },
   );
 
-  // 排序：选择列后 SQL 应带 ORDER BY，方向按钮可切换。
+  // 排序：选择列后生成的表查询 SQL 应带 ORDER BY，方向按钮可切换。
+  // 表数据页不再显示 SQL 编辑器，SQL 挂在 table-pager 的 data-table-sql 上供断言/排查。
   await page.locator('.table-pager select[aria-label="排序字段"]').selectOption('id');
   await page.waitForFunction(
-    () =>
-      document.querySelector('.cm-content')?.innerText?.includes('ORDER BY "id" ASC') ?? false,
+    () => (document.querySelector('.table-pager')?.getAttribute('data-table-sql') ?? '').includes('ORDER BY "id" ASC'),
     null,
     { timeout: 5000 },
   );
   await page.getByRole('button', { name: '升序' }).click();
   await page.waitForFunction(
-    () =>
-      document.querySelector('.cm-content')?.innerText?.includes('ORDER BY "id" DESC') ?? false,
+    () => (document.querySelector('.table-pager')?.getAttribute('data-table-sql') ?? '').includes('ORDER BY "id" DESC'),
     null,
     { timeout: 5000 },
   );
@@ -760,17 +786,19 @@ try {
   await page.locator('.table-pager input[aria-label="过滤值"]').fill('user');
   await page.getByRole('button', { name: '添加条件' }).click();
   await page.waitForFunction(
-    () =>
-      document.querySelector('.cm-content')?.innerText?.includes('WHERE "name" LIKE ? ESCAPE \'!\'') ??
-      false,
+    () => (document.querySelector('.table-pager')?.getAttribute('data-table-sql') ?? '').includes('WHERE "name" LIKE ? ESCAPE \'!\''),
     null,
     { timeout: 5000 },
   );
   await page.getByRole('button', { name: '清除', exact: true }).click();
   await page.waitForFunction(
-    () => !(document.querySelector('.cm-content')?.innerText?.includes('WHERE "name"') ?? false),
+    () => !(document.querySelector('.table-pager')?.getAttribute('data-table-sql') ?? '').includes('WHERE "name"'),
     null,
     { timeout: 5000 },
+  );
+  assert(
+    ((await page.locator('.table-pager').getAttribute('data-table-sql')) ?? '').length > 0,
+    'table page should expose its generated SQL',
   );
 
   // 列布局：隐藏列写入 localStorage，重置后清空。
@@ -802,12 +830,28 @@ try {
 
   // MOD-05：从 Excel/TSV 粘贴多行多列。没有单元格焦点时从第一个可写列、
   // 行尾开始追加待提交新增行；非数字写入 REAL 列要标红。
-  await app.evaluate(({ clipboard }) =>
-    clipboard.writeText(
-      '用户A\ta@example.com\tactive\t2024-01-01\tabc\t备注A\n用户B\tb@example.com\tpending\t2024-01-02\t3.5\t备注B',
-    ),
-  );
-  await page.getByRole('button', { name: '从 Excel 粘贴', exact: true }).click();
+  const pasteText =
+    '用户A\ta@example.com\tactive\t2024-01-01\tabc\t备注A\n用户B\tb@example.com\tpending\t2024-01-02\t3.5\t备注B';
+  if (clipboardAvailable) {
+    await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), pasteText);
+    await page.getByRole('button', { name: '从 Excel 粘贴', exact: true }).click();
+  } else {
+    // 锁屏/无剪贴板时用合成 paste 事件验证同一条粘贴链路。
+    await page.evaluate((text) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', text);
+      const event = new ClipboardEvent('paste', {
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+      });
+      // Chromium 不在构造参数里接收 clipboardData，需要显式定义。
+      Object.defineProperty(event, 'clipboardData', { value: data });
+      const grids = [...document.querySelectorAll('revo-grid')];
+      const grid = grids.find((element) => element.offsetParent !== null) ?? grids.at(-1);
+      grid?.dispatchEvent(event);
+    }, pasteText);
+  }
   await page.waitForFunction(
     () => document.querySelector('.toast')?.textContent?.includes('类型不匹配') ?? false,
     null,
@@ -830,6 +874,10 @@ try {
     null,
     { timeout: 15000 },
   );
+
+  // 表数据页不再显示 SQL 编辑器；查询超时用例切回绑定连接的 SQL 标签执行。
+  await page.locator('.tab', { hasText: '查询 2' }).click();
+  await page.waitForSelector('.cm-content', { timeout: 5000 });
 
   // 查询超时：上面把设置面板的查询超时调成了 10 秒。
   await page.locator('.cm-content').fill(

@@ -4980,6 +4980,11 @@ export default function App() {
           onCopyCell={() => void copyFocusedCell()}
           onTablePageChange={(page) => void changeTablePage(page)}
           onTablePageSizeChange={(size) => void changeTablePageSize(size)}
+          onRefreshTable={() =>
+            void runQuery(activeTab.sql, activeTab, activeTab.table?.params, {
+              internal: true,
+            })
+          }
           onTableSortChange={(column, direction) => void changeTableSort(column, direction)}
           onTableFilterChange={(filters) => void changeTableFilters(filters)}
           onCellChange={editTableCell}

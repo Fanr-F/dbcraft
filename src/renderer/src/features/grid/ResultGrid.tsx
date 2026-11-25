@@ -208,6 +208,8 @@ export function ResultGrid({
     const visible = columns.filter((column) => !layout.hidden.includes(column.name));
     const firstWritable = visible.findIndex((column) => !readOnlySet.has(column.name));
     if (firstWritable < 0) return;
+    // 自动聚焦/数据刷新后的焦点不是用户选的，粘贴按行尾追加。
+    autoPasteAtEnd.current = true;
 
     let cancelled = false;
     let retry: number | null = null;
@@ -292,13 +294,17 @@ export function ResultGrid({
     };
   }, []);
 
-  // 空表没有数据行时 RevoGrid 不会挂载 overlay（也就没有 clipboard 组件），
-  // beforepasteapply 不会触发；这里直接接住网格宿主上的原生 paste，按行尾追加。
+  // 表数据页的粘贴统一在 workspace 捕获阶段处理。RevoGrid 的 clipboard 组件只在
+  // overlay 挂载时存在（空表、翻页/排序后没有内部焦点时会卸载），不能依赖它；
+  // 编辑器/输入框保留原生粘贴，其余区域全部按 Excel/TSV 交给上层。
   useEffect(() => {
     const element = gridRef.current;
-    if (!element || !editable || !onPasteCells || rows.length > 0) return;
+    if (!element || !editable || !onPasteCells) return;
+    const workspace = element.closest('.workspace');
+    if (!workspace) return;
 
-    const handler = (event: ClipboardEvent) => {
+    const handler = (nativeEvent: Event) => {
+      const event = nativeEvent as ClipboardEvent;
       const target = event.target as HTMLElement | null;
       if (
         target &&
@@ -312,6 +318,7 @@ export function ResultGrid({
       const text = event.clipboardData?.getData('text/plain') ?? '';
       if (!text) return;
       const values = parseClipboardTsv(text).map((row) => row.map(normalizePastedValue));
+      // Excel 区域末尾常带空行；整行为空不生成新增行。
       while (
         values.length > 0 &&
         values[values.length - 1]!.every((value) => value === null)
@@ -320,27 +327,46 @@ export function ResultGrid({
       }
       if (values.length === 0) return;
 
-      const visible = columns.filter((column) => !layout.hidden.includes(column.name));
-      const firstWritable = visible.findIndex((column) => !readOnlySet.has(column.name));
+      const visibleIndexes = columns
+        .map((_, index) => index)
+        .filter((index) => !layout.hidden.includes(columns[index]!.name));
+      const firstWritable = visibleIndexes.findIndex(
+        (index) => !readOnlySet.has(columns[index]!.name),
+      );
       if (firstWritable < 0) return;
       const width = Math.max(...values.map((row) => row.length));
-      const columnIndexes = visible
-        .slice(firstWritable, firstWritable + width)
-        .map((column) => columns.indexOf(column));
-      if (columnIndexes.length === 0) return;
 
+      // 阻止 RevoGrid 自己的 clipboard 组件再写一遍网格。
       event.preventDefault();
       event.stopPropagation();
-      onPasteCells({
-        startRow: 0,
-        columnIndexes,
-        values: values.map((row) => row.slice(0, columnIndexes.length)),
-      });
+
+      const api = element as unknown as {
+        getFocused?: () => Promise<{ cell?: { x: number; y: number } } | null>;
+      };
+      void (async () => {
+        const live = await api.getFocused?.().catch(() => null);
+        // 自动焦点/数据刷新后的焦点不是用户选的，按行尾追加；
+        // 只有网格当前确实有内部焦点（用户点过单元格）才按该位置改写。
+        // 不读 React 的 focusedCell：翻页/排序后它可能是上一页的旧坐标。
+        const liveCell = live?.cell;
+        const pasteAtEnd = autoPasteAtEnd.current || !liveCell;
+        const startRow = pasteAtEnd || !liveCell ? rows.length : liveCell.y;
+        const startVisible = pasteAtEnd || !liveCell ? firstWritable : liveCell.x;
+        if (startVisible < 0) return;
+
+        const columnIndexes = visibleIndexes.slice(startVisible, startVisible + width);
+        if (columnIndexes.length === 0) return;
+        onPasteCells({
+          startRow,
+          columnIndexes,
+          values: values.map((row) => row.slice(0, columnIndexes.length)),
+        });
+      })();
     };
 
-    element.addEventListener('paste', handler, true);
-    return () => element.removeEventListener('paste', handler, true);
-  }, [editable, onPasteCells, rows.length, columns, layout.hidden, readOnlySet]);
+    workspace.addEventListener('paste', handler, true);
+    return () => workspace.removeEventListener('paste', handler, true);
+  }, [editable, onPasteCells, columns, rows, layout.hidden, readOnlySet]);
 
   // 追加待提交行（粘贴/新增行）后滚动到新行；否则数据在 200 行之外，
   // 用户看不到任何变化，容易以为粘贴失败。
@@ -357,7 +383,15 @@ export function ResultGrid({
     const api = element as unknown as {
       scrollToRow?: (row: number) => Promise<void>;
     };
-    void api.scrollToRow?.(target).catch(() => undefined);
+    // RevoGrid 的 source 更新是异步的，立即滚动可能被新数据覆盖；稍后补一次。
+    const timers = [120, 500].map((delay) =>
+      window.setTimeout(() => {
+        void api.scrollToRow?.(target).catch(() => undefined);
+      }, delay),
+    );
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
   }, [insertRows]);
 
   const updateLayout = (next: GridColumnLayout) => {
@@ -514,110 +548,6 @@ export function ResultGrid({
     element.addEventListener('afteredit', handler);
     return () => element.removeEventListener('afteredit', handler);
   }, [editable, onCellChange, onCellsChange]);
-
-  // Excel / TSV 粘贴：RevoGrid 原生实现会把粘贴区域裁剪到现有行数，
-  // 空表或末尾之外的内容会被静默丢弃。这里接管网格内的粘贴，
-  // 由上层决定哪些行改写、哪些行追加为待提交新增行。
-  useEffect(() => {
-    const element = gridRef.current;
-    if (!element || !editable || !onPasteCells) return;
-
-    const handler = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{
-          parsed?: string[][];
-          dataText?: string;
-          event?: ClipboardEvent;
-        }>
-      ).detail;
-      if (!detail) return;
-
-      const path = detail.event?.composedPath?.() ?? [];
-      const inEditor = path.some((node) => {
-        if (!(node instanceof HTMLElement)) return false;
-        return (
-          node.tagName === 'INPUT' ||
-          node.tagName === 'TEXTAREA' ||
-          node.tagName === 'SELECT' ||
-          node.isContentEditable
-        );
-      });
-      const inGrid = path.includes(element);
-      // 表数据页里，焦点可能停在标签栏/工具栏按钮上；只要还在同一个 workspace，
-      // 就把粘贴交给表数据页处理，而不是静默丢弃。
-      const workspace = element.closest('.workspace');
-      const target = path[0];
-      const inWorkspace =
-        workspace !== null && target instanceof Node && workspace.contains(target);
-      // 粘贴目标是 SQL 编辑器或单元格编辑器时，只取消 RevoGrid 的写入，
-      // 保留浏览器默认粘贴，避免同一段文本同时落进编辑器和网格。
-      if (inEditor || (!inGrid && !inWorkspace)) {
-        event.preventDefault();
-        return;
-      }
-
-      const rawMatrix = detail.dataText
-        ? parseClipboardTsv(detail.dataText)
-        : (detail.parsed ?? []);
-      if (!Array.isArray(rawMatrix) || rawMatrix.length === 0) return;
-      const values = rawMatrix.map((row) => row.map(normalizePastedValue));
-      // Excel 区域末尾常带空行；整行为空不生成新增行。
-      while (
-        values.length > 0 &&
-        values[values.length - 1]!.every((value) => value === null)
-      ) {
-        values.pop();
-      }
-      if (values.length === 0) return;
-
-      const visible = columns
-        .map((column, index) => ({ index, hidden: layout.hidden.includes(column.name) }))
-        .filter((item) => !item.hidden)
-        .map((item) => item.index);
-      if (visible.length === 0) return;
-      const width = Math.max(...values.map((row) => row.length));
-
-      // 先取消 RevoGrid 默认写入（它会直接改内部 store，绕过上层待提交状态），
-      // 再读取实时焦点。React 的 focusedCell 可能落后于网格内部焦点。
-      event.preventDefault();
-      detail.event?.preventDefault();
-
-      const api = element as unknown as {
-        getFocused?: () => Promise<{ cell?: { x: number; y: number } } | null>;
-      };
-      void (async () => {
-        const live = await api.getFocused?.().catch(() => null);
-        const firstWritable = visible.findIndex(
-          (index) => !readOnlySet.has(columns[index]!.name),
-        );
-        // 打开表页后的自动焦点还没被用户改过时，粘贴按“行尾追加”处理，
-        // 避免把 Excel 数据直接覆盖到第一行；用户点过单元格后按当前位置写入。
-        const pasteAtEnd = autoPasteAtEnd.current;
-        const startRow = pasteAtEnd
-          ? rows.length
-          : (live?.cell?.y ?? focusedCell?.rowIndex ?? rows.length);
-        const startVisible = pasteAtEnd
-          ? firstWritable
-          : live?.cell !== undefined
-            ? live.cell.x
-            : focusedCell
-              ? visible.indexOf(focusedCell.columnIndex)
-              : firstWritable;
-        if (startRow === undefined || startVisible < 0) return;
-
-        const columnIndexes = visible.slice(startVisible, startVisible + width);
-        if (columnIndexes.length === 0) return;
-        onPasteCells({
-          startRow,
-          columnIndexes,
-          values: values.map((row) => row.slice(0, columnIndexes.length)),
-        });
-      })();
-    };
-
-    element.addEventListener('beforepasteapply', handler);
-    return () => element.removeEventListener('beforepasteapply', handler);
-  }, [editable, onPasteCells, focusedCell, columns, rows.length, layout.hidden, readOnlySet]);
 
   // 列头点击交给上层生成 ORDER BY（服务端排序）。
   useEffect(() => {

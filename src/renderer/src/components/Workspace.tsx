@@ -200,6 +200,8 @@ interface WorkspaceProps {
   onCopyCell: () => void;
   onTablePageChange: (page: number) => void;
   onTablePageSizeChange: (pageSize: number) => void;
+  /** 表数据页不再显示 SQL 编辑器，用这个按钮重新执行当前表查询。 */
+  onRefreshTable: () => void;
   onTableSortChange: (column: string, direction: 'asc' | 'desc', additive?: boolean) => void;
   onTableFilterChange: (filters: TableFilter[]) => void;
   onCellChange: (rowIndex: number, columnIndex: number, value: QueryCell) => void;
@@ -316,6 +318,7 @@ export function Workspace({
   onCopyCell,
   onTablePageChange,
   onTablePageSizeChange,
+  onRefreshTable,
   onTableSortChange,
   onTableFilterChange,
   onCellChange,
@@ -660,6 +663,7 @@ export function Workspace({
         </div>
       ) : (
         <>
+      {!activeTab.table && (
       <div className="editor-pane">
         <div className="pane-toolbar">
           {/* 执行与取消共用同一个按钮：执行中显示「取消」，查询结束（或取消完成）后回到「执行」。 */}
@@ -838,10 +842,11 @@ export function Workspace({
           dialect={connectionType}
         />
       </div>
+      )}
 
       <div className="result-pane">
         <div className="pane-toolbar">
-          <strong>结果</strong>
+          <strong>{activeTab.table ? '表数据' : '结果'}</strong>
           {scriptStatements ? (
             <span className="pane-hint">
               {scriptStatements.length} / {run.scriptTotal ?? scriptStatements.length} 条 · 成功{' '}
@@ -936,8 +941,17 @@ export function Workspace({
         )}
 
         {activeTab.table && (
-          <div className="table-pager">
+          <div className="table-pager" data-table-sql={activeTab.sql}>
             <span className="pane-hint">表 {activeTab.table.name}</span>
+            <button
+              type="button"
+              className="btn"
+              disabled={running || lockedByEdits}
+              title={lockedByEdits ? '先提交或回滚当前修改' : '重新执行当前表查询'}
+              onClick={onRefreshTable}
+            >
+              刷新
+            </button>
             <button
               type="button"
               className="btn"

@@ -444,6 +444,7 @@ Server（类型 + host/port/instance；SQLite = 文件路径）
 已实现：
 
 - 双击表/视图打开 `表 · <name>` 标签，生成 `SELECT * ... LIMIT/OFFSET`；每页 50/200/500。
+- 表数据页不显示 SQL 编辑器，打开后直接展示数据网格；分页/排序/过滤和「刷新」都在表工具栏（W-20261120-03）。
 - 下拉排序 + 列头点击排序（服务端 `ORDER BY`，回到第 1 页）。
 - 服务端过滤：`WHERE <col> LIKE ? ESCAPE '!'`，`%`/`_`/`!` 按字面量转义，值走参数。
 - 单元格编辑、新增行、删除选中行；主键与生成列只读。
@@ -647,6 +648,7 @@ npm run e2e:mssql    # 需 .env.local 与可连的 SQL Server
 - 预期看到 `[e2e:sqlite] passed` / `[e2e:mysql] passed` / `[e2e:mssql] passed`；
 - 失败时优先看第一条断言对应的功能；测试脚本 `scripts/e2e-*.mjs` 带中文注释；
 - `e2e:mysql` 会建删临时库；`e2e:mssql` 会建删 `dbo.dbcraft_e2e_mssql`。
+- 锁屏/无桌面会话时 Windows 剪贴板不可用：`e2e:sqlite` / `e2e:mssql` 会打印 warning，跳过 DDL 剪贴板内容断言，粘贴用例改用合成 `ClipboardEvent`；正常桌面会话仍走真实剪贴板。
 
 #### 3.6.3 E2E 覆盖场景
 
@@ -1409,6 +1411,7 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - [~] 显式 NULL vs 留空默认值；`IDENTITY_INSERT`（W-20261109-83/84）
 - [~] 冲突预检与“跳过冲突行”（W-20261109-88）
 - [~] 单元格/区域复制（TSV）、网格右键菜单（W-20261109-92）
+- [~] 表数据页不显示 SQL 编辑器，双击表直接展示数据网格；表工具栏提供「刷新」重跑当前查询（W-20261120-03；E2E 覆盖）
 - [~] 从 Excel/TSV 粘贴多行多列：打开表页后自动聚焦网格，未点选时 Ctrl+V 按行尾追加、点选后按单元格改写；工具栏始终追加；超出末行生成待提交新增行并自动滚动到新行，类型不匹配标红（W-20261119-01/02、W-20261120-01；E2E 覆盖工具栏粘贴与 Ctrl+V 追加行，真实 MSSQL `1 2 2027/12/10 sdaf` 临时脚本验证；待人工用真实 Excel 复制验收）
 - [ ] 空结果、加载中的统一空态/骨架
 
@@ -1752,6 +1755,10 @@ R-01～R-06、H-10、H-11、K-01/K-03～K-08/K-10 按模块排期；K 组不改�
 - **W-20261120-01 修复表数据页打开后 Ctrl+V 无法粘贴**：诉求是从 Excel 复制 `1 2 2027/12/10 sdaf` 后粘贴不到表数据页。复现：双击表打开页签后不点单元格直接 `Ctrl+V`，没有任何待提交变化；先点/聚焦单元格后再 `Ctrl+V` 才生效。根因：双击发生在对象树按钮上，DOM 焦点仍留在树里；浏览器只向当前焦点元素派发 paste，RevoGrid 的 document 监听与 W-20261119-01 的 `beforepasteapply` 接管都不会触发，而我们在非网格焦点时又主动取消以避免误写 SQL 编辑器，于是静默丢弃。变更：`ResultGrid` 在表数据加载后延迟 200ms 聚焦网格宿主和第一个可写单元格，并在 300ms 后补一次焦点确认；期间用户首次 `pointerdown` 就取消，编辑器/输入框有焦点时跳过；新增 `autoPasteAtEnd` 标记——自动焦点还没被用户点选或方向键移动改变时，`Ctrl+V` 按行尾追加，避免覆盖第一行；用户点选/移动后改为按当前单元格改写；`beforepasteapply` 的接管范围从“必须在网格内”放宽到“同一 `.workspace` 内的非编辑器焦点”，标签栏/工具栏按钮聚焦时也能粘贴，但输入框、单元格编辑器、SQL 编辑器仍保留原生粘贴；工具栏「从 Excel 粘贴」固定追加到行尾；待提交新增行数量增长时自动 `scrollToRow` 到最后一行，避免新行在 200 行视口外、用户以为粘贴没反应。顺带修复双击时第一下单击预览会触发 `ensureDatabase`、对还在 `opening` 的会话执行 `USE` 而弹出「会话未打开，请重新连接。」：现在只对 ready 会话切换库，idle/error 会话直接带目标库打开，opening 交给在途打开。涉及 `src/renderer/src/features/grid/ResultGrid.tsx`、`src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`AGENTS.md`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§3.4.5/§3.5/§5）。验证：`npm run typecheck`、`npm run e2e:sqlite`、`npm run e2e:mssql` 通过；临时 Playwright 真实 MSSQL 脚本（临时 user-data-dir，已删除）在 `fanr.dbo.test` 上复现用户数据：打开表页后直接 `Ctrl+V` → 网格 200→201 行、待提交 1 项、toast「已粘贴 1 行（新增 1 行），2 个单元格类型不匹配，已标红。」（`nchar(3)` 收到 `2027/12/10`、`int` 收到 `sdaf`），回滚后恢复 200 行；同时确认打开时不再出现「会话未打开」；`e2e:sqlite` 新增断言：工具栏粘贴 2 行后网格文本出现「用户A」，证明已自动滚动到新增行。遗留/风险：自动聚焦有 200ms 延迟，键盘用户在打开后立刻按 Ctrl+V 仍可能赶在聚焦前；自动插入模式下程序化焦点（测试/E2E）不会清除 `autoPasteAtEnd`，只有真实 pointerdown/方向键会清除；类型校验仍是启发式，不替代数据库约束。
 
 - **W-20261120-02 修复 MSSQL 表格提交「无法开启事务」（错误 266）并统一事务控制**：诉求是粘贴后点「提交修改」提示「无法开启事务」。根因：`applyTableEdits` 用 `session.query('BEGIN TRANSACTION')` 开启事务，而 MSSQL 的 tedious `execSql` 会把批处理包在 EXECUTE 里；批处理结束时事务仍打开，SQL Server 返回错误 266（`Transaction count after EXECUTE indicates a mismatching number of BEGIN and COMMIT statements`），提交被中止，事务却已经在服务器端打开。`COMMIT` / `ROLLBACK` 同理不能单独走 execSql。变更：`DatabaseSession` 增加可选 `beginTransaction/commitTransaction/rollbackTransaction`；`MssqlSession` 用 tedious `connection.beginTransaction/commitTransaction/rollbackTransaction` 实现，并把 `run` 重构为通用 `enqueue`，让事务控制与查询共用同一队列；`applyTableEdits` 优先调用驱动原生事务方法（非 MSSQL 仍发 SQL），BEGIN 失败时尽力回滚；`executeQuery` / `executeQueryScript` 统一走新的 `runStatement`，MSSQL 下识别单条 `BEGIN [TRAN[SACTION]]`、`COMMIT [TRANSACTION|WORK]`、`ROLLBACK [TRANSACTION|WORK]` 并走原生 API，其余语句不变；渲染层 `transactionAction` 解析前剥掉末尾分号，修复 `COMMIT;` / `ROLLBACK;` 不更新事务面板、面板一直停在「事务中」的问题。`e2e:mssql` 新增回归：创建 `tempdb.dbo.dbcraft_e2e_edit`（IDENTITY 主键），打开空表后直接 `Ctrl+V` → 待提交 1 项 → 点「提交修改」→ 通过连接池断言 `name='e2e-row'`、`qty=7` 已落库。涉及 `src/main/services/DatabaseSession.ts`、`src/main/services/mssql/MssqlSession.ts`、`src/main/services/ConnectionManager.ts`、`src/renderer/src/App.tsx`、`scripts/e2e-mssql.mjs`、`AGENTS.md`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§3.5/§6）。验证：`npm run typecheck`、`npm run e2e:mssql` 通过；临时 Playwright 真实 MSSQL 脚本（临时 user-data-dir，已删除）验证空表 Ctrl+V → 提交成功写入 1 行，事务面板「开始事务」→「回滚当前事务」后状态回到「无事务」，均无错误 266。遗留/风险：原生事务期间同一会话的补全/元数据查询会加入同一物理事务（队列保证不交错，但事务范围仍是整个会话）；命名事务、`SAVE TRANSACTION`、隔离级别未暴露 UI；如果一条语句文本里同时包含 `BEGIN TRAN` 和后续 SQL 且分句器没有拆开，仍可能触发 266，当前编辑器按 `;` / GO / DELIMITER 分句，常规写法可覆盖。
+
+- **W-20261120-03 表数据页去掉 SQL 编辑器，双击表直接看数据**：诉求是双击打开表时不需要 SQL 编辑器，直接打开表。变更：`Workspace` 对 `activeTab.table` 不再渲染 `editor-pane`，表页签只保留结果工具条、表工具栏和数据网格，网格占满剩余高度；表工具栏新增「刷新」按钮，按当前 `tab.sql` + `tab.table.params` 重新执行（内部执行，不写历史），保留原先通过执行按钮刷新数据的能力；生成的 SQL 挂到 `.table-pager[data-table-sql]` 属性上，供 E2E 与排查使用。`e2e:sqlite` 同步调整：表页排序/过滤改为断言 `data-table-sql`，查询超时用例先切回绑定连接的「查询 2」标签再编辑执行；`e2e:mssql` 不受影响。涉及 `src/renderer/src/components/Workspace.tsx`、`src/renderer/src/App.tsx`、`scripts/e2e-sqlite.mjs`、`AGENTS.md`、`prd/SELF_TEST.md`、`prd/PROJECT_MASTER.md`（§3.4.5/§5）。验证：`npm run typecheck`、`npm run e2e:sqlite`、`npm run e2e:mssql` 通过。遗留/风险：表页签不再能临时编辑或执行自定义 SQL，复杂查询请新开 SQL 标签；结果工具条（查看/复制单元格、导出）仍保留；刷新按钮在有未提交修改时禁用，需先提交或回滚。
+
+- **W-20261120-04 粘贴改由 workspace 捕获原生 paste，修复数据刷新后 Ctrl+V 失效**：诉求是去掉表页 SQL 编辑器后继续保证 Ctrl+V 可用。复现发现：表页翻页/排序/过滤/提交后 RevoGrid 会清掉内部焦点，`revogr-overlay-selection` 与 `revogr-clipboard` 随之卸载，之前依赖的 `beforepasteapply` 根本不会触发；空表同样没有 overlay。变更：`ResultGrid` 不再监听 `beforepasteapply`，改为在 `.workspace` 的捕获阶段监听原生 `paste`；输入框/下拉框/单元格编辑器/SQL 编辑器保留浏览器原生粘贴，其余区域（网格、标签栏、工具栏按钮）解析 TSV 后 `preventDefault` + `stopPropagation`，再交给 `App.pasteTableCells`。起点判定改为只看 RevoGrid 当前真实内部焦点：没有内部焦点（打开页/翻页/排序后）按行尾追加，用户点选单元格后按该位置改写；不再读取可能过期的 React `focusedCell`。删除空表单独的原生 paste 兼容分支和“数据刷新后恢复焦点”的重试逻辑，减少焦点抢用。追加待提交行后的自动滚动改为 120ms/500ms 两次 `scrollToRow`，避免 source 异步更新覆盖滚动。E2E 调整：`e2e:sqlite` 删除手动 `setCellsFocus` 兜底；`e2e:sqlite`/`e2e:mssql` 启动时探测 OS 剪贴板，锁屏/无桌面会话导致剪贴板不可用时跳过 DDL 剪贴板内容断言，并用合成 `ClipboardEvent`（显式 `defineProperty('clipboardData')`）驱动粘贴链路。涉及 `src/renderer/src/features/grid/ResultGrid.tsx`、`scripts/e2e-sqlite.mjs`、`scripts/e2e-mssql.mjs`、`AGENTS.md`、`prd/PROJECT_MASTER.md`（§6）。验证：`npm run typecheck`、`npm run self-test`（28 步，含 `e2e:sqlite`）、`npm run e2e:mssql` 通过；临时脚本与日志已删除。遗留/风险：粘贴只在 `.workspace` 内捕获，焦点在左侧对象树（workspace 外）时需先自动聚焦或点击网格；锁屏会话的剪贴板内容断言会降级为合成事件，不等价于真实 Excel 复制；自动滚动依赖 RevoGrid `scrollToRow` 的时序，已用两次延迟兜底。
 
 ## 7. 附录：旧文档合并映射
 
